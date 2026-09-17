@@ -33,7 +33,9 @@ export type DocumentCategory =
   | 'QUARTERLY_REPORT'
   | 'ANNUAL_REPORT'
   | 'FINANCIAL_REPORT'
-  | 'PORTFOLIO_OF_EVIDENCE';
+  | 'PORTFOLIO_OF_EVIDENCE'
+  | 'GOVERNANCE_CHARTER'
+  | 'TAX_AND_BANKING';
 
 export interface User {
   id: string;
@@ -64,6 +66,7 @@ export interface JobCreationStats {
   youthJobsCreated: number;
   creativeSectorPractitionersSupported: number;
   targetJobsAnnual: number;
+  youthEmployed?: number;
 }
 
 export interface PublicEntity {
@@ -142,10 +145,15 @@ export interface QuarterlyReport {
   dueDate: string; // ISO date
   submittedAt?: string;
   submittedBy?: string;
+  submittedByName?: string;
   reviewedAt?: string;
   reviewedBy?: string;
+  reviewedByName?: string;
   reviewNotes?: string;
   rejectionReason?: string;
+  varianceExplanations?: string;
+  portfolioOfEvidenceDocId?: string;
+  accountingOfficerDeclaration?: boolean;
   fundsSpentThisQuarterZAR: number;
   totalFundsReceivedToDateZAR: number;
   items: ReportItem[];
@@ -174,6 +182,12 @@ export interface EntityDocument {
   approvedAt?: string;
   approvedBy?: string;
   comments: CommentMessage[];
+  fileName?: string;
+  fileSize?: string;
+  fileSizeBytes?: number;
+  uploadedAt?: string;
+  uploadedBy?: string;
+  verificationSummary?: string;
 }
 
 export interface CommentMessage {
@@ -202,7 +216,7 @@ export interface CorrectiveTask {
   dueDate: string;
   completedAt?: string;
   resolutionNotes?: string;
-  direction: 'DSAC_TO_ENTITY' | 'ENTITY_INTERNAL';
+  direction: 'DSAC_TO_ENTITY' | 'ENTITY_INTERNAL' | 'ENTITY_TO_DSAC';
 }
 
 export interface RiskAlert {
@@ -253,9 +267,12 @@ export interface AuditLogEntry {
     | 'REPORT_UNDER_REVIEW'
     | 'REPORT_APPROVED'
     | 'REPORT_CORRECTION_REQUIRED'
+    | 'REPORT_REVISION_REQUESTED'
+    | 'REPORT_VERIFIED'
     | 'REPORT_RESUBMITTED'
     | 'DOCUMENT_UPLOADED'
     | 'DOCUMENT_VERSION_INCREMENTED'
+    | 'DOCUMENT_DELETED'
     | 'TASK_CREATED'
     | 'TASK_RESOLVED'
     | 'EARLY_WARNING_TRIGGERED'

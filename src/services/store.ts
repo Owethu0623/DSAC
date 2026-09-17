@@ -116,7 +116,28 @@ export class GovTrackStore {
     saveToStorage(STORAGE_KEYS.ENTITIES, this.entities);
     this.kpis = loadFromStorage<KPIRecord[]>(STORAGE_KEYS.KPIS, INITIAL_KPIS);
     this.reports = loadFromStorage<QuarterlyReport[]>(STORAGE_KEYS.REPORTS, INITIAL_REPORTS);
-    this.documents = loadFromStorage<EntityDocument[]>(STORAGE_KEYS.DOCUMENTS, INITIAL_DOCUMENTS);
+    let loadedDocs = loadFromStorage<EntityDocument[]>(STORAGE_KEYS.DOCUMENTS, INITIAL_DOCUMENTS);
+    INITIAL_DOCUMENTS.forEach(initDoc => {
+      const existing = loadedDocs.find(d => d.id === initDoc.id);
+      if (!existing) {
+        loadedDocs.push(initDoc);
+      } else {
+        // Guarantee file properties are synchronized
+        existing.fileName = existing.fileName || initDoc.fileName || existing.versions?.[0]?.fileName || existing.title;
+        existing.fileSize = existing.fileSize || initDoc.fileSize || (existing.fileSizeBytes ? `${(existing.fileSizeBytes / (1024 * 1024)).toFixed(1)} MB` : '3.5 MB');
+        existing.fileSizeBytes = existing.fileSizeBytes || initDoc.fileSizeBytes;
+        existing.uploadedAt = existing.uploadedAt || initDoc.uploadedAt || existing.versions?.[0]?.uploadedAt;
+        existing.uploadedBy = existing.uploadedBy || initDoc.uploadedBy || existing.versions?.[0]?.uploadedBy;
+      }
+    });
+    this.documents = loadedDocs.map(d => ({
+      ...d,
+      fileName: d.fileName || d.versions?.[0]?.fileName || d.title,
+      fileSize: d.fileSize || (d.fileSizeBytes ? (d.fileSizeBytes < 1000000 ? `${Math.round(d.fileSizeBytes / 1024)} KB` : `${(d.fileSizeBytes / (1024 * 1024)).toFixed(1)} MB`) : '3.5 MB'),
+      uploadedAt: d.uploadedAt || d.versions?.[0]?.uploadedAt || '2025-07-14T10:00:00.000Z',
+      uploadedBy: d.uploadedBy || d.versions?.[0]?.uploadedBy || 'Lerato Phiri (Organisation Admin)',
+    }));
+    saveToStorage(STORAGE_KEYS.DOCUMENTS, this.documents);
     this.tasks = loadFromStorage<CorrectiveTask[]>(STORAGE_KEYS.TASKS, INITIAL_TASKS);
     this.riskAlerts = loadFromStorage<RiskAlert[]>(STORAGE_KEYS.RISKS, INITIAL_RISK_ALERTS);
     this.deadlines = loadFromStorage<RegulatoryDeadline[]>(STORAGE_KEYS.DEADLINES, INITIAL_DEADLINES);
@@ -140,7 +161,7 @@ export class GovTrackStore {
   }
 
   // --- PERSISTENCE HELPERS ---
-  private persistAll(): void {
+  public persistAll(): void {
     saveToStorage(STORAGE_KEYS.CURRENT_USER, this.currentUser);
     saveToStorage(STORAGE_KEYS.REGISTERED_USERS, this.registeredUsers);
     saveToStorage(STORAGE_KEYS.ENTITIES, this.entities);
@@ -456,12 +477,13 @@ export class GovTrackStore {
     financialYear: string,
     fileName: string,
     fileSizeBytes: number,
-    initialSummary: string
-  ): void {
+    initialSummary: string,
+    downloadUrl?: string
+  ): EntityDocument {
     const entity = this.entities.find(e => e.id === entityId);
     const uploader = this.currentUser ? `${this.currentUser.name} (${this.currentUser.designation})` : 'Authorized Official';
     const newDoc: EntityDocument = {
-      id: `doc-${Date.now()}`,
+      id: `doc-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       entityId,
       entityName: entity ? entity.name : 'Unknown Entity',
       title,
@@ -469,6 +491,12 @@ export class GovTrackStore {
       financialYear,
       currentVersion: 1,
       approvalStatus: 'PENDING_REVIEW',
+      fileName,
+      fileSize: `${(fileSizeBytes / (1024 * 1024)).toFixed(1)} MB`,
+      fileSizeBytes,
+      uploadedAt: new Date().toISOString(),
+      uploadedBy: uploader,
+      verificationSummary: initialSummary,
       versions: [
         {
           versionNumber: 1,
@@ -477,14 +505,184 @@ export class GovTrackStore {
           fileName,
           fileSizeBytes,
           changeSummary: initialSummary,
+          downloadUrl,
         },
       ],
       comments: [],
     };
 
     this.documents = [newDoc, ...this.documents];
-    this.addAuditLog('DOCUMENT_UPLOADED', `Registered new statutory document "${title}" (${category}).`, newDoc.entityName);
+
+    // If it's a PoE or Quarterly Report, automatically register or link in this.reports
+    if (category === 'PORTFOLIO_OF_EVIDENCE' || category === 'QUARTERLY_REPORT') {
+      const existingReport = this.reports.find(r => r.entityId === entityId && r.quarter === 'Q2');
+      if (existingReport) {
+        existingReport.portfolioOfEvidenceDocId = newDoc.id;
+        existingReport.submissionStatus = 'SUBMITTED';
+      } else {
+        const newRep: QuarterlyReport = {
+          id: `rep-q2-${Date.now()}`,
+          entityId,
+          entityName: entity ? entity.name : 'Institutional Entity',
+          financialYear,
+          quarter: 'Q2',
+          submissionStatus: 'SUBMITTED',
+          dueDate: '2025-10-31',
+          submittedAt: new Date().toISOString(),
+          submittedByName: uploader,
+          submittedBy: uploader,
+          fundsSpentThisQuarterZAR: 1200000,
+          totalFundsReceivedToDateZAR: entity?.transferredAmountZAR || 3500000,
+          items: [],
+          portfolioOfEvidenceDocId: newDoc.id,
+          varianceExplanations: initialSummary,
+          accountingOfficerDeclaration: true,
+        };
+        this.reports = [newRep, ...this.reports];
+      }
+    }
+
+    // Automatically create a verification task for DSAC National Oversight
+    this.createTask({
+      entityId,
+      entityName: entity ? entity.name : 'Institutional Entity',
+      title: `Verify Statutory Evidence: ${fileName} (${entity?.shortCode || entity?.name})`,
+      description: `New Section 38 audit verification document "${title}" uploaded by ${uploader}. Inspect and approve or request amendments.`,
+      assignedToName: 'DSAC Oversight Directorate',
+      priority: category === 'PORTFOLIO_OF_EVIDENCE' ? 'HIGH' : 'MEDIUM',
+      status: 'OPEN',
+      dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+      direction: 'ENTITY_TO_DSAC',
+    });
+
+    this.addAuditLog('DOCUMENT_UPLOADED', `Registered new statutory document "${title}" (${category}) for ${newDoc.entityName}. Submitted for DSAC Section 38 verification.`, newDoc.entityName);
     this.persistAll();
+    return newDoc;
+  }
+
+  verifyDocument(docId: string, decision: 'APPROVED' | 'REQUIRES_AMENDMENT', notes?: string): void {
+    const doc = this.documents.find(d => d.id === docId);
+    if (!doc) return;
+
+    const reviewer = this.currentUser ? `${this.currentUser.name} (${this.currentUser.designation})` : 'DSAC National Oversight Reviewer';
+    doc.approvalStatus = decision;
+    if (decision === 'APPROVED') {
+      doc.approvedAt = new Date().toISOString();
+      doc.approvedBy = reviewer;
+      
+      // Also mark linked reports as approved
+      const linkedReports = this.reports.filter(r => r.portfolioOfEvidenceDocId === docId || (r.entityId === doc.entityId && r.submissionStatus === 'SUBMITTED'));
+      linkedReports.forEach(r => {
+        r.submissionStatus = 'APPROVED';
+        r.reviewedAt = new Date().toISOString();
+        r.reviewedBy = reviewer;
+        r.reviewedByName = reviewer;
+      });
+
+      // Boost entity compliance score upon statutory evidence verification
+      const ent = this.entities.find(e => e.id === doc.entityId);
+      if (ent) {
+        ent.overallComplianceScore = Math.min(100, ent.overallComplianceScore + 2);
+        this.recalculateEntityRisk(ent.id);
+      }
+    }
+
+    if (notes) {
+      doc.comments.push({
+        id: `cmt-${Date.now()}`,
+        authorName: this.currentUser?.name || 'DSAC Reviewer',
+        authorRole: this.currentUser?.role || 'DSAC_ADMIN',
+        authorEntity: 'DSAC National',
+        timestamp: new Date().toISOString(),
+        message: notes,
+      });
+    }
+
+    this.addAuditLog(
+      decision === 'APPROVED' ? 'REPORT_VERIFIED' : 'REPORT_REVISION_REQUESTED',
+      `Statutory document "${doc.title}" was ${decision === 'APPROVED' ? 'formally approved and verified' : 'flagged for amendment'}. Reviewer: ${reviewer}. ${notes ? `Note: ${notes}` : ''}`,
+      doc.entityName
+    );
+    this.persistAll();
+  }
+
+  deleteEntityDocument(docId: string): void {
+    const doc = this.documents.find(d => d.id === docId);
+    if (!doc) return;
+    this.documents = this.documents.filter(d => d.id !== docId);
+    this.addAuditLog('DOCUMENT_DELETED', `Archived statutory document "${doc.title}"`, doc.entityName);
+    this.persistAll();
+  }
+
+  submitQuarterlyReport(params: {
+    entityId: string;
+    quarter: 'Q1' | 'Q2' | 'Q3' | 'Q4';
+    financialYear: string;
+    expenditureClaimedZAR: number;
+    declarationNotes: string;
+    poeDocId?: string;
+    items?: ReportItem[];
+  }): QuarterlyReport {
+    const entity = this.entities.find(e => e.id === params.entityId);
+    const actor = this.currentUser ? `${this.currentUser.name} (${this.currentUser.designation})` : 'Authorized Reporting Officer';
+    
+    let report = this.reports.find(r => r.entityId === params.entityId && r.quarter === params.quarter);
+    if (!report) {
+      report = {
+        id: `rep-${params.quarter.toLowerCase()}-${Date.now()}`,
+        entityId: params.entityId,
+        entityName: entity ? entity.name : 'Institutional Entity',
+        quarter: params.quarter,
+        financialYear: params.financialYear,
+        submissionStatus: 'SUBMITTED',
+        dueDate: '2025-10-31',
+        submittedAt: new Date().toISOString(),
+        submittedBy: actor,
+        submittedByName: actor,
+        fundsSpentThisQuarterZAR: params.expenditureClaimedZAR,
+        totalFundsReceivedToDateZAR: entity?.transferredAmountZAR || 3500000,
+        items: params.items || [],
+        portfolioOfEvidenceDocId: params.poeDocId,
+        varianceExplanations: params.declarationNotes,
+        accountingOfficerDeclaration: true,
+      };
+      this.reports = [report, ...this.reports];
+    } else {
+      report.submissionStatus = 'SUBMITTED';
+      report.submittedAt = new Date().toISOString();
+      report.submittedBy = actor;
+      report.submittedByName = actor;
+      report.fundsSpentThisQuarterZAR = params.expenditureClaimedZAR;
+      if (params.items && params.items.length > 0) report.items = params.items;
+      if (params.poeDocId) report.portfolioOfEvidenceDocId = params.poeDocId;
+      report.varianceExplanations = params.declarationNotes;
+    }
+
+    if (entity) {
+      entity.reportedExpenditureZAR = (entity.reportedExpenditureZAR || 0) + params.expenditureClaimedZAR;
+      if (entity.overdueReportsCount > 0) entity.overdueReportsCount = Math.max(0, entity.overdueReportsCount - 1);
+      this.recalculateEntityRisk(entity.id);
+    }
+
+    this.createTask({
+      entityId: params.entityId,
+      entityName: entity ? entity.name : 'Institutional Entity',
+      title: `Verify ${params.quarter} Performance Report: ${entity?.shortCode || entity?.name}`,
+      description: `Formal quarterly report submitted with claimed expenditure of R ${(params.expenditureClaimedZAR / 1_000_000).toFixed(2)}M. Inspect Portfolio of Evidence and verify achievements.`,
+      assignedToName: 'DSAC Oversight Directorate',
+      priority: 'HIGH',
+      status: 'OPEN',
+      dueDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
+      direction: 'ENTITY_TO_DSAC',
+    });
+
+    this.addAuditLog(
+      'REPORT_SUBMITTED',
+      `Submitted ${params.quarter} Performance Report for ${entity?.name}. Claimed expenditure: R ${(params.expenditureClaimedZAR / 1_000_000).toFixed(2)}M.`,
+      entity?.name
+    );
+    this.persistAll();
+    return report;
   }
 
   addDocumentComment(docId: string, message: string): void {
@@ -612,6 +810,20 @@ export class GovTrackStore {
     const totalPermanentJobs = this.entities.reduce((acc, e) => acc + e.jobStats.permanentJobs, 0);
     const totalCreativePractitioners = this.entities.reduce((acc, e) => acc + e.jobStats.creativeSectorPractitionersSupported, 0);
 
+    const totalDocumentsCount = this.documents.length;
+    const verifiedDocumentsCount = this.documents.filter(d => d.approvalStatus === 'APPROVED').length;
+    const pendingDocumentsCount = this.documents.filter(d => d.approvalStatus === 'PENDING_REVIEW').length;
+    const amendmentRequiredDocumentsCount = this.documents.filter(d => d.approvalStatus === 'REQUIRES_AMENDMENT').length;
+    
+    // Total reports submitted vs outstanding across all entities
+    const entitiesWithSubmittedReports = new Set(
+      this.reports
+        .filter(r => r.submissionStatus === 'SUBMITTED' || r.submissionStatus === 'APPROVED' || r.submissionStatus === 'RESUBMITTED')
+        .map(r => r.entityId)
+    );
+    const reportsSubmittedCount = entitiesWithSubmittedReports.size;
+    const reportsOutstandingCount = Math.max(0, totalEntities - reportsSubmittedCount);
+
     return {
       totalEntities,
       onTrackCount,
@@ -629,6 +841,12 @@ export class GovTrackStore {
       totalPermanentJobs,
       totalCreativePractitioners,
       averageCompliance: Math.round(this.entities.reduce((acc, e) => acc + e.overallComplianceScore, 0) / Math.max(1, totalEntities)),
+      totalDocumentsCount,
+      verifiedDocumentsCount,
+      pendingDocumentsCount,
+      amendmentRequiredDocumentsCount,
+      reportsSubmittedCount,
+      reportsOutstandingCount,
     };
   }
 

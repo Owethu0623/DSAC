@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   FileText, 
   Download, 
@@ -16,8 +16,9 @@ import {
   Calendar,
   Layers
 } from 'lucide-react';
-import { PublicEntity, QuarterlyReport } from '../../types';
+import { PublicEntity, QuarterlyReport, EntityDocument } from '../../types';
 import { store } from '../../services/store';
+import { downloadStatutoryDocument } from '../../services/downloadHelper';
 
 interface DsacReportsViewProps {
   entities: PublicEntity[];
@@ -199,8 +200,79 @@ export const DsacReportsView: React.FC<DsacReportsViewProps> = ({
   onSelectEntity,
   onOpenWorkspace
 }) => {
-  const [reports, setReports] = useState<ReportItemRecord[]>(INITIAL_REPORTS_LIST);
-  const [selectedReportId, setSelectedReportId] = useState<string>(INITIAL_REPORTS_LIST[0].id);
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    return store.subscribe(() => setTick(t => t + 1));
+  }, []);
+
+  // Merge store documents & reports with baseline list to give a 100% comprehensive view
+  const reports: ReportItemRecord[] = useMemo(() => {
+    // 1. Documents from store (e.g. uploaded statutory PoE and governance files)
+    const storeDocRecords: ReportItemRecord[] = store.documents.map(d => {
+      const ent = store.entities.find(e => e.id === d.entityId);
+      const fileName = d.fileName || d.title || '';
+      const isPdf = fileName.toLowerCase().endsWith('.pdf');
+      const formattedStatus: 'VERIFIED' | 'UNDER_REVIEW' | 'REQUIRES_AMENDMENT' = 
+        d.approvalStatus === 'APPROVED' ? 'VERIFIED' :
+        d.approvalStatus === 'REQUIRES_AMENDMENT' ? 'REQUIRES_AMENDMENT' : 'UNDER_REVIEW';
+
+      const typeMap: Record<string, ReportItemRecord['type']> = {
+        'PORTFOLIO_OF_EVIDENCE': 'Portfolio of Evidence (PoE)',
+        'OPERATIONAL_PLAN': 'Annual Performance Plan (APP)',
+        'FINANCIAL_REPORT': 'Audited Financial Statements (AFS)',
+        'ANNUAL_REPORT': 'Quarterly Performance Report (QPR)',
+        'GOVERNANCE_CHARTER': 'Quarterly Performance Report (QPR)'
+      };
+
+      return {
+        id: d.id,
+        entityId: d.entityId,
+        entityName: ent ? ent.name : d.entityName,
+        quarter: 'Q2',
+        year: d.financialYear || '2024/25',
+        title: d.title,
+        type: typeMap[d.category] || 'Portfolio of Evidence (PoE)',
+        status: formattedStatus,
+        submittedDate: d.uploadedAt ? d.uploadedAt.split('T')[0] : '14 Jul 2025',
+        fileFormat: isPdf ? 'PDF' : 'PDF',
+        fileSize: d.fileSize || '3.5 MB',
+        reportingOfficer: d.uploadedBy || 'Institutional Admin',
+        executiveSummary: d.verificationSummary || `Statutory evidence submission uploaded under Section 38 audit verification. Verified against public entity grant covenants.`
+      };
+    });
+
+    // 2. Reports from store (quarterly statutory reports)
+    const storeReportRecords: ReportItemRecord[] = store.reports.map(r => {
+      const ent = store.entities.find(e => e.id === r.entityId);
+      const formattedStatus: 'VERIFIED' | 'UNDER_REVIEW' | 'REQUIRES_AMENDMENT' =
+        r.submissionStatus === 'APPROVED' ? 'VERIFIED' :
+        r.submissionStatus === 'CORRECTION_REQUIRED' ? 'REQUIRES_AMENDMENT' : 'UNDER_REVIEW';
+
+      return {
+        id: r.id,
+        entityId: r.entityId,
+        entityName: ent ? ent.name : r.entityName,
+        quarter: r.quarter,
+        year: r.financialYear || '2024/25',
+        title: `${ent?.shortCode || ent?.name || 'Institutional'} ${r.quarter} Statutory Performance & Expenditure Report`,
+        type: 'Quarterly Performance Report (QPR)',
+        status: formattedStatus,
+        submittedDate: r.submittedAt ? r.submittedAt.split('T')[0] : '14 Jul 2025',
+        fileFormat: 'PDF',
+        fileSize: '4.2 MB',
+        reportingOfficer: r.submittedByName || r.submittedBy || 'Reporting Officer',
+        executiveSummary: r.varianceExplanations || `Statutory quarterly report covering programmatic milestones and expenditure reconciliation of R ${((r.fundsSpentThisQuarterZAR || 0) / 1_000_000).toFixed(1)}M under PFMA Vote 40.`
+      };
+    });
+
+    // 3. Baseline records, filtered so we do not duplicate IDs
+    const existingIds = new Set([...storeDocRecords.map(d => d.id), ...storeReportRecords.map(r => r.id)]);
+    const filteredBaseline = INITIAL_REPORTS_LIST.filter(b => !existingIds.has(b.id));
+
+    return [...storeDocRecords, ...storeReportRecords, ...filteredBaseline];
+  }, [store.documents, store.reports, store.entities]);
+
+  const [selectedReportId, setSelectedReportId] = useState<string>('rep-001');
   const [quarterFilter, setQuarterFilter] = useState<string>('ALL');
   const [typeFilter, setTypeFilter] = useState<string>('ALL');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
@@ -217,24 +289,65 @@ export const DsacReportsView: React.FC<DsacReportsViewProps> = ({
     return matchesSearch && matchesQuarter && matchesType && matchesStatus;
   });
 
-  const selectedReport = reports.find(r => r.id === selectedReportId) || reports[0];
+  const selectedReport = reports.find(r => r.id === selectedReportId) || filteredReports[0] || reports[0];
 
   const handleVerify = (id: string) => {
-    setReports(prev => prev.map(r => r.id === id ? { ...r, status: 'VERIFIED' } : r));
+    const doc = store.documents.find(d => d.id === id);
+    if (doc) {
+      store.verifyDocument(id, 'APPROVED');
+    } else {
+      const rep = store.reports.find(r => r.id === id);
+      if (rep) {
+        rep.submissionStatus = 'APPROVED';
+        rep.reviewedAt = new Date().toISOString();
+        rep.reviewedByName = 'DSAC National Oversight Reviewer';
+        const ent = store.entities.find(e => e.id === rep.entityId);
+        if (ent) {
+          ent.overallComplianceScore = Math.min(100, ent.overallComplianceScore + 2);
+          store.recalculateEntityRisk(ent.id);
+        }
+        store.persistAll();
+      }
+    }
     setActionNotice(`Report formally verified and logged in statutory repository.`);
     setTimeout(() => setActionNotice(null), 4000);
   };
 
   const handleRequestRevision = (id: string) => {
-    setReports(prev => prev.map(r => r.id === id ? { ...r, status: 'REQUIRES_AMENDMENT' } : r));
+    const doc = store.documents.find(d => d.id === id);
+    if (doc) {
+      store.verifyDocument(id, 'REQUIRES_AMENDMENT', 'Clarification required regarding Section 38 PoE vouchers.');
+    } else {
+      const rep = store.reports.find(r => r.id === id);
+      if (rep) {
+        rep.submissionStatus = 'CORRECTION_REQUIRED';
+        const ent = store.entities.find(e => e.id === rep.entityId);
+        if (ent) {
+          store.recalculateEntityRisk(ent.id);
+        }
+        store.persistAll();
+      }
+    }
     setActionNotice(`Report flagged for clarification. Notification sent to ${selectedReport?.reportingOfficer}.`);
     setTimeout(() => setActionNotice(null), 4000);
   };
 
   const handleDownload = () => {
-    setActionNotice(`Downloading authentic departmental copy of "${selectedReport?.title}"...`);
+    if (!selectedReport) return;
+    downloadStatutoryDocument(
+      `${selectedReport.title.replace(/[^a-zA-Z0-9_-]/g, '_')}.pdf`,
+      selectedReport.title,
+      selectedReport.type,
+      selectedReport.entityName
+    );
+    setActionNotice(`Downloaded authentic departmental copy of "${selectedReport.title}".`);
     setTimeout(() => setActionNotice(null), 3500);
   };
+
+  const totalRepoCount = reports.length;
+  const verifiedCount = reports.filter(r => r.status === 'VERIFIED').length;
+  const underReviewCount = reports.filter(r => r.status === 'UNDER_REVIEW').length;
+  const amendmentCount = reports.filter(r => r.status === 'REQUIRES_AMENDMENT').length;
 
   return (
     <div className="space-y-4">
@@ -267,22 +380,22 @@ export const DsacReportsView: React.FC<DsacReportsViewProps> = ({
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-3">
           <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200/70">
             <div className="text-[11px] font-semibold text-slate-500">Repository Documents</div>
-            <div className="text-xl font-black text-slate-900 mt-0.5">86 Reports</div>
+            <div className="text-xl font-black text-slate-900 mt-0.5">{totalRepoCount} Reports</div>
             <div className="text-[10px] text-slate-400">All 32 Institutions</div>
           </div>
           <div className="p-2.5 rounded-lg bg-emerald-50/70 border border-emerald-200/70">
             <div className="text-[11px] font-semibold text-emerald-800">Verified &amp; Approved</div>
-            <div className="text-xl font-black text-emerald-700 mt-0.5">68 Reports</div>
+            <div className="text-xl font-black text-emerald-700 mt-0.5">{verifiedCount} Reports</div>
             <div className="text-[10px] text-emerald-600 font-medium">PoE Validated</div>
           </div>
           <div className="p-2.5 rounded-lg bg-amber-50/70 border border-amber-200/70">
             <div className="text-[11px] font-semibold text-amber-800">Under DSAC Review</div>
-            <div className="text-xl font-black text-amber-700 mt-0.5">12 Reports</div>
+            <div className="text-xl font-black text-amber-700 mt-0.5">{underReviewCount} Reports</div>
             <div className="text-[10px] text-amber-600 font-medium">In Evaluation</div>
           </div>
           <div className="p-2.5 rounded-lg bg-rose-50/70 border border-rose-200/70">
             <div className="text-[11px] font-semibold text-rose-800">Requires Amendment</div>
-            <div className="text-xl font-black text-rose-700 mt-0.5">6 Reports</div>
+            <div className="text-xl font-black text-rose-700 mt-0.5">{amendmentCount} Reports</div>
             <div className="text-[10px] text-rose-600 font-medium">Feedback Issued</div>
           </div>
         </div>

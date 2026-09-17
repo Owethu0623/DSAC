@@ -279,30 +279,6 @@ export const Header: React.FC<HeaderProps> = ({
             )}
           </div>
 
-          {/* Quick Switch Button between DSAC and Entity */}
-          <div className="hidden lg:flex items-center bg-slate-800 p-0.5 rounded-lg border border-slate-700 text-xs">
-            <button
-              onClick={() => onSelectTab('dsac-repo')}
-              className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-all ${
-                currentTab === 'dsac-repo' || currentTab === 'dashboard'
-                  ? 'bg-emerald-700 text-white shadow-xs'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              🏛️ DSAC
-            </button>
-            <button
-              onClick={() => onSelectTab('entity-portal')}
-              className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-all ${
-                currentTab === 'entity-portal'
-                  ? 'bg-indigo-700 text-white shadow-xs'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              🎭 NPO Portal
-            </button>
-          </div>
-
           {/* Statutory Deadlines & Alerts Bell */}
           <div className="relative">
             <button

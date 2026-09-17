@@ -124,6 +124,11 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
   const pePercentage = totalApprovedBudget > 0 ? (peBudget / totalApprovedBudget) * 100 : 87.9;
   const npoPercentage = totalApprovedBudget > 0 ? (npoBudget / totalApprovedBudget) * 100 : 12.1;
 
+  const reportsSubmitted = pulse.reportsSubmittedCount;
+  const reportsOutstanding = pulse.reportsOutstandingCount;
+  const reportsSubmittedPercent = entities.length > 0 ? Math.round((reportsSubmitted / entities.length) * 100) : 0;
+  const reportsOutstandingPercent = 100 - reportsSubmittedPercent;
+
   const formatZAR = (val: number) => {
     if (val >= 1_000_000_000) {
       return `R ${(val / 1_000_000_000).toFixed(2)}B`;
@@ -436,7 +441,7 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
                 </div>
               </div>
 
-              {/* Card 4: 24 Reports Submitted (75%) */}
+              {/* Card 4: Reports Submitted */}
               <div 
                 onClick={() => openFeatureInSideView('reports')}
                 className="bg-emerald-50/60 hover:bg-emerald-50 border border-emerald-200/70 hover:border-emerald-400 rounded-xl p-3.5 flex flex-col justify-between transition-all duration-200 hover:shadow-xs cursor-pointer group"
@@ -446,13 +451,13 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
                     <FileCheck className="w-4 h-4" />
                   </div>
                   <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100/70 px-2 py-0.5 rounded-full">
-                    75% Compliant
+                    {reportsSubmittedPercent}% Compliant
                   </span>
                 </div>
                 <div className="my-2">
-                  <div className="text-3xl font-black text-slate-900 tracking-tight leading-none">24</div>
+                  <div className="text-3xl font-black text-slate-900 tracking-tight leading-none">{reportsSubmitted}</div>
                   <div className="text-xs font-bold text-slate-800 mt-1">Reports Submitted</div>
-                  <div className="text-[11px] font-bold text-emerald-700">This Quarter (75%)</div>
+                  <div className="text-[11px] font-bold text-emerald-700">This Quarter ({reportsSubmittedPercent}%)</div>
                 </div>
                 <div className="pt-2 border-t border-emerald-100/80 flex items-center justify-between text-xs font-bold text-emerald-800 group-hover:text-emerald-900">
                   <span>Side View</span>
@@ -460,7 +465,7 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
                 </div>
               </div>
 
-              {/* Card 5: 8 Reports Outstanding (25%) */}
+              {/* Card 5: Reports Outstanding */}
               <div 
                 onClick={() => openFeatureInSideView('compliance')}
                 className="bg-rose-50/60 hover:bg-rose-50 border border-rose-200/70 hover:border-rose-400 rounded-xl p-3.5 flex flex-col justify-between transition-all duration-200 hover:shadow-xs col-span-1 sm:col-span-2 md:col-span-1 cursor-pointer group"
@@ -470,13 +475,13 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
                     <AlertCircle className="w-4 h-4" />
                   </div>
                   <span className="text-[10px] font-bold text-rose-800 bg-rose-100/70 px-2 py-0.5 rounded-full">
-                    25% Pending
+                    {reportsOutstandingPercent}% Pending
                   </span>
                 </div>
                 <div className="my-2">
-                  <div className="text-3xl font-black text-slate-900 tracking-tight leading-none">8</div>
+                  <div className="text-3xl font-black text-slate-900 tracking-tight leading-none">{reportsOutstanding}</div>
                   <div className="text-xs font-bold text-slate-800 mt-1">Reports Outstanding</div>
-                  <div className="text-[11px] font-bold text-rose-700">(25%) Clearance Required</div>
+                  <div className="text-[11px] font-bold text-rose-700">({reportsOutstandingPercent}%) Clearance Required</div>
                 </div>
                 <div className="pt-2 border-t border-rose-100/80 flex items-center justify-between text-xs font-bold text-rose-800 group-hover:text-rose-900">
                   <span>Side View</span>
@@ -502,13 +507,6 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
                   <p className="text-[11px] text-slate-500 mt-0.5">Matched to portfolio allocations</p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <button 
-                    onClick={() => openFeatureInSideView('support', 'ent-sahra')}
-                    className="text-xs text-emerald-700 hover:text-emerald-800 font-semibold cursor-pointer flex items-center gap-1 hover:underline"
-                    title="Open Support & Funding Side View"
-                  >
-                    <span>View All</span>
-                  </button>
                   <select
                     value={selectedYear}
                     onChange={(e) => setSelectedYear(e.target.value)}
@@ -523,11 +521,9 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
 
               {/* SVG Donut Chart with Center Metric */}
               <div 
-                onClick={() => openFeatureInSideView('support', 'ent-sahra')}
-                className="flex flex-col items-center justify-center py-4 cursor-pointer group"
-                title="Inspect Financial Tranches in Side View"
+                className="flex flex-col items-center justify-center py-4 select-none"
               >
-                <div className="relative w-44 h-44 flex items-center justify-center group-hover:scale-105 transition-transform">
+                <div className="relative w-44 h-44 flex items-center justify-center">
                   <svg viewBox="0 0 100 100" className="w-full h-full -rotate-90">
                     {/* Background Ring */}
                     <circle
@@ -623,13 +619,10 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
                   </div>
                 </div>
 
-                <button
-                  onClick={() => openFeatureInSideView('support', 'ent-sahra')}
-                  className="w-full mt-1 pt-2 border-t border-slate-100 flex items-center justify-center gap-1.5 text-xs font-bold text-emerald-800 hover:text-emerald-700 cursor-pointer group"
-                >
-                  <span>Inspect Tranche Allocation in Side View</span>
-                  <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
-                </button>
+                <div className="w-full mt-1 pt-2 border-t border-slate-100 flex items-center justify-between text-xs font-semibold text-slate-600">
+                  <span className="text-slate-500">Statutory Tranche Allocation</span>
+                  <span className="font-bold text-emerald-700">PFMA Vote 40 Schedule</span>
+                </div>
               </div>
             </div>
 
@@ -638,12 +631,11 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 flex-1">
                 {/* Graph 1: Total Approved Budget */}
                 <div 
-                  onClick={() => openFeatureInSideView('support')}
-                  className="bg-white hover:bg-slate-50/70 border border-slate-200/90 hover:border-emerald-300 rounded-xl p-4 flex flex-col justify-between transition-all shadow-xs cursor-pointer group"
+                  className="bg-white border border-slate-200/90 rounded-xl p-4 flex flex-col justify-between shadow-xs"
                 >
                   <div>
                     <div className="flex items-center justify-between gap-2 mb-2">
-                      <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-800 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                      <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-800 flex items-center justify-center shrink-0">
                         <Coins className="w-4 h-4" />
                       </div>
                       <span className="text-[10px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200/60 px-2 py-0.5 rounded-full">
@@ -694,12 +686,11 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
 
                 {/* Graph 2: Transfer to Date & Remaining Disbursal */}
                 <div 
-                  onClick={() => openFeatureInSideView('support')}
-                  className="bg-white hover:bg-slate-50/70 border border-slate-200/90 hover:border-indigo-300 rounded-xl p-4 flex flex-col justify-between transition-all shadow-xs cursor-pointer group"
+                  className="bg-white border border-slate-200/90 rounded-xl p-4 flex flex-col justify-between shadow-xs"
                 >
                   <div>
                     <div className="flex items-center justify-between gap-2 mb-2">
-                      <div className="w-8 h-8 rounded-lg bg-indigo-100 text-indigo-800 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                      <div className="w-8 h-8 rounded-lg bg-indigo-100 text-indigo-800 flex items-center justify-center shrink-0">
                         <FileText className="w-4 h-4" />
                       </div>
                       <span className="text-[10px] font-bold text-indigo-800 bg-indigo-50 border border-indigo-200/60 px-2 py-0.5 rounded-full">

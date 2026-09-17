@@ -70,12 +70,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const openTasksCount = store.tasks.filter(t => t.status === 'OPEN').length;
 
   const isEntityPortal = currentTab === 'entity-portal';
+  const isEntityUser = store.currentUser?.role === 'ENTITY_OFFICER';
 
-  // Primary navigation items
-  const navSections: NavSection[] = [
-    {
-      title: 'Portals & Dashboards',
-      items: [
+  // Primary navigation items - filtered strictly by authenticated actor portal
+  const portalItems = isEntityUser
+    ? [
+        {
+          id: 'entity-portal',
+          label: 'Entity / NPO Portal',
+          sublabel: store.currentUser?.entityName || 'Entity Workspace',
+          icon: Theater,
+          badge: 'NPO',
+          badgeColor: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30',
+        },
+      ]
+    : [
         {
           id: 'dsac-repo',
           label: 'DSAC REPO Oversight',
@@ -84,23 +93,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
           badge: 'Live',
           badgeColor: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
         },
-        {
-          id: 'entity-portal',
-          label: 'Entity / NPO Portal',
-          sublabel: 'Ubuntu Arts NPO',
-          icon: Theater,
-          badge: 'NPO',
-          badgeColor: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30',
-        },
-        {
-          id: 'side-by-side',
-          label: 'Dual Oversight View',
-          sublabel: 'Side-by-Side Analysis',
-          icon: Columns2,
-          badge: 'Split',
-          badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30',
-        },
-      ],
+      ];
+
+  const navSections: NavSection[] = [
+    {
+      title: isEntityUser ? 'Institutional Portal' : 'Departmental Oversight',
+      items: portalItems,
     },
     {
       title: 'Statutory Operations',

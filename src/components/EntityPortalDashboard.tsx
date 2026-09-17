@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Theater,
   Calendar,
@@ -38,10 +38,14 @@ import {
   Lock,
   Sparkles,
   Info,
-  LogOut
+  LogOut,
+  Landmark,
+  Trash2,
+  Paperclip
 } from 'lucide-react';
 import { store } from '../services/store';
 import { UbuntuArtsLogo } from './UbuntuArtsLogo';
+import { downloadStatutoryDocument } from '../services/downloadHelper';
 
 interface EntityPortalDashboardProps {
   entityId?: string;
@@ -56,6 +60,11 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
   onNavigateToSection,
   onLogout,
 }) => {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    return store.subscribe(() => setTick(t => t + 1));
+  }, []);
+
   const [activeSidebar, setActiveSidebar] = useState<string>('overview');
   const [selectedYear, setSelectedYear] = useState<string>('2025/26 Financial Year');
   const [showNotifications, setShowNotifications] = useState<boolean>(false);
@@ -64,6 +73,54 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
   // Modals
   const [activeModal, setActiveModal] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
+
+  // Resolve current entity from store
+  const targetEntityId = entityId || store.currentUser?.entityId || 'ent-ubuntu-arts';
+  const entity = store.entities.find(e => e.id === targetEntityId) || store.entities.find(e => e.id === 'ent-ubuntu-arts') || store.entities[0];
+  const entityDocuments = store.documents.filter(d => d.entityId === entity.id);
+  const entityReports = store.reports.filter(r => r.entityId === entity.id);
+
+  // Drag & Drop States
+  const [isDraggingModal, setIsDraggingModal] = useState(false);
+  const [isDraggingSection, setIsDraggingSection] = useState(false);
+
+  // Document Upload Form State
+  const [uploadDocTitle, setUploadDocTitle] = useState('');
+  const [uploadDocCategory, setUploadDocCategory] = useState<'PORTFOLIO_OF_EVIDENCE' | 'OPERATIONAL_PLAN' | 'FINANCIAL_REPORT' | 'ANNUAL_REPORT' | 'GOVERNANCE_CHARTER'>('PORTFOLIO_OF_EVIDENCE');
+  const [uploadFileName, setUploadFileName] = useState('');
+  const [uploadFileSize, setUploadFileSize] = useState('4.2 MB');
+  const [uploadSummary, setUploadSummary] = useState('');
+  const [section38Confirmed, setSection38Confirmed] = useState(true);
+
+  // File selection & drag-and-drop helper
+  const handleFileSelected = (file: File) => {
+    setUploadFileName(file.name);
+    const cleanName = file.name.replace(/\.[^/.]+$/, "");
+    if (!uploadDocTitle || uploadDocTitle === 'Section 38 Portfolio Evidence') {
+      setUploadDocTitle(cleanName);
+    }
+    const bytes = file.size;
+    const formattedSize = bytes < 1000000 ? `${Math.round(bytes / 1024)} KB` : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    setUploadFileSize(formattedSize);
+
+    // Auto-detect category from filename
+    const lower = file.name.toLowerCase();
+    if (lower.includes('poe') || lower.includes('evidence') || lower.includes('register')) {
+      setUploadDocCategory('PORTFOLIO_OF_EVIDENCE');
+    } else if (lower.includes('tax') || lower.includes('sars') || lower.includes('bank') || lower.includes('financial')) {
+      setUploadDocCategory('FINANCIAL_REPORT');
+    } else if (lower.includes('board') || lower.includes('resolution') || lower.includes('governance')) {
+      setUploadDocCategory('GOVERNANCE_CHARTER');
+    } else if (lower.includes('audit') || lower.includes('afs') || lower.includes('annual')) {
+      setUploadDocCategory('ANNUAL_REPORT');
+    }
+  };
+
+  // Report Submission Form State
+  const [reportQuarter, setReportQuarter] = useState<'Q1' | 'Q2' | 'Q3' | 'Q4'>('Q2');
+  const [reportExpenditure, setReportExpenditure] = useState('1200000');
+  const [reportPoeDocId, setReportPoeDocId] = useState('');
+  const [reportDeclaration, setReportDeclaration] = useState('I hereby affirm that the programmatic targets and expenditure reported reflect verified records in accordance with PFMA Section 38.');
 
   // Form states for interactive sub-views
   const [supportType, setSupportType] = useState('Financial Support');
@@ -88,7 +145,7 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
     },
   ]);
 
-  // Organisation Profile State
+  // Organisation Profile State - Statutory identifiers are strictly final
   const [orgProfile, setOrgProfile] = useState({
     name: 'Ubuntu Arts NPO',
     npoNumber: 'NPO-2018-8841',
@@ -117,12 +174,188 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
     accessibility: 88,
   });
 
+  // Dynamic Year-Based Stats synchronized with Department Dashboard
+  const yearStats = useMemo(() => {
+    if (selectedYear.includes('2024/25')) {
+      return {
+        yearLabel: '2024/25 Financial Year',
+        fiscalTag: '2024/2025',
+        budgetAllocated: 4800000,
+        transferred: 4800000,
+        expenditure: 4720000,
+        utilPercent: 98,
+        remaining: 80000,
+        complianceStatus: 'On Track',
+        complianceScore: 100,
+        upcomingDueDates: 0,
+        overdueItems: 0,
+        kpiAchievedCount: 8,
+        kpiTotalCount: 8,
+        kpiPercent: 100,
+        targets: [
+          { title: 'Community arts programmes', current: '16', target: '16 (100%)', pct: 100, color: 'bg-emerald-500' },
+          { title: 'Youth participants', current: '1 150', target: '1 100 (104%)', pct: 100, color: 'bg-emerald-500' },
+          { title: 'Workshops conducted', current: '24', target: '24 (100%)', pct: 100, color: 'bg-emerald-500' },
+          { title: 'Independent AFS Audit', current: 'Clean Opinion', target: 'Unqualified (100%)', pct: 100, color: 'bg-emerald-500' },
+        ],
+        auditOutcome: 'Clean Audit (Unqualified)',
+        badge: 'Audited & Closed',
+      };
+    } else if (selectedYear.includes('2023/24')) {
+      return {
+        yearLabel: '2023/24 Financial Year',
+        fiscalTag: '2023/2024',
+        budgetAllocated: 4500000,
+        transferred: 4500000,
+        expenditure: 4480000,
+        utilPercent: 100,
+        remaining: 20000,
+        complianceStatus: 'On Track',
+        complianceScore: 96,
+        upcomingDueDates: 0,
+        overdueItems: 0,
+        kpiAchievedCount: 8,
+        kpiTotalCount: 8,
+        kpiPercent: 100,
+        targets: [
+          { title: 'Community arts programmes', current: '14', target: '14 (100%)', pct: 100, color: 'bg-emerald-500' },
+          { title: 'Youth participants', current: '980', target: '950 (103%)', pct: 100, color: 'bg-emerald-500' },
+          { title: 'Workshops conducted', current: '20', target: '20 (100%)', pct: 100, color: 'bg-emerald-500' },
+          { title: 'Independent AFS Audit', current: 'Clean Opinion', target: 'Unqualified (100%)', pct: 100, color: 'bg-emerald-500' },
+        ],
+        auditOutcome: 'Clean Audit (Unqualified)',
+        badge: 'Audited & Closed',
+      };
+    } else {
+      // 2025/26 (Current Active)
+      const allocated = entity.budgetAllocationZAR || 5000000;
+      const transferred = entity.transferredAmountZAR || 3200000;
+      const spent = entity.reportedExpenditureZAR || 3200000;
+      const utilPct = Math.round((transferred / allocated) * 100);
+      return {
+        yearLabel: '2025/26 Financial Year',
+        fiscalTag: '2025/2026',
+        budgetAllocated: allocated,
+        transferred: transferred,
+        expenditure: spent,
+        utilPercent: utilPct, // 64%
+        remaining: Math.max(0, allocated - transferred),
+        complianceStatus: 'On Track',
+        complianceScore: entity.overallComplianceScore || 88,
+        upcomingDueDates: 2,
+        overdueItems: 1,
+        kpiAchievedCount: 6,
+        kpiTotalCount: 8,
+        kpiPercent: 75,
+        targets: [
+          { title: 'Community arts programmes', current: `${kpiActuals.programmes} / 15`, target: '15 (80%)', pct: 80, color: 'bg-emerald-500' },
+          { title: 'Youth participants', current: `${kpiActuals.youth} / 1 000`, target: '1 000 (85%)', pct: 85, color: 'bg-emerald-500' },
+          { title: 'Workshops conducted', current: `${kpiActuals.trainings} / 20`, target: '20 (90%)', pct: 90, color: 'bg-emerald-500' },
+          { title: 'Partnerships established', current: '3 / 5', target: '5 (60%)', pct: 60, color: 'bg-amber-400' },
+        ],
+        auditOutcome: entity.auditOutcome || 'Clean Audit',
+        badge: 'Active Financial Year',
+      };
+    }
+  }, [selectedYear, entity, kpiActuals]);
+
   const currentUser = store.currentUser || {
     name: 'Lerato Phiri',
     role: 'ENTITY_OFFICER',
     designation: 'Organisation Admin',
     email: 'l.phiri@ubuntuarts.org.za',
     entityName: 'Ubuntu Arts NPO',
+  };
+
+  const handleUploadDocument = (e: React.FormEvent) => {
+    e.preventDefault();
+    const finalTitle = uploadDocTitle.trim() || uploadFileName.replace(/\.[^/.]+$/, "") || 'Section 38 Portfolio Evidence';
+    const finalFileName = uploadFileName.trim() || `${finalTitle.replace(/[^a-zA-Z0-9_-]/g, '_')}.pdf`;
+    const numBytes = Math.round((parseFloat(uploadFileSize) || 3.5) * 1024 * 1024);
+
+    store.createNewDocument(
+      entity.id,
+      finalTitle,
+      uploadDocCategory,
+      yearStats.fiscalTag,
+      finalFileName,
+      numBytes,
+      uploadSummary || 'Statutory evidence dossier submitted under PFMA Section 38 audit verification.'
+    );
+
+    setActionSuccess(`Statutory document "${finalFileName}" uploaded successfully and forwarded to DSAC Section 38 Oversight.`);
+    setActiveModal(null);
+    setUploadDocTitle('');
+    setUploadFileName('');
+    setUploadSummary('');
+    setTimeout(() => setActionSuccess(null), 3500);
+  };
+
+  const handleReportSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const spentAmount = parseFloat(reportExpenditure) || 1200000;
+    store.submitQuarterlyReport({
+      entityId: entity.id,
+      quarter: reportQuarter,
+      financialYear: yearStats.fiscalTag,
+      expenditureClaimedZAR: spentAmount,
+      declarationNotes: reportDeclaration,
+      poeDocId: reportPoeDocId || entityDocuments[0]?.id,
+    });
+
+    setActionSuccess(`Quarter ${reportQuarter} Statutory Performance Report submitted to DSAC with expenditure of R ${(spentAmount / 1_000_000).toFixed(2)}M.`);
+    setActiveModal(null);
+    setTimeout(() => setActionSuccess(null), 3500);
+  };
+
+  const handleSaveKpiActuals = () => {
+    if (entity) {
+      entity.jobStats = {
+        ...entity.jobStats,
+        youthJobsCreated: kpiActuals.youth,
+        youthEmployed: kpiActuals.youth,
+        creativeSectorPractitionersSupported: kpiActuals.practitioners,
+      };
+      const totalRatio = (
+        (kpiActuals.programmes / 15) +
+        (kpiActuals.youth / 1000) +
+        (kpiActuals.practitioners / 120) +
+        (kpiActuals.schools / 40)
+      ) / 4;
+      entity.overallComplianceScore = Math.min(100, Math.round(75 + totalRatio * 25));
+      store.recalculateEntityRisk(entity.id);
+      store.persistAll();
+    }
+    setActionSuccess('Quarterly KPI actuals updated, risk recalculated, and synchronized with DSAC.');
+    setTimeout(() => setActionSuccess(null), 2500);
+  };
+
+  const handleClaimTranche = (trancheName: string, amount: number) => {
+    store.createTask({
+      entityId: entity.id,
+      entityName: entity.name,
+      title: `Disburse ${trancheName} (R ${(amount / 1_000_000).toFixed(2)}M) for ${entity.shortCode || entity.name}`,
+      description: `Formal request for ${trancheName} disbursement following verified Q1 & Q2 statutory compliance.`,
+      assignedToName: 'DSAC Chief Financial Officer',
+      priority: 'HIGH',
+      status: 'OPEN',
+      dueDate: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString(),
+      direction: 'ENTITY_TO_DSAC',
+    });
+    setActionSuccess(`Claim for ${trancheName} (R ${(amount / 1_000_000).toFixed(2)}M) submitted to DSAC Finance Directorate.`);
+    setTimeout(() => setActionSuccess(null), 3000);
+  };
+
+  const handleDownloadDoc = (fileName: string, title: string, category: string) => {
+    downloadStatutoryDocument(fileName, title, category, entity.name);
+    setActionSuccess(`Downloaded authentic copy of "${fileName}".`);
+    setTimeout(() => setActionSuccess(null), 2500);
+  };
+
+  const handleDeleteDoc = (docId: string, title: string) => {
+    store.deleteEntityDocument(docId);
+    setActionSuccess(`Archived document "${title}".`);
+    setTimeout(() => setActionSuccess(null), 2500);
   };
 
   const sidebarItems = [
@@ -262,26 +495,84 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
             <div className="relative">
               <button
                 onClick={() => setShowNotifications(!showNotifications)}
-                className="relative p-2 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors"
+                className="relative p-2 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                title="Notifications"
               >
                 <Bell className="w-4 h-4" />
-                <span className="absolute top-1 right-1 w-4 h-4 bg-rose-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center">
-                  2
+                <span className="absolute top-1 right-1 w-4 h-4 bg-rose-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center animate-pulse">
+                  {entityDocuments.some(d => d.approvalStatus === 'PENDING_REVIEW') ? 3 : 2}
                 </span>
               </button>
 
               {showNotifications && (
-                <div className="absolute right-0 mt-2 w-72 bg-white rounded-xl shadow-xl border border-slate-200 p-3 z-50 text-xs">
-                  <div className="font-bold text-slate-800 mb-2 pb-1 border-b border-slate-100">
-                    Portal Alerts
+                <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-white rounded-xl shadow-2xl border border-slate-200 p-3.5 z-50 text-xs">
+                  <div className="flex items-center justify-between font-bold text-slate-800 mb-2 pb-2 border-b border-slate-100">
+                    <span className="flex items-center gap-1.5">
+                      <Bell className="w-3.5 h-3.5 text-indigo-600" />
+                      Portal Notifications &amp; Alerts
+                    </span>
+                    <span className="text-[10px] text-slate-400 font-normal">Real-Time Sync</span>
                   </div>
-                  <div className="space-y-2">
-                    <div className="p-2 bg-amber-50 rounded-lg border border-amber-200 text-amber-900">
-                      <span className="font-bold">Quarter 2 Report Due:</span> 15 Oct 2025 (in 18 days).
+                  <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                    {/* Recent Uploads status */}
+                    {entityDocuments.slice(0, 2).map((doc) => (
+                      <div 
+                        key={doc.id}
+                        onClick={() => { setActiveSidebar('documents'); setShowNotifications(false); }}
+                        className="p-2.5 bg-slate-50 hover:bg-indigo-50/50 rounded-lg border border-slate-200 cursor-pointer transition-colors"
+                      >
+                        <div className="flex items-center justify-between text-[11px] font-bold text-slate-800">
+                          <span className="truncate max-w-[190px]">{doc.fileName || doc.title}</span>
+                          <span className={`text-[9px] px-1.5 py-0.2 rounded font-bold ${
+                            doc.approvalStatus === 'APPROVED' ? 'bg-emerald-100 text-emerald-800' :
+                            doc.approvalStatus === 'REQUIRES_AMENDMENT' ? 'bg-rose-100 text-rose-800' :
+                            'bg-amber-100 text-amber-800'
+                          }`}>
+                            {doc.approvalStatus === 'APPROVED' ? 'DSAC Verified' :
+                             doc.approvalStatus === 'REQUIRES_AMENDMENT' ? 'Amendment Req.' :
+                             'Pending Review'}
+                          </span>
+                        </div>
+                        <div className="text-[10px] text-slate-500 mt-1 flex items-center justify-between">
+                          <span>Section 38 Statutory Repository</span>
+                          <span>{doc.uploadedAt ? doc.uploadedAt.split('T')[0] : 'Today'}</span>
+                        </div>
+                      </div>
+                    ))}
+
+                    <div 
+                      onClick={() => { setActiveSidebar('submissions'); setShowNotifications(false); }}
+                      className="p-2.5 bg-amber-50/80 hover:bg-amber-100/60 rounded-lg border border-amber-200 text-amber-900 cursor-pointer transition-colors"
+                    >
+                      <div className="font-bold text-[11px] flex items-center gap-1">
+                        <Clock className="w-3 h-3 text-amber-600" />
+                        Quarter 2 Performance Report Due
+                      </div>
+                      <div className="text-[10px] text-amber-700 mt-0.5">
+                        Statutory submission deadline: 15 Oct 2025 (in 18 days). PoE register required.
+                      </div>
                     </div>
-                    <div className="p-2 bg-emerald-50 rounded-lg border border-emerald-200 text-emerald-900">
-                      <span className="font-bold">Tranche 2 Released:</span> R 1 700 000 disbursed.
+
+                    <div 
+                      onClick={() => { setActiveSidebar('budget'); setShowNotifications(false); }}
+                      className="p-2.5 bg-emerald-50/80 hover:bg-emerald-100/60 rounded-lg border border-emerald-200 text-emerald-900 cursor-pointer transition-colors"
+                    >
+                      <div className="font-bold text-[11px] flex items-center gap-1">
+                        <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                        Tranche 2 Disbursed: R 1 700 000
+                      </div>
+                      <div className="text-[10px] text-emerald-700 mt-0.5">
+                        Funds cleared into Standard Bank account under Vote 40 BAS allocation.
+                      </div>
                     </div>
+                  </div>
+                  <div className="pt-2 mt-2 border-t border-slate-100 text-center">
+                    <button 
+                      onClick={() => setShowNotifications(false)}
+                      className="text-[10px] font-semibold text-indigo-600 hover:text-indigo-800"
+                    >
+                      Close Alerts
+                    </button>
                   </div>
                 </div>
               )}
@@ -365,7 +656,10 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
                     <div className="w-8 h-8 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center shrink-0">
                       <CheckCircle className="w-5 h-5" />
                     </div>
-                    <div className="text-base font-bold text-emerald-600">On Track</div>
+                    <div>
+                      <div className="text-base font-bold text-emerald-600 leading-none">{yearStats.complianceStatus}</div>
+                      <div className="text-[10px] text-slate-500 font-medium mt-0.5">Score: {yearStats.complianceScore}%</div>
+                    </div>
                   </div>
                 </div>
 
@@ -379,7 +673,7 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
                       <Calendar className="w-4 h-4" />
                     </div>
                     <div>
-                      <div className="text-xl font-black text-slate-900 leading-none">2</div>
+                      <div className="text-xl font-black text-slate-900 leading-none">{yearStats.upcomingDueDates}</div>
                       <div className="text-[10px] text-slate-500 font-medium">Next 30 days</div>
                     </div>
                   </div>
@@ -391,12 +685,12 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
                 >
                   <div className="text-xs font-medium text-slate-500 mb-2">Overdue Items</div>
                   <div className="flex items-center gap-2">
-                    <div className="w-8 h-8 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center shrink-0">
-                      <AlertCircle className="w-5 h-5" />
+                    <div className={`w-8 h-8 rounded-full ${yearStats.overdueItems > 0 ? 'bg-rose-100 text-rose-600' : 'bg-emerald-100 text-emerald-600'} flex items-center justify-center shrink-0`}>
+                      {yearStats.overdueItems > 0 ? <AlertCircle className="w-5 h-5" /> : <CheckCircle className="w-5 h-5" />}
                     </div>
                     <div>
-                      <div className="text-xl font-black text-slate-900 leading-none">1</div>
-                      <div className="text-[10px] text-slate-500 font-medium">Requires attention</div>
+                      <div className="text-xl font-black text-slate-900 leading-none">{yearStats.overdueItems}</div>
+                      <div className="text-[10px] text-slate-500 font-medium">{yearStats.overdueItems > 0 ? 'Requires attention' : 'All clear'}</div>
                     </div>
                   </div>
                 </div>
@@ -411,8 +705,8 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
                       <Target className="w-4 h-4" />
                     </div>
                     <div>
-                      <div className="text-xl font-black text-slate-900 leading-none">6/8</div>
-                      <div className="text-[10px] text-teal-700 font-bold">75%</div>
+                      <div className="text-xl font-black text-slate-900 leading-none">{yearStats.kpiAchievedCount}/{yearStats.kpiTotalCount}</div>
+                      <div className="text-[10px] text-teal-700 font-bold">{yearStats.kpiPercent}%</div>
                     </div>
                   </div>
                 </div>
@@ -427,8 +721,8 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
                       <Coins className="w-4 h-4" />
                     </div>
                     <div>
-                      <div className="text-xl font-black text-slate-900 leading-none">64%</div>
-                      <div className="text-[10px] text-slate-500 font-medium">R 3.2M of R 5.0M</div>
+                      <div className="text-xl font-black text-slate-900 leading-none">{yearStats.utilPercent}%</div>
+                      <div className="text-[10px] text-slate-500 font-medium">R {(yearStats.transferred / 1_000_000).toFixed(1)}M of R {(yearStats.budgetAllocated / 1_000_000).toFixed(1)}M</div>
                     </div>
                   </div>
                 </div>
@@ -436,12 +730,12 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
 
               {/* Row 2: Targets (Left) & Upcoming Due Dates (Right) */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-                {/* My Key Targets (2025/26) */}
+                {/* My Key Targets */}
                 <div className="bg-white rounded-xl p-5 border border-slate-200 shadow-xs flex flex-col justify-between">
                   <div className="flex items-center justify-between pb-3 border-b border-slate-100">
                     <h4 className="font-bold text-sm text-slate-900 flex items-center gap-2">
                       <Target className="w-4 h-4 text-indigo-600" />
-                      <span>My Key Targets (2025/26)</span>
+                      <span>My Key Targets ({yearStats.fiscalTag})</span>
                     </h4>
                     <button
                       onClick={() => setActiveSidebar('kpis')}
@@ -452,45 +746,17 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
                   </div>
 
                   <div className="py-3 space-y-3.5">
-                    <div>
-                      <div className="flex justify-between text-xs mb-1">
-                        <span className="font-medium text-slate-700">Community arts programmes</span>
-                        <span className="font-bold text-slate-900">12 / 15 (80%)</span>
+                    {yearStats.targets.map((tgt, i) => (
+                      <div key={i}>
+                        <div className="flex justify-between text-xs mb-1">
+                          <span className="font-medium text-slate-700">{tgt.title}</span>
+                          <span className="font-bold text-slate-900">{tgt.current} / {tgt.target}</span>
+                        </div>
+                        <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
+                          <div className={`${tgt.color} h-2 rounded-full transition-all duration-500`} style={{ width: `${tgt.pct}%` }}></div>
+                        </div>
                       </div>
-                      <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
-                        <div className="bg-emerald-500 h-2 rounded-full" style={{ width: '80%' }}></div>
-                      </div>
-                    </div>
-
-                    <div>
-                      <div className="flex justify-between text-xs mb-1">
-                        <span className="font-medium text-slate-700">Youth participants</span>
-                        <span className="font-bold text-slate-900">850 / 1 000 (85%)</span>
-                      </div>
-                      <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
-                        <div className="bg-emerald-500 h-2 rounded-full" style={{ width: '85%' }}></div>
-                      </div>
-                    </div>
-
-                    <div>
-                      <div className="flex justify-between text-xs mb-1">
-                        <span className="font-medium text-slate-700">Workshops conducted</span>
-                        <span className="font-bold text-slate-900">18 / 20 (90%)</span>
-                      </div>
-                      <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
-                        <div className="bg-emerald-500 h-2 rounded-full" style={{ width: '90%' }}></div>
-                      </div>
-                    </div>
-
-                    <div>
-                      <div className="flex justify-between text-xs mb-1">
-                        <span className="font-medium text-slate-700">Partnerships established</span>
-                        <span className="font-bold text-slate-900">3 / 5 (60%)</span>
-                      </div>
-                      <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
-                        <div className="bg-amber-400 h-2 rounded-full" style={{ width: '60%' }}></div>
-                      </div>
-                    </div>
+                    ))}
                   </div>
                 </div>
 
@@ -1000,11 +1266,8 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
                     </p>
                   </div>
                   <button
-                    onClick={() => {
-                      setActionSuccess('Quarterly KPI actuals updated and transmitted to DSAC.');
-                      setTimeout(() => setActionSuccess(null), 1500);
-                    }}
-                    className="px-4 py-1.5 bg-teal-700 hover:bg-teal-800 text-white font-bold text-xs rounded-lg shadow-xs"
+                    onClick={handleSaveKpiActuals}
+                    className="px-4 py-1.5 bg-teal-700 hover:bg-teal-800 text-white font-bold text-xs rounded-lg shadow-xs transition-colors"
                   >
                     Save &amp; Submit Actuals
                   </button>
@@ -1158,11 +1421,14 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
                       <div className="font-bold text-slate-900">Tranche 3 (Mid-Term Claim Eligible)</div>
                       <div className="text-slate-500">Pending Q2 report submission &amp; expenditure audit</div>
                     </div>
-                    <div className="text-right">
+                    <div className="text-right flex items-center gap-2">
                       <div className="font-black text-amber-700">R 1 000 000</div>
-                      <span className="px-2 py-0.5 bg-amber-100 text-amber-800 rounded-full text-[10px] font-bold">
-                        Ready to Claim
-                      </span>
+                      <button
+                        onClick={() => handleClaimTranche('Tranche 3 (Mid-Term Claim)', 1000000)}
+                        className="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-[10px] font-bold shadow-xs cursor-pointer transition-colors"
+                      >
+                        Claim Tranche 3
+                      </button>
                     </div>
                   </div>
 
@@ -1256,46 +1522,85 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
                     </p>
                   </div>
                   <button
-                    onClick={() => setActiveModal('report')}
-                    className="px-4 py-1.5 bg-indigo-700 hover:bg-indigo-800 text-white font-bold text-xs rounded-lg shadow-xs flex items-center gap-1.5"
+                    onClick={() => {
+                      setReportQuarter('Q2');
+                      setActiveModal('report');
+                    }}
+                    className="px-4 py-1.5 bg-indigo-700 hover:bg-indigo-800 text-white font-bold text-xs rounded-lg shadow-xs flex items-center gap-1.5 transition-colors"
                   >
                     <Upload className="w-3.5 h-3.5" />
-                    <span>Submit Q2 Report</span>
+                    <span>Submit Report</span>
                   </button>
                 </div>
 
                 <div className="space-y-3 mt-4 text-xs">
-                  <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl">
-                    <div className="flex items-center justify-between">
-                      <span className="font-bold text-slate-900 text-sm">Quarter 2 (Jul - Sep 2025) Performance Report</span>
-                      <span className="px-2.5 py-0.5 bg-amber-100 text-amber-800 rounded-full font-bold text-[10px]">
-                        Pending Submission (Due 15 Oct 2025)
-                      </span>
-                    </div>
-                    <p className="text-slate-600 mt-1">
-                      Includes programmatic performance actuals for 15 community workshops, 850 youth participants, and financial reconciliation of R 1 200 000 spent.
-                    </p>
-                    <div className="mt-3 flex items-center gap-2">
+                  {entityReports.length === 0 ? (
+                    <div className="p-6 text-center text-slate-400 bg-slate-50 rounded-xl border border-slate-200">
+                      <FileText className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                      <p>No quarterly statutory reports recorded yet.</p>
                       <button
-                        onClick={() => setActiveModal('report')}
-                        className="px-3 py-1 bg-indigo-700 text-white font-bold rounded-lg text-xs"
+                        onClick={() => {
+                          setReportQuarter('Q2');
+                          setActiveModal('report');
+                        }}
+                        className="mt-2 px-3 py-1 bg-indigo-50 text-indigo-700 font-bold rounded-lg hover:bg-indigo-100 transition-colors"
                       >
-                        Open Submission Form
+                        Submit Q2 Performance Report
                       </button>
                     </div>
-                  </div>
+                  ) : (
+                    entityReports.map((rep) => {
+                      const isApproved = rep.submissionStatus === 'APPROVED';
+                      const isUnderReview = rep.submissionStatus === 'SUBMITTED';
 
-                  <div className="p-4 bg-emerald-50/60 border border-emerald-200 rounded-xl">
-                    <div className="flex items-center justify-between">
-                      <span className="font-bold text-slate-900 text-sm">Quarter 1 (Apr - Jun 2025) Performance Report</span>
-                      <span className="px-2.5 py-0.5 bg-emerald-100 text-emerald-800 rounded-full font-bold text-[10px]">
-                        Approved by DSAC
-                      </span>
-                    </div>
-                    <p className="text-slate-600 mt-1">
-                      Report submitted on 14 Jul 2025. Reviewed and cleared by Thandi Mokoena on 18 Jul 2025.
-                    </p>
-                  </div>
+                      return (
+                        <div
+                          key={rep.id}
+                          className={`p-4 rounded-xl border transition-all ${
+                            isApproved
+                              ? 'bg-emerald-50/60 border-emerald-200'
+                              : isUnderReview
+                              ? 'bg-amber-50/60 border-amber-200'
+                              : 'bg-slate-50 border-slate-200'
+                          }`}
+                        >
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                            <span className="font-bold text-slate-900 text-sm">
+                              {rep.quarter} ({rep.quarter === 'Q1' ? 'Apr - Jun 2025' : rep.quarter === 'Q2' ? 'Jul - Sep 2025' : 'Oct - Dec 2025'}) Performance Report
+                            </span>
+                            <span
+                              className={`px-2.5 py-0.5 rounded-full font-bold text-[10px] w-fit ${
+                                isApproved
+                                  ? 'bg-emerald-100 text-emerald-800'
+                                  : isUnderReview
+                                  ? 'bg-amber-100 text-amber-800'
+                                  : 'bg-slate-100 text-slate-700'
+                              }`}
+                            >
+                              {isApproved ? 'Approved by DSAC' : isUnderReview ? 'Under DSAC Review' : 'Pending Submission'}
+                            </span>
+                          </div>
+                          <p className="text-slate-600 mt-1.5">
+                            {rep.varianceExplanations || `Statutory submission with claimed expenditure of R ${((rep.fundsSpentThisQuarterZAR || 1200000) / 1_000_000).toFixed(2)}M. Audited against MTSF targets.`}
+                          </p>
+                          <div className="mt-3 flex items-center justify-between text-[11px] text-slate-400">
+                            <span>Submitted: {rep.submittedAt ? rep.submittedAt.split('T')[0] : '14 Jul 2025'}</span>
+                            {!isApproved && (
+                              <button
+                                onClick={() => {
+                                  setReportQuarter(rep.quarter);
+                                  setActiveModal('report');
+                                }}
+                                className="px-3 py-1 bg-indigo-700 text-white font-bold rounded-lg text-xs hover:bg-indigo-800 transition-colors"
+                              >
+                                Update Submission
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
                 </div>
               </div>
             </div>
@@ -1317,7 +1622,7 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
                   </div>
                   <button
                     onClick={() => setActiveModal('uploadPoE')}
-                    className="px-4 py-1.5 bg-indigo-700 hover:bg-indigo-800 text-white font-bold text-xs rounded-lg shadow-xs flex items-center gap-1.5"
+                    className="px-4 py-1.5 bg-indigo-700 hover:bg-indigo-800 text-white font-bold text-xs rounded-lg shadow-xs flex items-center gap-1.5 transition-colors"
                   >
                     <UploadCloud className="w-3.5 h-3.5" />
                     <span>Upload Document</span>
@@ -1325,35 +1630,65 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
                 </div>
 
                 <div className="divide-y divide-slate-100 text-xs mt-3">
-                  {[
-                    { name: 'Ubuntu_Arts_Q1_Verified_PoE_Register.pdf', size: '4.2 MB', date: '14 Jul 2025', cat: 'Quarterly PoE' },
-                    { name: 'Signed_Board_Resolution_2025_26_Budget.pdf', size: '1.8 MB', date: '02 May 2025', cat: 'Governance' },
-                    { name: 'SARS_Tax_Compliance_Status_Pin_Cert.pdf', size: '650 KB', date: '12 Jan 2025', cat: 'Tax Clearance' },
-                    { name: 'Independent_Audit_Report_AFS_2024_25.pdf', size: '8.9 MB', date: '31 Jul 2025', cat: 'Financial Statements' },
-                    { name: 'Standard_Bank_Entity_Account_Confirmation.pdf', size: '420 KB', date: '15 Apr 2025', cat: 'Banking' },
-                  ].map((doc, i) => (
-                    <div key={i} className="py-2.5 flex items-center justify-between gap-3">
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <FileText className="w-4 h-4 text-indigo-600 shrink-0" />
-                        <div className="truncate">
-                          <div className="font-semibold text-slate-900 truncate">{doc.name}</div>
-                          <div className="text-[10px] text-slate-400">{doc.cat} • {doc.size}</div>
+                  {entityDocuments.length === 0 ? (
+                    <div className="py-8 text-center text-slate-400">
+                      <FolderLock className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                      <p>No statutory evidence documents uploaded yet.</p>
+                      <button
+                        onClick={() => setActiveModal('uploadPoE')}
+                        className="mt-2 px-3 py-1 bg-indigo-50 text-indigo-700 font-bold rounded-lg hover:bg-indigo-100 transition-colors"
+                      >
+                        Upload Section 38 Document
+                      </button>
+                    </div>
+                  ) : (
+                    entityDocuments.map((doc) => (
+                      <div key={doc.id} className="py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <div className="w-8 h-8 rounded-lg bg-indigo-50 border border-indigo-100 text-indigo-700 flex items-center justify-center shrink-0">
+                            <FileText className="w-4 h-4" />
+                          </div>
+                          <div className="truncate">
+                            <div className="font-semibold text-slate-900 truncate">{doc.fileName || doc.title}</div>
+                            <div className="text-[10px] text-slate-400">
+                              {doc.category.replace(/_/g, ' ')} • {doc.fileSize || '3.5 MB'}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                            doc.approvalStatus === 'APPROVED' ? 'bg-emerald-100 text-emerald-800' :
+                            doc.approvalStatus === 'REQUIRES_AMENDMENT' ? 'bg-rose-100 text-rose-800' :
+                            'bg-amber-100 text-amber-800'
+                          }`}>
+                            {doc.approvalStatus === 'APPROVED' ? 'Approved by DSAC' :
+                             doc.approvalStatus === 'REQUIRES_AMENDMENT' ? 'Revision Requested' :
+                             'Pending Review'}
+                          </span>
+                          <span className="text-[10px] text-slate-400">
+                            {doc.uploadedAt ? doc.uploadedAt.split('T')[0] : '14 Jul 2025'}
+                          </span>
+                          <button
+                            onClick={() => handleDownloadDoc(doc.fileName || doc.title, doc.title, doc.category)}
+                            title="Download official file"
+                            className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-slate-100 rounded-lg transition-colors"
+                          >
+                            <Download className="w-3.5 h-3.5" />
+                          </button>
+                          {doc.approvalStatus !== 'APPROVED' && (
+                            <button
+                              onClick={() => handleDeleteDoc(doc.id, doc.title)}
+                              title="Archive document"
+                              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                         </div>
                       </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <span className="text-[10px] text-slate-400">{doc.date}</span>
-                        <button
-                          onClick={() => {
-                            setActionSuccess(`Downloaded ${doc.name}`);
-                            setTimeout(() => setActionSuccess(null), 1500);
-                          }}
-                          className="p-1 text-slate-500 hover:text-indigo-600 hover:bg-slate-100 rounded"
-                        >
-                          <Download className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
+                    ))
+                  )}
                 </div>
               </div>
             </div>
@@ -1522,40 +1857,127 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
       {/* Modal 1: Upload PoE Document */}
       {activeModal === 'uploadPoE' && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-200 p-5 space-y-4 text-xs">
+          <div className="bg-white rounded-2xl max-w-lg w-full shadow-2xl border border-slate-200 p-5 space-y-4 text-xs">
             <div className="flex items-center justify-between pb-2 border-b border-slate-100">
               <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2">
                 <Upload className="w-4 h-4 text-indigo-600" />
-                <span>Upload Verified Portfolio of Evidence</span>
+                <span>Upload Verified Statutory Document &amp; PoE</span>
               </h3>
               <button onClick={() => setActiveModal(null)} className="text-slate-400 hover:text-slate-600">
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <div className="p-6 border-2 border-dashed border-indigo-200 rounded-xl bg-indigo-50/40 text-center space-y-2">
-              <UploadCloud className="w-8 h-8 text-indigo-500 mx-auto" />
-              <div className="font-bold text-slate-800">Drag and drop verified PoE files here</div>
-              <div className="text-[10px] text-slate-400">PDF attendance registers, signed declarations, photos (Max 50MB)</div>
-            </div>
+            <form onSubmit={handleUploadDocument} className="space-y-3">
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Document Title</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Ubuntu_Arts_Q2_Workshops_Attendance_Register"
+                  value={uploadDocTitle}
+                  onChange={(e) => setUploadDocTitle(e.target.value)}
+                  className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:bg-white focus:outline-none focus:ring-1 focus:ring-indigo-600"
+                />
+              </div>
 
-            <div className="flex justify-end gap-2 pt-2">
-              <button onClick={() => setActiveModal(null)} className="px-3 py-1.5 border rounded-lg text-slate-600">
-                Cancel
-              </button>
-              <button 
-                onClick={() => {
-                  setActionSuccess('Portfolio of Evidence successfully uploaded and linked to Quarter 2 file.');
-                  setTimeout(() => {
-                    setActionSuccess(null);
-                    setActiveModal(null);
-                  }, 1200);
-                }} 
-                className="px-4 py-1.5 bg-indigo-700 text-white rounded-lg font-semibold"
-              >
-                Upload &amp; Save
-              </button>
-            </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Document Category</label>
+                  <select
+                    value={uploadDocCategory}
+                    onChange={(e) => setUploadDocCategory(e.target.value as any)}
+                    className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs"
+                  >
+                    <option value="PORTFOLIO_OF_EVIDENCE">Quarterly Portfolio of Evidence (PoE)</option>
+                    <option value="GOVERNANCE_CHARTER">Governance &amp; Board Resolution</option>
+                    <option value="FINANCIAL_REPORT">Audited Financial Statements (AFS)</option>
+                    <option value="OPERATIONAL_PLAN">Annual Performance Plan (APP)</option>
+                    <option value="ANNUAL_REPORT">Annual Statutory Report</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Simulated File Size</label>
+                  <select
+                    value={uploadFileSize}
+                    onChange={(e) => setUploadFileSize(e.target.value)}
+                    className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs"
+                  >
+                    <option value="2.4 MB">2.4 MB (Standard PDF)</option>
+                    <option value="4.2 MB">4.2 MB (Comprehensive PoE)</option>
+                    <option value="6.8 MB">6.8 MB (Audited Statements)</option>
+                    <option value="850 KB">850 KB (Certificate / Pin)</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Upload Drop Zone / Input */}
+              <div className="p-4 border-2 border-dashed border-indigo-200 rounded-xl bg-indigo-50/40 text-center space-y-2 relative">
+                <input
+                  type="file"
+                  accept=".pdf,.xlsx,.csv,.docx"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      setUploadFileName(file.name);
+                      if (!uploadDocTitle) setUploadDocTitle(file.name.replace(/\.[^/.]+$/, ""));
+                      const mb = (file.size / (1024 * 1024)).toFixed(1);
+                      setUploadFileSize(`${mb} MB`);
+                    }
+                  }}
+                  className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                />
+                <UploadCloud className="w-7 h-7 text-indigo-600 mx-auto" />
+                <div className="font-bold text-slate-800">
+                  {uploadFileName ? uploadFileName : "Click or drag & drop evidence file here"}
+                </div>
+                <div className="text-[10px] text-slate-500">
+                  Supported formats: PDF registers, signed resolutions, financial statements
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Executive Summary / Audit Notes</label>
+                <textarea
+                  rows={2}
+                  placeholder="Summary of participant verification, Section 38 audit trail, and vouchers attached..."
+                  value={uploadSummary}
+                  onChange={(e) => setUploadSummary(e.target.value)}
+                  className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:bg-white focus:outline-none focus:ring-1 focus:ring-indigo-600"
+                />
+              </div>
+
+              <div className="flex items-start gap-2 pt-1">
+                <input
+                  type="checkbox"
+                  id="section38affirm"
+                  checked={section38Confirmed}
+                  onChange={(e) => setSection38Confirmed(e.target.checked)}
+                  className="mt-0.5 rounded text-indigo-600 focus:ring-indigo-500"
+                />
+                <label htmlFor="section38affirm" className="text-[11px] text-slate-600 select-none">
+                  I affirm that this statutory evidence is submitted in compliance with Section 38(1)(j) of the PFMA and represents verified institutional activities.
+                </label>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setActiveModal(null)}
+                  className="px-3 py-1.5 border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50"
+                >
+                  Cancel
+                </button>
+                <button 
+                  type="submit"
+                  disabled={!section38Confirmed}
+                  className="px-4 py-1.5 bg-indigo-700 hover:bg-indigo-800 disabled:opacity-50 text-white rounded-lg font-semibold shadow-xs transition-colors"
+                >
+                  Upload &amp; Log to DSAC
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
@@ -1574,34 +1996,71 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
               </button>
             </div>
 
-            <form onSubmit={handleSupportSubmit} className="space-y-3">
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">Quarterly Cycle</label>
-                <select className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg">
-                  <option>Quarter 2 (Jul - Sep 2025)</option>
-                  <option>Quarter 3 (Oct - Dec 2025)</option>
-                </select>
+            <form onSubmit={handleReportSubmit} className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Quarterly Cycle</label>
+                  <select
+                    value={reportQuarter}
+                    onChange={(e) => setReportQuarter(e.target.value as any)}
+                    className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg font-bold text-slate-800"
+                  >
+                    <option value="Q1">Quarter 1 (Apr - Jun 2025)</option>
+                    <option value="Q2">Quarter 2 (Jul - Sep 2025)</option>
+                    <option value="Q3">Quarter 3 (Oct - Dec 2025)</option>
+                    <option value="Q4">Quarter 4 (Jan - Mar 2026)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">Expenditure Claimed (ZAR)</label>
+                  <input
+                    type="number"
+                    value={reportExpenditure}
+                    onChange={(e) => setReportExpenditure(e.target.value)}
+                    className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg font-bold text-slate-800"
+                  />
+                </div>
               </div>
 
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">Expenditure Claimed in Quarter (ZAR)</label>
-                <input type="number" defaultValue="1200000" className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg" />
+                <label className="block font-semibold text-slate-700 mb-1">Linked Portfolio of Evidence (PoE)</label>
+                <select
+                  value={reportPoeDocId}
+                  onChange={(e) => setReportPoeDocId(e.target.value)}
+                  className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs"
+                >
+                  <option value="">-- Select uploaded statutory evidence document --</option>
+                  {entityDocuments.map(doc => (
+                    <option key={doc.id} value={doc.id}>
+                      {doc.fileName || doc.title} ({doc.category.replace(/_/g, ' ')})
+                    </option>
+                  ))}
+                </select>
               </div>
 
               <div>
                 <label className="block font-semibold text-slate-700 mb-1">Accounting Officer Declaration</label>
                 <textarea
                   rows={2}
-                  defaultValue="I hereby affirm that the programmatic targets and expenditure reported reflect verified records in accordance with PFMA Section 38."
-                  className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs"
+                  value={reportDeclaration}
+                  onChange={(e) => setReportDeclaration(e.target.value)}
+                  className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:bg-white focus:outline-none focus:ring-1 focus:ring-indigo-600"
                 />
               </div>
 
-              <div className="flex justify-end gap-2 pt-2">
-                <button type="button" onClick={() => setActiveModal(null)} className="px-3 py-1.5 border rounded-lg text-slate-600">
+              <div className="p-3 bg-emerald-50/70 border border-emerald-200 rounded-xl text-[11px] text-emerald-900 flex items-start gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                <span>
+                  Submitting this statutory report triggers automated cross-reconciliation with the Department Oversight Dashboard and updates Section 38 risk calculation.
+                </span>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+                <button type="button" onClick={() => setActiveModal(null)} className="px-3 py-1.5 border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50">
                   Cancel
                 </button>
-                <button type="submit" className="px-4 py-1.5 bg-indigo-700 text-white rounded-lg font-semibold">
+                <button type="submit" className="px-4 py-1.5 bg-indigo-700 hover:bg-indigo-800 text-white rounded-lg font-semibold shadow-xs transition-colors">
                   Sign &amp; Transmit to DSAC
                 </button>
               </div>
