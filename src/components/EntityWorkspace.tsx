@@ -18,7 +18,9 @@ import {
   ChevronDown,
   Layers,
   Sparkles,
-  LogOut
+  LogOut,
+  Coins,
+  Download
 } from 'lucide-react';
 import { store } from '../services/store';
 import { 
@@ -336,6 +338,116 @@ export const EntityWorkspace: React.FC<EntityWorkspaceProps> = ({
       {activeTab === 'reports' && (
         <div className="space-y-6">
           
+          {/* Statutory December Budget Mandates Card */}
+          <div className="bg-gradient-to-br from-emerald-950 via-slate-900 to-teal-950 text-white rounded-xl p-6 border border-emerald-900/60 shadow-md">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-4 border-b border-emerald-800/40">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="px-2.5 py-0.5 rounded text-[11px] font-black uppercase tracking-wider bg-emerald-700 text-emerald-100">
+                    Statutory PFMA &amp; Treasury Mandate
+                  </span>
+                  <span className="text-xs text-emerald-300 font-bold">
+                    Section 38(1)(j) Compliance
+                  </span>
+                </div>
+                <h2 className="text-lg font-black text-white mt-1">
+                  December Statutory Budget Submissions
+                </h2>
+                <p className="text-xs text-emerald-200/80">
+                  Statutory Rule: Current financial year budget must be submitted in <strong>December into 4 quarters</strong>. Budget for the following year must be submitted in <strong>December</strong>.
+                </p>
+              </div>
+
+              <span className="self-start md:self-auto px-3 py-1 rounded-md text-xs font-bold bg-emerald-800/80 border border-emerald-500/40 text-emerald-200">
+                December Submissions Verified
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-5">
+              {/* Box 1: Current Year Budget in 4 Quarters */}
+              <div className="bg-white/5 border border-white/10 rounded-xl p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-black uppercase tracking-wider text-emerald-300">
+                    Current Year Budget (2024/25) • 4 Quarters
+                  </span>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                    Submitted Dec
+                  </span>
+                </div>
+
+                <div className="text-xs text-slate-300">
+                  Approved Annual Baseline: <strong className="text-white">R {((entity.budgetAllocationZAR) / 1_000_000).toFixed(2)}M ZAR</strong>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 pt-1">
+                  <div className="p-2.5 rounded-lg bg-white/5 border border-white/10">
+                    <div className="text-[10px] font-bold text-emerald-300">Q1 Tranche (25%)</div>
+                    <div className="text-sm font-black text-white">R {((entity.budgetAllocationZAR * 0.25) / 1_000_000).toFixed(2)}M</div>
+                    <div className="text-[10px] text-slate-400">Apr–Jun • Disbursed</div>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-white/5 border border-white/10">
+                    <div className="text-[10px] font-bold text-emerald-300">Q2 Tranche (25%)</div>
+                    <div className="text-sm font-black text-white">R {((entity.budgetAllocationZAR * 0.25) / 1_000_000).toFixed(2)}M</div>
+                    <div className="text-[10px] text-slate-400">Jul–Sep • Disbursed</div>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-white/5 border border-white/10">
+                    <div className="text-[10px] font-bold text-emerald-300">Q3 Tranche (25%)</div>
+                    <div className="text-sm font-black text-white">R {((entity.budgetAllocationZAR * 0.25) / 1_000_000).toFixed(2)}M</div>
+                    <div className="text-[10px] text-slate-400">Oct–Dec • Disbursed</div>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-white/5 border border-white/10">
+                    <div className="text-[10px] font-bold text-sky-300">Q4 Tranche (25%)</div>
+                    <div className="text-sm font-black text-white">R {((entity.budgetAllocationZAR * 0.25) / 1_000_000).toFixed(2)}M</div>
+                    <div className="text-[10px] text-slate-400">Jan–Mar • Pending Gate</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Box 2: Following Year Budget (2025/26 MTEF) */}
+              <div className="bg-white/5 border border-white/10 rounded-xl p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-black uppercase tracking-wider text-teal-300">
+                    Following Year Budget (2025/26 MTEF)
+                  </span>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-teal-500/20 text-teal-300 border border-teal-500/30">
+                    Submitted Dec
+                  </span>
+                </div>
+
+                <div className="space-y-1.5 text-xs text-slate-300">
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400">Statutory Deadline:</span>
+                    <strong className="text-white">31 December 2024</strong>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400">Actual Submission:</span>
+                    <strong className="text-emerald-300">12 December 2024 (On Time)</strong>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400">Requested Following Year Baseline:</span>
+                    <strong className="text-white">R {((entity.budgetAllocationZAR * 1.05) / 1_000_000).toFixed(2)}M ZAR</strong>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400">Accounting Officer Endorsement:</span>
+                    <strong className="text-white">{entity.headOfEntity} (Signed)</strong>
+                  </div>
+                </div>
+
+                <div className="pt-1">
+                  <button
+                    onClick={() => {
+                      alert(`December Budget Submission Dossier for ${entity.name} downloaded.`);
+                    }}
+                    className="w-full py-2 px-3 rounded-lg bg-white/10 hover:bg-white/15 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer border border-white/10"
+                  >
+                    <Download className="w-3.5 h-3.5 text-emerald-300" />
+                    <span>Download December Budget Dossier (PDF &amp; Spreadsheets)</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
           {/* Active Submissions List */}
           <div className="bg-white rounded-xl p-6 border border-slate-200 shadow-sm">
             <div className="flex items-center justify-between pb-4 border-b border-slate-100">

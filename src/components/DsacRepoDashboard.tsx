@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Building2,
   Users,
@@ -28,7 +28,9 @@ import {
   ChevronRight,
   ChevronLeft,
   ArrowLeft,
-  LogOut
+  ArrowRight,
+  LogOut,
+  Settings
 } from 'lucide-react';
 import { store } from '../services/store';
 import { SouthAfricanCoatOfArms, DsacOfficialLogo } from './SouthAfricanCoatOfArms';
@@ -41,6 +43,8 @@ import { DsacComplianceView } from './features/DsacComplianceView';
 import { DsacSupportView } from './features/DsacSupportView';
 import { DsacReportsView } from './features/DsacReportsView';
 import { DsacRiskView } from './features/DsacRiskView';
+import { DsacAnalyticsView } from './features/DsacAnalyticsView';
+import { DsacSettingsView } from './features/DsacSettingsView';
 import { AIPerformanceAnalyst } from './AIPerformanceAnalyst';
 import { TaskManagementView } from './TaskManagementView';
 import { AuditLogView } from './AuditLogView';
@@ -65,53 +69,140 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
   const [activeSidebar, setActiveSidebar] = useState<string>(initialSection);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedYear, setSelectedYear] = useState<string>('This Financial Year');
-  const [supportFilter, setSupportFilter] = useState<string>('This Year');
   const [showNotifications, setShowNotifications] = useState<boolean>(false);
   const [showProfileMenu, setShowProfileMenu] = useState<boolean>(false);
   const [selectedDrawerEntity, setSelectedDrawerEntity] = useState<PublicEntity | null>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState<boolean>(false);
+  const [kpiFilter, setKpiFilter] = useState<'ALL' | 'PUBLIC_ENTITY' | 'NPO'>('ALL');
+
+  // Real-time store subscription
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    return store.subscribe(() => setTick(t => t + 1));
+  }, []);
 
   // Dedicated Side View feature state (covers all 26 Public Entities & 6 NPOs)
   const [sideViewFeature, setSideViewFeature] = useState<DsacFeatureId>('compliance');
   const [isSideViewOpen, setIsSideViewOpen] = useState<boolean>(false);
   const [selectedSideViewEntityId, setSelectedSideViewEntityId] = useState<string>('ent-sahra');
+  const [sideViewEntityFilter, setSideViewEntityFilter] = useState<'ALL' | 'PUBLIC_ENTITY' | 'NPO'>('ALL');
 
-  const openFeatureInSideView = (feature: DsacFeatureId, entityId?: string) => {
+  const openFeatureInSideView = (feature: DsacFeatureId, entityId?: string, entityFilter?: 'ALL' | 'PUBLIC_ENTITY' | 'NPO') => {
     setSideViewFeature(feature);
+    if (entityFilter) {
+      setSideViewEntityFilter(entityFilter);
+    }
     if (entityId) {
       setSelectedSideViewEntityId(entityId);
+    } else if (feature === 'support') {
+      setSelectedSideViewEntityId('ent-sahra');
     }
     setIsSideViewOpen(true);
     setActiveSidebar(feature);
   };
 
   const entities = store.entities;
+  const pulse = store.getPerformancePulse();
+
+  // Aggregate calculations across all 26 Public Entities and 6 NPOs (billions and millions)
+  const totalApprovedBudget = entities.reduce((sum, e) => sum + (e.budgetAllocationZAR || 0), 0);
+  const totalTransferredToDate = entities.reduce((sum, e) => sum + (e.transferredAmountZAR || 0), 0);
+  const totalReportedExpenditure = entities.reduce((sum, e) => sum + (e.reportedExpenditureZAR || 0), 0);
+  const remainingDisbursement = Math.max(0, totalApprovedBudget - totalTransferredToDate);
+  const transferRate = totalApprovedBudget > 0 ? (totalTransferredToDate / totalApprovedBudget) * 100 : 0;
+  const expenditureRate = totalTransferredToDate > 0 ? (totalReportedExpenditure / totalTransferredToDate) * 100 : 0;
+  const highRiskEntitiesCount = entities.filter(e => e.riskLevel === 'HIGH' || e.riskLevel === 'CRITICAL').length;
+  const highRiskEntities = entities.filter(e => e.riskLevel === 'HIGH' || e.riskLevel === 'CRITICAL');
+
+  // Institution category breakdowns for graphs
+  const peEntities = entities.filter(e => e.type === 'PUBLIC_ENTITY');
+  const npoEntities = entities.filter(e => e.type === 'NPO');
+  const peBudget = peEntities.reduce((sum, e) => sum + (e.budgetAllocationZAR || 0), 0);
+  const npoBudget = npoEntities.reduce((sum, e) => sum + (e.budgetAllocationZAR || 0), 0);
+  const peTransfer = peEntities.reduce((sum, e) => sum + (e.transferredAmountZAR || 0), 0);
+  const npoTransfer = npoEntities.reduce((sum, e) => sum + (e.transferredAmountZAR || 0), 0);
+  const pePercentage = totalApprovedBudget > 0 ? (peBudget / totalApprovedBudget) * 100 : 87.9;
+  const npoPercentage = totalApprovedBudget > 0 ? (npoBudget / totalApprovedBudget) * 100 : 12.1;
+
+  const formatZAR = (val: number) => {
+    if (val >= 1_000_000_000) {
+      return `R ${(val / 1_000_000_000).toFixed(2)}B`;
+    }
+    if (val >= 1_000_000) {
+      return `R ${(val / 1_000_000).toFixed(1)}M`;
+    }
+    return `R ${val.toLocaleString()}`;
+  };
+
+  // Year-based calculations for Budget Utilization card
+  const getYearData = () => {
+    if (selectedYear.includes('2024/2025')) {
+      const budget = Math.round(totalApprovedBudget * 0.945);
+      const spent = Math.round(budget * 0.962);
+      const rem = budget - spent;
+      return {
+        label: '2024/2025 Financial Year',
+        approved: budget,
+        utilized: spent,
+        remaining: rem,
+        utilPercent: 96.2,
+        remPercent: 3.8,
+        statusTitle: 'Audited Expenditure',
+      };
+    } else if (selectedYear.includes('2023/2024')) {
+      const budget = Math.round(totalApprovedBudget * 0.892);
+      const spent = Math.round(budget * 0.978);
+      const rem = budget - spent;
+      return {
+        label: '2023/2024 Financial Year',
+        approved: budget,
+        utilized: spent,
+        remaining: rem,
+        utilPercent: 97.8,
+        remPercent: 2.2,
+        statusTitle: 'Audited Expenditure',
+      };
+    } else {
+      return {
+        label: '2025/2026 (Current)',
+        approved: totalApprovedBudget,
+        utilized: totalTransferredToDate,
+        remaining: remainingDisbursement,
+        utilPercent: Math.round(transferRate * 10) / 10,
+        remPercent: Math.round((100 - transferRate) * 10) / 10,
+        statusTitle: 'Transferred to Date',
+      };
+    }
+  };
+
+  const yearMetrics = getYearData();
 
   const currentUser = store.currentUser || {
     name: 'Sicelo Sakhile Mkhize',
     role: 'DSAC_ADMIN',
-    designation: 'Chief Director: Public Entities Oversight & Governance',
+    designation: 'Chief Director: Public Entities Governance & Support',
     email: 'sakhilesicelo94@gmail.com'
   };
 
-  // Stacked KPI Performance by Entity (Matches image.png)
-  const entityKpiData = [
-    { name: 'Entity A', fullName: 'Entity A (SAHRA)', achieved: 65, inProgress: 20, notAchieved: 15, id: 'ent-sahra' },
-    { name: 'Entity B', fullName: 'Entity B (NAC)', achieved: 48, inProgress: 27, notAchieved: 25, id: 'ent-nac' },
-    { name: 'Entity C', fullName: 'Entity C (NFVF)', achieved: 74, inProgress: 16, notAchieved: 10, id: 'ent-nfvf' },
-    { name: 'Entity D', fullName: 'Entity D (Freedom Park)', achieved: 38, inProgress: 32, notAchieved: 30, id: 'ent-fp' },
-    { name: 'Entity E', fullName: 'Entity E (Ubuntu Arts)', achieved: 82, inProgress: 11, notAchieved: 7, id: 'ent-ubuntu-arts' },
+  // Actual Names of Entities and NPOs currently under the Department
+  const actualEntityKpis = [
+    { name: 'South African Heritage Resources Agency (SAHRA)', shortName: 'SAHRA', type: 'PUBLIC_ENTITY', achieved: 65, inProgress: 20, notAchieved: 15, id: 'ent-sahra' },
+    { name: 'National Arts Council of South Africa (NAC)', shortName: 'NAC', type: 'PUBLIC_ENTITY', achieved: 52, inProgress: 23, notAchieved: 25, id: 'ent-nac' },
+    { name: 'National Film and Video Foundation (NFVF)', shortName: 'NFVF', type: 'PUBLIC_ENTITY', achieved: 74, inProgress: 16, notAchieved: 10, id: 'ent-nfvf' },
+    { name: 'Freedom Park Heritage Destination', shortName: 'Freedom Park', type: 'PUBLIC_ENTITY', achieved: 68, inProgress: 20, notAchieved: 12, id: 'ent-freedom-park' },
+    { name: 'The South African State Theatre (Pretoria)', shortName: 'State Theatre', type: 'PUBLIC_ENTITY', achieved: 71, inProgress: 19, notAchieved: 10, id: 'ent-state-theatre' },
+    { name: 'Ubuntu Arts Community NPO', shortName: 'Ubuntu Arts NPO', type: 'NPO', achieved: 82, inProgress: 11, notAchieved: 7, id: 'ent-ubuntu-arts' },
+    { name: 'Business and Arts South Africa (BASA)', shortName: 'BASA NPO', type: 'NPO', achieved: 88, inProgress: 8, notAchieved: 4, id: 'ent-basa' },
+    { name: 'Boxing South Africa (BSA)', shortName: 'Boxing SA', type: 'PUBLIC_ENTITY', achieved: 40, inProgress: 25, notAchieved: 35, id: 'ent-bsa' },
+    { name: 'Iziko Museums of South Africa', shortName: 'Iziko Museums', type: 'PUBLIC_ENTITY', achieved: 77, inProgress: 15, notAchieved: 8, id: 'ent-iziko' },
+    { name: 'Market Theatre Foundation', shortName: 'Market Theatre', type: 'PUBLIC_ENTITY', achieved: 79, inProgress: 14, notAchieved: 7, id: 'ent-market-theatre' },
+    { name: 'South African Cultural Observatory (SACO)', shortName: 'SACO NPO', type: 'NPO', achieved: 85, inProgress: 10, notAchieved: 5, id: 'ent-saco' },
+    { name: 'Blind SA Accessible Cultural Media', shortName: 'Blind SA NPO', type: 'NPO', achieved: 80, inProgress: 12, notAchieved: 8, id: 'ent-blind-sa' },
   ];
 
-  // Support Given by Type (Exact match to image.png colors)
-  const supportTypeData = [
-    { type: 'Financial Support', count: 18, color: 'bg-[#3b82f6]', max: 20 },
-    { type: 'Capacity Building', count: 12, color: 'bg-[#06b6d4]', max: 20 },
-    { type: 'Technical Support', count: 10, color: 'bg-[#38bdf8]', max: 20 },
-    { type: 'Governance Support', count: 6, color: 'bg-[#6366f1]', max: 20 },
-    { type: 'Programme Support', count: 5, color: 'bg-[#14b8a6]', max: 20 },
-    { type: 'Infrastructure Support', count: 3, color: 'bg-[#f59e0b]', max: 20 },
-  ];
+  const displayedEntityKpis = kpiFilter === 'ALL'
+    ? actualEntityKpis
+    : actualEntityKpis.filter(e => e.type === kpiFilter);
 
   const sidebarItems = [
     { id: 'overview', label: 'Overview', icon: Building2 },
@@ -123,7 +214,7 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
     { id: 'risks', label: 'Risk & Alerts', icon: AlertTriangle },
     { id: 'analytics', label: 'Analytics', icon: BarChart3 },
     { id: 'approvals', label: 'Approvals', icon: FileCheck },
-    { id: 'settings', label: 'Settings', icon: Filter },
+    { id: 'settings', label: 'Settings', icon: Settings },
   ];
 
   return (
@@ -152,7 +243,15 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
                 <button
                   key={item.id}
                   onClick={() => {
-                    setActiveSidebar(item.id);
+                    if (item.id === 'support') {
+                      openFeatureInSideView('support', 'ent-sahra');
+                    } else if (item.id === 'compliance' || item.id === 'performance' || item.id === 'reports' || item.id === 'risks') {
+                      openFeatureInSideView(item.id as DsacFeatureId);
+                    } else if (item.id === 'entities') {
+                      openFeatureInSideView('entities');
+                    } else {
+                      setActiveSidebar(item.id);
+                    }
                     if (onNavigateToSection && item.id !== 'overview') {
                       onNavigateToSection(item.id);
                     }
@@ -259,386 +358,176 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
         {activeSidebar === 'overview' && (
           <div className="p-4 sm:p-6 space-y-5 overflow-y-auto">
           
-          {/* DSAC Official Feature Toolbar: Click any feature to open dedicated Side View for all 26 PEs and 6 NPOs */}
-          <div className="bg-white border border-slate-200 px-4 py-3 rounded-xl shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3">
-            <div className="flex items-center gap-2.5 text-xs">
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-600 animate-pulse shrink-0"></span>
-              <div>
-                <span className="font-extrabold text-slate-900 tracking-wide text-xs">
-                  Statutory Oversight Features
-                </span>
-                <span className="text-[11px] text-slate-500 block sm:inline sm:ml-2">
-                  (Side-View Inspector across all 26 Public Entities &amp; 6 NPOs)
-                </span>
-              </div>
-            </div>
-
-            {/* Quick Feature Switcher Buttons for Side View */}
-            <div className="flex items-center gap-1.5 flex-wrap">
-              {[
-                { id: 'compliance', label: 'Compliance', icon: ShieldCheck, color: 'text-emerald-700' },
-                { id: 'performance', label: 'Performance', icon: Target, color: 'text-teal-700' },
-                { id: 'support', label: 'Support & Funding', icon: Coins, color: 'text-blue-700' },
-                { id: 'reports', label: 'Reports & PoE', icon: FileText, color: 'text-indigo-700' },
-                { id: 'entities', label: '26 PEs & 6 NPOs', icon: Building2, color: 'text-slate-700' },
-                { id: 'risks', label: 'Risk & Alerts', icon: AlertTriangle, color: 'text-amber-700' },
-              ].map(feat => {
-                const Icon = feat.icon;
-                const isCurrentActive = isSideViewOpen && sideViewFeature === feat.id;
-                return (
-                  <button
-                    key={feat.id}
-                    onClick={() => openFeatureInSideView(feat.id as DsacFeatureId)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
-                      isCurrentActive
-                        ? 'bg-emerald-800 text-white shadow-xs ring-1 ring-emerald-400/40'
-                        : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
-                    }`}
-                  >
-                    <Icon className={`w-3.5 h-3.5 ${isCurrentActive ? 'text-emerald-300' : feat.color}`} />
-                    <span>{feat.label}</span>
-                    {isCurrentActive && (
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span>
-                    )}
-                  </button>
-                );
-              })}
-
-              {isSideViewOpen && (
-                <button
-                  onClick={() => {
-                    setIsSideViewOpen(false);
-                    setActiveSidebar('overview');
-                  }}
-                  className="px-2.5 py-1.5 rounded-lg text-xs font-semibold text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-colors ml-1 cursor-pointer"
-                  title="Close Side View"
-                >
-                  Close Side View ✕
-                </button>
-              )}
-            </div>
-          </div>
-
           {/* OVERVIEW DASHBOARD CONTENT (Always rendered) */}
           <div className="space-y-5">
           
-          {/* ROW 1: 5 STAT CARDS (Portfolio Overview) */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4">
-            {/* Card 1: 26 Public Entities */}
-            <div 
-              onClick={() => openFeatureInSideView('entities')}
-              className="bg-teal-50/70 hover:bg-teal-50 border border-teal-200/80 rounded-xl p-3.5 flex flex-col justify-between transition-shadow hover:shadow-xs cursor-pointer group"
-            >
-              <div className="w-8 h-8 rounded-lg bg-teal-100 text-teal-700 flex items-center justify-center mb-2 group-hover:scale-105 transition-transform">
-                <Building2 className="w-4 h-4" />
-              </div>
-              <div>
-                <div className="text-2xl font-black text-slate-900 leading-none">26</div>
-                <div className="text-xs font-medium text-slate-600 mt-1 flex items-center justify-between">
-                  <span>Public Entities</span>
-                  <span className="text-[10px] text-teal-700 font-bold opacity-0 group-hover:opacity-100 transition-opacity">Side View →</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Card 2: 6 NPOs */}
-            <div 
-              onClick={() => openFeatureInSideView('entities')}
-              className="bg-sky-50/70 hover:bg-sky-50 border border-sky-200/80 rounded-xl p-3.5 flex flex-col justify-between transition-shadow hover:shadow-xs cursor-pointer group"
-            >
-              <div className="w-8 h-8 rounded-lg bg-sky-100 text-sky-700 flex items-center justify-center mb-2 group-hover:scale-105 transition-transform">
-                <Users className="w-4 h-4" />
-              </div>
-              <div>
-                <div className="text-2xl font-black text-slate-900 leading-none">6</div>
-                <div className="text-xs font-medium text-slate-600 mt-1 flex items-center justify-between">
-                  <span>NPOs</span>
-                  <span className="text-[10px] text-sky-700 font-bold opacity-0 group-hover:opacity-100 transition-opacity">Side View →</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Card 3: 32 Total Organisations */}
-            <div 
-              onClick={() => openFeatureInSideView('entities')}
-              className="bg-blue-50/70 hover:bg-blue-50 border border-blue-200/80 rounded-xl p-3.5 flex flex-col justify-between transition-shadow hover:shadow-xs cursor-pointer group"
-            >
-              <div className="w-8 h-8 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center mb-2 group-hover:scale-105 transition-transform">
-                <Layers className="w-4 h-4" />
-              </div>
-              <div>
-                <div className="text-2xl font-black text-slate-900 leading-none">32</div>
-                <div className="text-xs font-medium text-slate-600 mt-1 flex items-center justify-between">
-                  <span>Total Organisations</span>
-                  <span className="text-[10px] text-blue-700 font-bold opacity-0 group-hover:opacity-100 transition-opacity">All 32 Side View →</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Card 4: 24 Reports Submitted (75%) */}
-            <div 
-              onClick={() => openFeatureInSideView('reports')}
-              className="bg-emerald-50/70 hover:bg-emerald-50 border border-emerald-200/80 rounded-xl p-3.5 flex flex-col justify-between transition-shadow hover:shadow-xs cursor-pointer group"
-            >
-              <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center mb-2 group-hover:scale-105 transition-transform">
-                <FileCheck className="w-4 h-4" />
-              </div>
-              <div>
-                <div className="text-2xl font-black text-slate-900 leading-none">24</div>
-                <div className="text-xs font-medium text-slate-600 mt-1 flex items-center justify-between">
-                  <div>Reports Submitted <span className="text-emerald-700 font-bold block sm:inline">This Quarter (75%)</span></div>
-                  <span className="text-[10px] text-emerald-700 font-bold opacity-0 group-hover:opacity-100 transition-opacity">Side View →</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Card 5: 8 Reports Outstanding (25%) */}
-            <div 
-              onClick={() => openFeatureInSideView('compliance')}
-              className="bg-rose-50/70 hover:bg-rose-50 border border-rose-200/80 rounded-xl p-3.5 flex flex-col justify-between transition-shadow hover:shadow-xs col-span-2 sm:col-span-1 cursor-pointer group"
-            >
-              <div className="w-8 h-8 rounded-lg bg-rose-100 text-rose-700 flex items-center justify-center mb-2 group-hover:scale-105 transition-transform">
-                <AlertCircle className="w-4 h-4" />
-              </div>
-              <div>
-                <div className="text-2xl font-black text-slate-900 leading-none">8</div>
-                <div className="text-xs font-medium text-slate-600 mt-1 flex items-center justify-between">
-                  <div>Reports Outstanding <span className="text-rose-700 font-bold block sm:inline">(25%)</span></div>
-                  <span className="text-[10px] text-rose-700 font-bold opacity-0 group-hover:opacity-100 transition-opacity">Side View →</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* ROW 2: 4 STAT CARDS (KPI Delivery Breakdown) */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-            {/* Total KPIs */}
-            <div 
-              onClick={() => openFeatureInSideView('performance')}
-              className="bg-blue-50/50 hover:bg-blue-50/80 border border-blue-200/60 rounded-xl p-3.5 flex items-center gap-3 cursor-pointer group"
-            >
-              <div className="w-9 h-9 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
-                <Target className="w-4 h-4" />
-              </div>
-              <div>
-                <div className="text-xl font-black text-slate-900 leading-none">132</div>
-                <div className="text-xs text-slate-600 font-medium">Total KPIs (Side View)</div>
-              </div>
-            </div>
-
-            {/* Achieved */}
-            <div 
-              onClick={() => openFeatureInSideView('performance')}
-              className="bg-emerald-50/50 hover:bg-emerald-50/80 border border-emerald-200/60 rounded-xl p-3.5 flex items-center gap-3 cursor-pointer group"
-            >
-              <div className="w-9 h-9 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
-                <CheckCircle2 className="w-4 h-4" />
-              </div>
-              <div>
-                <div className="text-xl font-black text-slate-900 leading-none">
-                  78 <span className="text-xs font-semibold text-emerald-700">(59%)</span>
-                </div>
-                <div className="text-xs text-slate-600 font-medium">Achieved (Inspect)</div>
-              </div>
-            </div>
-
-            {/* In Progress */}
-            <div 
-              onClick={() => openFeatureInSideView('performance')}
-              className="bg-amber-50/50 hover:bg-amber-50/80 border border-amber-200/60 rounded-xl p-3.5 flex items-center gap-3 cursor-pointer group"
-            >
-              <div className="w-9 h-9 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
-                <Clock className="w-4 h-4" />
-              </div>
-              <div>
-                <div className="text-xl font-black text-slate-900 leading-none">
-                  36 <span className="text-xs font-semibold text-amber-700">(27%)</span>
-                </div>
-                <div className="text-xs text-slate-600 font-medium">In Progress (Inspect)</div>
-              </div>
-            </div>
-
-            {/* Not Achieved */}
-            <div 
-              onClick={() => openFeatureInSideView('risks')}
-              className="bg-rose-50/50 hover:bg-rose-50/80 border border-rose-200/60 rounded-xl p-3.5 flex items-center gap-3 cursor-pointer group"
-            >
-              <div className="w-9 h-9 rounded-full bg-rose-100 text-rose-700 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
-                <XCircle className="w-4 h-4" />
-              </div>
-              <div>
-                <div className="text-xl font-black text-slate-900 leading-none">
-                  18 <span className="text-xs font-semibold text-rose-700">(14%)</span>
-                </div>
-                <div className="text-xs text-slate-600 font-medium">Not Achieved (Risks)</div>
-              </div>
-            </div>
-          </div>
-
-          {/* ROW 3: 4 STAT CARDS (Financial & High Risk Summary) */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-            {/* Total Support Approved */}
-            <div 
-              onClick={() => openFeatureInSideView('support')}
-              className="bg-emerald-50/70 hover:bg-emerald-50 border border-emerald-200/80 rounded-xl p-3.5 flex items-center gap-3 cursor-pointer group"
-            >
-              <div className="w-9 h-9 rounded-lg bg-emerald-100 text-emerald-800 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
-                <Coins className="w-4 h-4" />
-              </div>
-              <div>
-                <div className="text-lg font-black text-slate-900 leading-none">R 125.4M</div>
-                <div className="text-xs text-slate-600 font-medium">Support &amp; Funding →</div>
-              </div>
-            </div>
-
-            {/* Total Amount Utilized */}
-            <div 
-              onClick={() => openFeatureInSideView('support')}
-              className="bg-indigo-50/70 hover:bg-indigo-50 border border-indigo-200/80 rounded-xl p-3.5 flex items-center gap-3 cursor-pointer group"
-            >
-              <div className="w-9 h-9 rounded-lg bg-indigo-100 text-indigo-800 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
-                <FileText className="w-4 h-4" />
-              </div>
-              <div>
-                <div className="text-lg font-black text-slate-900 leading-none">
-                  R 98.6M <span className="text-xs font-semibold text-indigo-700">(79%)</span>
-                </div>
-                <div className="text-xs text-slate-600 font-medium">Tranches &amp; Utilization →</div>
-              </div>
-            </div>
-
-            {/* Remaining Balance */}
-            <div 
-              onClick={() => openFeatureInSideView('support')}
-              className="bg-cyan-50/70 hover:bg-cyan-50 border border-cyan-200/80 rounded-xl p-3.5 flex items-center gap-3 cursor-pointer group"
-            >
-              <div className="w-9 h-9 rounded-lg bg-cyan-100 text-cyan-800 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
-                <Wallet className="w-4 h-4" />
-              </div>
-              <div>
-                <div className="text-lg font-black text-slate-900 leading-none">
-                  R 26.8M <span className="text-xs font-semibold text-cyan-700">(21%)</span>
-                </div>
-                <div className="text-xs text-slate-600 font-medium">Disbursements Pending →</div>
-              </div>
-            </div>
-
-            {/* Entities at High Risk */}
-            <div 
-              onClick={() => openFeatureInSideView('risks')}
-              className="bg-rose-50/70 hover:bg-rose-50 border border-rose-200/80 rounded-xl p-3.5 flex items-center gap-3 cursor-pointer group"
-            >
-              <div className="w-9 h-9 rounded-lg bg-rose-100 text-rose-800 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
-                <AlertTriangle className="w-4 h-4" />
-              </div>
-              <div>
-                <div className="text-lg font-black text-rose-700 leading-none">5</div>
-                <div className="text-xs text-slate-600 font-medium">Entities at High Risk →</div>
-              </div>
-            </div>
-          </div>
-
-          {/* ROW 4: CHARTS (KPI Performance by Entity & Budget Utilization Donut) */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-            
-            {/* KPI Performance by Entity (2 cols) */}
-            <div className="lg:col-span-2 bg-white rounded-xl p-5 border border-slate-200 shadow-xs flex flex-col justify-between">
-              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-                <h2 className="text-sm font-bold text-slate-900">KPI Performance by Entity</h2>
-                <button 
-                  onClick={() => openFeatureInSideView('performance')}
-                  className="text-xs text-emerald-700 hover:text-emerald-800 font-semibold cursor-pointer flex items-center gap-1"
-                >
-                  <span>View All</span>
-                </button>
-              </div>
-
-              {/* Stacked Horizontal Bar Chart */}
-              <div className="py-4 space-y-3">
-                {entityKpiData.map((ent) => (
-                  <div 
-                    key={ent.id} 
-                    onClick={() => openFeatureInSideView('performance', ent.id)}
-                    className="space-y-1 p-1 rounded-lg hover:bg-slate-50 transition-colors cursor-pointer group"
-                    title={`Inspect ${ent.name} in Performance Side View`}
-                  >
-                    <div className="flex items-center justify-between text-xs font-medium text-slate-700">
-                      <span className="font-bold text-slate-800 group-hover:text-emerald-700 flex items-center gap-1">
-                        {ent.name}
-                        <span className="text-[10px] text-slate-400 group-hover:text-emerald-600">→</span>
-                      </span>
-                      <span className="text-[11px] text-slate-500 font-mono">
-                        {ent.achieved}% Achieved
-                      </span>
-                    </div>
-
-                    {/* Stacked Bar */}
-                    <div className="h-4 w-full bg-slate-100 rounded-md overflow-hidden flex shadow-inner">
-                      <div 
-                        style={{ width: `${ent.achieved}%` }}
-                        className="bg-emerald-500 h-full transition-all duration-500 hover:opacity-90"
-                        title={`Achieved: ${ent.achieved}%`}
-                      />
-                      <div 
-                        style={{ width: `${ent.inProgress}%` }}
-                        className="bg-amber-400 h-full transition-all duration-500 hover:opacity-90"
-                        title={`In Progress: ${ent.inProgress}%`}
-                      />
-                      <div 
-                        style={{ width: `${ent.notAchieved}%` }}
-                        className="bg-rose-500 h-full transition-all duration-500 hover:opacity-90"
-                        title={`Not Achieved: ${ent.notAchieved}%`}
-                      />
-                    </div>
+          {/* ROW 1: 5-ITEM EXECUTIVE CATALOG RIBBON (In one line, beautifully styled) */}
+          <div className="bg-white border border-slate-200/90 rounded-2xl p-2.5 sm:p-3 shadow-xs">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2.5 sm:gap-3">
+              {/* Card 1: 26 Public Entities */}
+              <div 
+                onClick={() => openFeatureInSideView('entities', undefined, 'PUBLIC_ENTITY')}
+                className="bg-teal-50/60 hover:bg-teal-50 border border-teal-200/70 hover:border-teal-400 rounded-xl p-3.5 flex flex-col justify-between transition-all duration-200 hover:shadow-xs cursor-pointer group"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="w-8 h-8 rounded-lg bg-teal-100 text-teal-800 flex items-center justify-center group-hover:scale-105 transition-transform">
+                    <Building2 className="w-4 h-4" />
                   </div>
-                ))}
-
-                {/* X Axis scale */}
-                <div className="flex justify-between text-[10px] text-slate-400 font-mono pt-1">
-                  <span>0</span>
-                  <span>20</span>
-                  <span>40</span>
-                  <span>60</span>
-                  <span>80</span>
-                  <span>100</span>
+                  <span className="text-[10px] font-bold text-teal-800 bg-teal-100/70 px-2 py-0.5 rounded-full">
+                    PFMA 3A
+                  </span>
+                </div>
+                <div className="my-2">
+                  <div className="text-3xl font-black text-slate-900 tracking-tight leading-none">26</div>
+                  <div className="text-xs font-bold text-slate-800 mt-1">Public Entities</div>
+                  <div className="text-[11px] text-slate-500 font-medium">Statutory Institutions</div>
+                </div>
+                <div className="pt-2 border-t border-teal-100/80 flex items-center justify-between text-xs font-bold text-teal-800 group-hover:text-teal-900">
+                  <span>Side View</span>
+                  <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
                 </div>
               </div>
 
-              {/* Legend */}
-              <div className="flex items-center justify-center gap-6 pt-2 text-xs border-t border-slate-100">
-                <div className="flex items-center gap-1.5">
-                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
-                  <span className="text-slate-600 font-medium">Achieved</span>
+              {/* Card 2: 6 NPOs */}
+              <div 
+                onClick={() => openFeatureInSideView('entities', undefined, 'NPO')}
+                className="bg-sky-50/60 hover:bg-sky-50 border border-sky-200/70 hover:border-sky-400 rounded-xl p-3.5 flex flex-col justify-between transition-all duration-200 hover:shadow-xs cursor-pointer group"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="w-8 h-8 rounded-lg bg-sky-100 text-sky-800 flex items-center justify-center group-hover:scale-105 transition-transform">
+                    <Users className="w-4 h-4" />
+                  </div>
+                  <span className="text-[10px] font-bold text-sky-800 bg-sky-100/70 px-2 py-0.5 rounded-full">
+                    Subsidized
+                  </span>
                 </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="w-2.5 h-2.5 rounded-full bg-amber-400"></span>
-                  <span className="text-slate-600 font-medium">In Progress</span>
+                <div className="my-2">
+                  <div className="text-3xl font-black text-slate-900 tracking-tight leading-none">6</div>
+                  <div className="text-xs font-bold text-slate-800 mt-1">NPOs</div>
+                  <div className="text-[11px] text-slate-500 font-medium">Cultural Non-Profits</div>
                 </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="w-2.5 h-2.5 rounded-full bg-rose-500"></span>
-                  <span className="text-slate-600 font-medium">Not Achieved</span>
+                <div className="pt-2 border-t border-sky-100/80 flex items-center justify-between text-xs font-bold text-sky-800 group-hover:text-sky-900">
+                  <span>Side View</span>
+                  <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
+                </div>
+              </div>
+
+              {/* Card 3: 32 Total Organisations */}
+              <div 
+                onClick={() => openFeatureInSideView('entities', undefined, 'ALL')}
+                className="bg-blue-50/60 hover:bg-blue-50 border border-blue-200/70 hover:border-blue-400 rounded-xl p-3.5 flex flex-col justify-between transition-all duration-200 hover:shadow-xs cursor-pointer group"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="w-8 h-8 rounded-lg bg-blue-100 text-blue-800 flex items-center justify-center group-hover:scale-105 transition-transform">
+                    <Layers className="w-4 h-4" />
+                  </div>
+                  <span className="text-[10px] font-bold text-blue-800 bg-blue-100/70 px-2 py-0.5 rounded-full">
+                    Portfolio
+                  </span>
+                </div>
+                <div className="my-2">
+                  <div className="text-3xl font-black text-slate-900 tracking-tight leading-none">32</div>
+                  <div className="text-xs font-bold text-slate-800 mt-1">Total Organisations</div>
+                  <div className="text-[11px] text-slate-500 font-medium">26 PEs + 6 NPOs</div>
+                </div>
+                <div className="pt-2 border-t border-blue-100/80 flex items-center justify-between text-xs font-bold text-blue-800 group-hover:text-blue-900">
+                  <span>All 32 Side View</span>
+                  <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
+                </div>
+              </div>
+
+              {/* Card 4: 24 Reports Submitted (75%) */}
+              <div 
+                onClick={() => openFeatureInSideView('reports')}
+                className="bg-emerald-50/60 hover:bg-emerald-50 border border-emerald-200/70 hover:border-emerald-400 rounded-xl p-3.5 flex flex-col justify-between transition-all duration-200 hover:shadow-xs cursor-pointer group"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-800 flex items-center justify-center group-hover:scale-105 transition-transform">
+                    <FileCheck className="w-4 h-4" />
+                  </div>
+                  <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100/70 px-2 py-0.5 rounded-full">
+                    75% Compliant
+                  </span>
+                </div>
+                <div className="my-2">
+                  <div className="text-3xl font-black text-slate-900 tracking-tight leading-none">24</div>
+                  <div className="text-xs font-bold text-slate-800 mt-1">Reports Submitted</div>
+                  <div className="text-[11px] font-bold text-emerald-700">This Quarter (75%)</div>
+                </div>
+                <div className="pt-2 border-t border-emerald-100/80 flex items-center justify-between text-xs font-bold text-emerald-800 group-hover:text-emerald-900">
+                  <span>Side View</span>
+                  <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
+                </div>
+              </div>
+
+              {/* Card 5: 8 Reports Outstanding (25%) */}
+              <div 
+                onClick={() => openFeatureInSideView('compliance')}
+                className="bg-rose-50/60 hover:bg-rose-50 border border-rose-200/70 hover:border-rose-400 rounded-xl p-3.5 flex flex-col justify-between transition-all duration-200 hover:shadow-xs col-span-1 sm:col-span-2 md:col-span-1 cursor-pointer group"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="w-8 h-8 rounded-lg bg-rose-100 text-rose-800 flex items-center justify-center group-hover:scale-105 transition-transform">
+                    <AlertCircle className="w-4 h-4" />
+                  </div>
+                  <span className="text-[10px] font-bold text-rose-800 bg-rose-100/70 px-2 py-0.5 rounded-full">
+                    25% Pending
+                  </span>
+                </div>
+                <div className="my-2">
+                  <div className="text-3xl font-black text-slate-900 tracking-tight leading-none">8</div>
+                  <div className="text-xs font-bold text-slate-800 mt-1">Reports Outstanding</div>
+                  <div className="text-[11px] font-bold text-rose-700">(25%) Clearance Required</div>
+                </div>
+                <div className="pt-2 border-t border-rose-100/80 flex items-center justify-between text-xs font-bold text-rose-800 group-hover:text-rose-900">
+                  <span>Side View</span>
+                  <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
                 </div>
               </div>
             </div>
+          </div>
 
-            {/* Budget Utilization Donut (1 col) */}
-            <div className="bg-white rounded-xl p-5 border border-slate-200 shadow-xs flex flex-col justify-between">
+          {/* ROW 2: BUDGET UTILIZATION & FINANCIAL PERFORMANCE DECK (Directly after Catalog Feature) */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-5">
+            
+            {/* Left Column: Budget Utilization Card (lg:col-span-5) */}
+            <div className="lg:col-span-5 bg-white rounded-2xl p-5 border border-slate-200/90 shadow-xs flex flex-col justify-between">
               <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-                <h2 className="text-sm font-bold text-slate-900">Budget Utilization</h2>
-                <select
-                  value={selectedYear}
-                  onChange={(e) => setSelectedYear(e.target.value)}
-                  className="text-xs font-semibold text-slate-600 bg-slate-50 border border-slate-200 rounded px-2 py-1"
-                >
-                  <option>This Financial Year</option>
-                  <option>2024/2025</option>
-                  <option>2023/2024</option>
-                </select>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-sm sm:text-base font-bold text-slate-900">Budget Utilization</h2>
+                    <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100/80 border border-emerald-200/70 px-2 py-0.5 rounded-full uppercase tracking-wider">
+                      Vote 40
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 mt-0.5">Matched to portfolio allocations</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button 
+                    onClick={() => openFeatureInSideView('support', 'ent-sahra')}
+                    className="text-xs text-emerald-700 hover:text-emerald-800 font-semibold cursor-pointer flex items-center gap-1 hover:underline"
+                    title="Open Support & Funding Side View"
+                  >
+                    <span>View All</span>
+                  </button>
+                  <select
+                    value={selectedYear}
+                    onChange={(e) => setSelectedYear(e.target.value)}
+                    className="text-xs font-bold text-emerald-800 bg-emerald-50 border border-emerald-300 rounded-lg px-2.5 py-1.5 cursor-pointer focus:ring-1 focus:ring-emerald-600 focus:outline-hidden"
+                  >
+                    <option>This Financial Year</option>
+                    <option>2024/2025</option>
+                    <option>2023/2024</option>
+                  </select>
+                </div>
               </div>
 
               {/* SVG Donut Chart with Center Metric */}
-              <div className="flex flex-col items-center justify-center py-4">
-                <div className="relative w-44 h-44 flex items-center justify-center">
+              <div 
+                onClick={() => openFeatureInSideView('support', 'ent-sahra')}
+                className="flex flex-col items-center justify-center py-4 cursor-pointer group"
+                title="Inspect Financial Tranches in Side View"
+              >
+                <div className="relative w-44 h-44 flex items-center justify-center group-hover:scale-105 transition-transform">
                   <svg viewBox="0 0 100 100" className="w-full h-full -rotate-90">
                     {/* Background Ring */}
                     <circle
@@ -646,79 +535,378 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
                       cy="50"
                       r="38"
                       stroke="#f1f5f9"
-                      strokeWidth="15"
+                      strokeWidth="13"
                       fill="none"
                     />
-                    {/* Utilized Segment (79%) */}
+                    {/* Utilized Segment */}
                     <circle
                       cx="50"
                       cy="50"
                       r="38"
-                      stroke="#10b981"
-                      strokeWidth="15"
+                      stroke="#059669"
+                      strokeWidth="13"
                       strokeDasharray="238.76"
-                      strokeDashoffset="50.14" // 79%
+                      strokeDashoffset={238.76 * (1 - (yearMetrics.utilPercent / 100))}
                       strokeLinecap="round"
                       fill="none"
                     />
-                    {/* Remaining Segment (21%) */}
+                    {/* Remaining Segment */}
                     <circle
                       cx="50"
                       cy="50"
                       r="38"
-                      stroke="#38bdf8"
-                      strokeWidth="15"
+                      stroke="#0ea5e9"
+                      strokeWidth="13"
                       strokeDasharray="238.76"
-                      strokeDashoffset="188.62" // 21%
+                      strokeDashoffset={238.76 * (1 - (yearMetrics.remPercent / 100))}
                       strokeLinecap="round"
                       fill="none"
                     />
                   </svg>
 
                   {/* Center Text */}
-                  <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
-                    <span className="text-lg font-black text-slate-900 leading-none">R 98.6M</span>
-                    <span className="text-[10px] text-slate-500 font-semibold uppercase tracking-wider mt-0.5">Utilized</span>
-                    <span className="text-xs font-bold text-emerald-600 mt-0.5">(79%)</span>
+                  <div className="absolute inset-0 flex flex-col items-center justify-center text-center px-2">
+                    <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                      {selectedYear.includes('2024') || selectedYear.includes('2023') ? yearMetrics.label.split(' ')[0] : 'This Financial Year'}
+                    </span>
+                    <span className="text-2xl font-black text-slate-900 tracking-tight leading-none mt-1">
+                      {formatZAR(yearMetrics.utilized)}
+                    </span>
+                    <span className="text-[11px] text-slate-600 font-semibold mt-1">
+                      {yearMetrics.statusTitle}
+                    </span>
+                    <span className="text-xs font-extrabold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full mt-1">
+                      ({yearMetrics.utilPercent}%)
+                    </span>
                   </div>
                 </div>
               </div>
 
-              {/* Legend with Values */}
-              <div className="space-y-1.5 pt-2 text-xs border-t border-slate-100">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
-                    <span className="text-slate-600">R 125.4M Approved</span>
+              {/* Quantitative Legend & Progress Breakdown */}
+              <div className="space-y-2.5 pt-3 border-t border-slate-100 text-xs">
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0"></span>
+                      <span className="text-slate-700 font-medium">{formatZAR(yearMetrics.approved)} Approved</span>
+                    </div>
+                    <span className="font-bold text-slate-900">100%</span>
                   </div>
-                  <span className="font-semibold text-slate-800">100%</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="w-2.5 h-2.5 rounded-full bg-sky-500"></span>
-                    <span className="text-slate-600">R 98.6M Utilized</span>
+                  <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
+                    <div className="bg-emerald-500 h-full w-full rounded-full" />
                   </div>
-                  <span className="font-semibold text-slate-800">79%</span>
                 </div>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="w-2.5 h-2.5 rounded-full bg-amber-400"></span>
-                    <span className="text-slate-600">R 26.8M Remaining</span>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-600 shrink-0"></span>
+                      <span className="text-slate-700 font-medium">{formatZAR(yearMetrics.utilized)} {yearMetrics.statusTitle}</span>
+                    </div>
+                    <span className="font-bold text-emerald-700">{yearMetrics.utilPercent}%</span>
                   </div>
-                  <span className="font-semibold text-slate-800">21%</span>
+                  <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
+                    <div style={{ width: `${yearMetrics.utilPercent}%` }} className="bg-emerald-600 h-full rounded-full transition-all" />
+                  </div>
                 </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full bg-sky-500 shrink-0"></span>
+                      <span className="text-slate-700 font-medium">{formatZAR(yearMetrics.remaining)} Balance Pending</span>
+                    </div>
+                    <span className="font-bold text-sky-700">{yearMetrics.remPercent}%</span>
+                  </div>
+                  <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
+                    <div style={{ width: `${yearMetrics.remPercent}%` }} className="bg-sky-500 h-full rounded-full transition-all" />
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => openFeatureInSideView('support', 'ent-sahra')}
+                  className="w-full mt-1 pt-2 border-t border-slate-100 flex items-center justify-center gap-1.5 text-xs font-bold text-emerald-800 hover:text-emerald-700 cursor-pointer group"
+                >
+                  <span>Inspect Tranche Allocation in Side View</span>
+                  <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
+                </button>
               </div>
             </div>
 
+            {/* Right Column: Companion Financial Allocation Graphs & High Risk Card (lg:col-span-7) */}
+            <div className="lg:col-span-7 flex flex-col gap-4 justify-between">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 flex-1">
+                {/* Graph 1: Total Approved Budget */}
+                <div 
+                  onClick={() => openFeatureInSideView('support')}
+                  className="bg-white hover:bg-slate-50/70 border border-slate-200/90 hover:border-emerald-300 rounded-xl p-4 flex flex-col justify-between transition-all shadow-xs cursor-pointer group"
+                >
+                  <div>
+                    <div className="flex items-center justify-between gap-2 mb-2">
+                      <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-800 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                        <Coins className="w-4 h-4" />
+                      </div>
+                      <span className="text-[10px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200/60 px-2 py-0.5 rounded-full">
+                        Statutory Vote 40
+                      </span>
+                    </div>
+                    
+                    <div className="text-2xl font-black text-slate-900 tracking-tight leading-none">
+                      {formatZAR(totalApprovedBudget)}
+                    </div>
+                    <div className="text-xs text-slate-800 font-bold mt-1.5">Total Approved Budget</div>
+                    <div className="text-[11px] text-slate-500 font-medium">All 26 PEs &amp; 6 Subsidized NPOs</div>
+                  </div>
+
+                  {/* Visual Graph: Allocation Breakdown Bar */}
+                  <div className="mt-4 pt-3 border-t border-slate-100 space-y-2">
+                    <div className="flex items-center justify-between text-[11px] font-bold text-slate-700">
+                      <span className="flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-teal-600 inline-block" />
+                        26 PEs ({pePercentage.toFixed(0)}%)
+                      </span>
+                      <span className="flex items-center gap-1.5 text-slate-600">
+                        <span className="w-2 h-2 rounded-full bg-sky-500 inline-block" />
+                        6 NPOs ({npoPercentage.toFixed(0)}%)
+                      </span>
+                    </div>
+
+                    {/* Stacked Progress Bar Graph */}
+                    <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden flex shadow-inner">
+                      <div 
+                        style={{ width: `${pePercentage}%` }} 
+                        className="h-full bg-teal-600 transition-all duration-500" 
+                        title={`Public Entities: ${formatZAR(peBudget)} (${pePercentage.toFixed(1)}%)`}
+                      />
+                      <div 
+                        style={{ width: `${npoPercentage}%` }} 
+                        className="h-full bg-sky-500 transition-all duration-500" 
+                        title={`Subsidized NPOs: ${formatZAR(npoBudget)} (${npoPercentage.toFixed(1)}%)`}
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between text-[10px] text-slate-500 font-medium">
+                      <span>PEs: {formatZAR(peBudget)}</span>
+                      <span>NPOs: {formatZAR(npoBudget)}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Graph 2: Transfer to Date & Remaining Disbursal */}
+                <div 
+                  onClick={() => openFeatureInSideView('support')}
+                  className="bg-white hover:bg-slate-50/70 border border-slate-200/90 hover:border-indigo-300 rounded-xl p-4 flex flex-col justify-between transition-all shadow-xs cursor-pointer group"
+                >
+                  <div>
+                    <div className="flex items-center justify-between gap-2 mb-2">
+                      <div className="w-8 h-8 rounded-lg bg-indigo-100 text-indigo-800 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                        <FileText className="w-4 h-4" />
+                      </div>
+                      <span className="text-[10px] font-bold text-indigo-800 bg-indigo-50 border border-indigo-200/60 px-2 py-0.5 rounded-full">
+                        {transferRate.toFixed(1)}% Disbursed
+                      </span>
+                    </div>
+                    
+                    <div className="text-2xl font-black text-slate-900 tracking-tight leading-none">
+                      {formatZAR(totalTransferredToDate)}{' '}
+                      <span className="text-base font-bold text-indigo-700">({transferRate.toFixed(1)}%)</span>
+                    </div>
+                    <div className="text-xs text-slate-800 font-bold mt-1.5">Transfer to Date (Overall)</div>
+                    <div className="text-[11px] text-slate-500 font-medium">Combined Disbursed Tranches</div>
+                  </div>
+
+                  {/* Visual Graph: 4-Quarter Statutory Tranches Stepper */}
+                  <div className="mt-4 pt-3 border-t border-slate-100 space-y-2">
+                    <div className="flex items-center justify-between text-[11px] font-bold text-slate-700">
+                      <span>Tranche Milestones</span>
+                      <span className="text-indigo-700">3 of 4 Released</span>
+                    </div>
+
+                    {/* 4 Tranche Segments Graph */}
+                    <div className="grid grid-cols-4 gap-1.5">
+                      <div className="h-2 rounded-sm bg-indigo-600" title="Q1 (25%) - Disbursed" />
+                      <div className="h-2 rounded-sm bg-indigo-600" title="Q2 (25%) - Disbursed" />
+                      <div className="h-2 rounded-sm bg-indigo-600" title="Q3 (25%) - Disbursed" />
+                      <div className="h-2 rounded-sm bg-slate-200" title="Q4 (25%) - Pending Release" />
+                    </div>
+
+                    <div className="flex items-center justify-between text-[10px] text-slate-500 font-medium">
+                      <span className="text-emerald-700 font-bold">Q1-Q3 Paid ({formatZAR(totalTransferredToDate)})</span>
+                      <span>Q4 Bal ({formatZAR(remainingDisbursement)})</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Entities at High / Critical Risk (Beautiful Alert Card View) */}
+              <div 
+                onClick={() => openFeatureInSideView('risks')}
+                className="bg-rose-50/60 hover:bg-rose-50 border-2 border-rose-200/90 hover:border-rose-400 rounded-xl p-4 flex flex-col justify-between transition-all shadow-xs cursor-pointer group"
+              >
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <div className="w-8 h-8 rounded-lg bg-rose-100 text-rose-800 flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform">
+                        <AlertTriangle className="w-4 h-4 text-rose-700" />
+                      </div>
+                      <span className="text-[10px] font-black text-rose-800 bg-rose-100/80 border border-rose-300 px-2.5 py-0.5 rounded-full uppercase tracking-wider">
+                        High Risk Alert
+                      </span>
+                    </div>
+                    <div className="text-xs text-slate-900 font-bold mt-1">Entities at High Risk</div>
+                    <div className="text-[11px] text-slate-600 font-medium">Section 38 PFMA Classifications</div>
+                  </div>
+
+                  <div className="flex items-baseline gap-1.5 self-start sm:self-auto">
+                    <div className="text-3xl font-black text-rose-700 leading-none">
+                      {highRiskEntitiesCount}
+                    </div>
+                    <span className="text-xs font-bold text-rose-600">Institutions</span>
+                  </div>
+                </div>
+
+                {/* Watchlist Badges for the High Risk Entities */}
+                <div className="mt-3 pt-2.5 border-t border-rose-200/70 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-[10px] font-bold text-slate-700 uppercase tracking-wider mr-1">Watchlist:</span>
+                    {highRiskEntities.map(e => (
+                      <span 
+                        key={e.id}
+                        className="px-2 py-0.5 bg-white/90 border border-rose-200 text-rose-800 text-[10px] font-bold rounded-md shadow-2xs"
+                      >
+                        {e.shortCode}
+                      </span>
+                    ))}
+                  </div>
+                  <div className="text-[10px] font-bold text-rose-700 flex items-center gap-1 group-hover:underline shrink-0">
+                    <span>Inspect Risk Register</span>
+                    <ArrowRight className="w-3 h-3 group-hover:translate-x-0.5 transition-transform" />
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
 
-          {/* ROW 5: 3 COLUMNS (Compliance Status, Support Given by Type, Risk Overview) */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+          {/* ROW 3: KPI PERFORMANCE BY ENTITY & NPO */}
+          <div className="bg-white rounded-2xl p-5 border border-slate-200/90 shadow-xs">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+              <div>
+                <h2 className="text-sm sm:text-base font-bold text-slate-900">KPI Performance by Entity &amp; NPO</h2>
+                <p className="text-[11px] text-slate-500 mt-0.5">Actual statutory institutions reporting to the department</p>
+              </div>
+              <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-lg text-xs font-semibold">
+                <button
+                  onClick={() => setKpiFilter('ALL')}
+                  className={`px-2.5 py-1 rounded-md transition-all cursor-pointer ${
+                    kpiFilter === 'ALL' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  All Institutions
+                </button>
+                <button
+                  onClick={() => setKpiFilter('PUBLIC_ENTITY')}
+                  className={`px-2.5 py-1 rounded-md transition-all cursor-pointer ${
+                    kpiFilter === 'PUBLIC_ENTITY' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  Public Entities
+                </button>
+                <button
+                  onClick={() => setKpiFilter('NPO')}
+                  className={`px-2.5 py-1 rounded-md transition-all cursor-pointer ${
+                    kpiFilter === 'NPO' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  Subsidized NPOs
+                </button>
+              </div>
+            </div>
+
+            {/* Stacked Horizontal Bar Chart of Actual Entities */}
+            <div className="py-4 space-y-3 max-h-[380px] overflow-y-auto pr-1">
+              {displayedEntityKpis.map((ent) => (
+                <div 
+                  key={ent.id} 
+                  onClick={() => openFeatureInSideView('performance', ent.id)}
+                  className="space-y-1 p-2 rounded-xl hover:bg-slate-50 transition-colors cursor-pointer group border border-transparent hover:border-slate-200/70"
+                  title={`Inspect ${ent.name} in Performance Side View`}
+                >
+                  <div className="flex items-center justify-between text-xs font-medium text-slate-700">
+                    <div className="flex items-center gap-2 truncate mr-2">
+                      <span className="font-bold text-slate-800 group-hover:text-emerald-700 truncate">
+                        {ent.name}
+                      </span>
+                      <span className={`text-[10px] px-1.5 py-0.2 rounded-md font-bold uppercase shrink-0 ${
+                        ent.type === 'NPO' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'
+                      }`}>
+                        {ent.type === 'NPO' ? 'NPO' : 'Public Entity'}
+                      </span>
+                      <span className="text-[10px] text-slate-400 group-hover:text-emerald-600 font-bold">Inspect →</span>
+                    </div>
+                    <span className="text-[11px] text-slate-600 font-mono font-bold shrink-0">
+                      {ent.achieved}% Achieved
+                    </span>
+                  </div>
+
+                  {/* Stacked Bar */}
+                  <div className="h-4 w-full bg-slate-100 rounded-md overflow-hidden flex shadow-inner">
+                    <div 
+                      style={{ width: `${ent.achieved}%` }}
+                      className="bg-emerald-500 h-full transition-all duration-500 hover:opacity-90"
+                      title={`Achieved: ${ent.achieved}%`}
+                    />
+                    <div 
+                      style={{ width: `${ent.inProgress}%` }}
+                      className="bg-amber-400 h-full transition-all duration-500 hover:opacity-90"
+                      title={`In Progress: ${ent.inProgress}%`}
+                    />
+                    <div 
+                      style={{ width: `${ent.notAchieved}%` }}
+                      className="bg-rose-500 h-full transition-all duration-500 hover:opacity-90"
+                      title={`Not Achieved: ${ent.notAchieved}%`}
+                    />
+                  </div>
+                </div>
+              ))}
+
+              {/* X Axis scale */}
+              <div className="flex justify-between text-[10px] text-slate-400 font-mono pt-1">
+                <span>0%</span>
+                <span>20%</span>
+                <span>40%</span>
+                <span>60%</span>
+                <span>80%</span>
+                <span>100%</span>
+              </div>
+            </div>
+
+            {/* Legend */}
+            <div className="flex items-center justify-center gap-6 pt-3 text-xs border-t border-slate-100">
+              <div className="flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+                <span className="text-slate-600 font-medium">Achieved</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-full bg-amber-400"></span>
+                <span className="text-slate-600 font-medium">In Progress</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-full bg-rose-500"></span>
+                <span className="text-slate-600 font-medium">Not Achieved</span>
+              </div>
+            </div>
+          </div>
+
+          {/* ROW 5: 2 COLUMNS (Compliance Status & PFMA Risk Overview - Support Given by Type Removed) */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             
             {/* Column 1: Compliance Status */}
             <div className="bg-white rounded-xl p-5 border border-slate-200 shadow-xs flex flex-col justify-between">
               <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-                <h3 className="text-sm font-bold text-slate-900">Compliance Status</h3>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">Compliance Status &amp; Regulatory Standing</h3>
+                  <p className="text-[11px] text-slate-500">Across all 26 Public Entities and 6 NPOs</p>
+                </div>
                 <button 
                   onClick={() => openFeatureInSideView('compliance')}
                   className="text-xs text-emerald-700 hover:text-emerald-800 font-semibold cursor-pointer flex items-center gap-1"
@@ -733,7 +921,7 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
                 className="flex items-center justify-center py-4 cursor-pointer group"
                 title="Inspect Compliance in Side View"
               >
-                <div className="relative w-32 h-32 flex items-center justify-center group-hover:scale-105 transition-transform">
+                <div className="relative w-36 h-36 flex items-center justify-center group-hover:scale-105 transition-transform">
                   <svg viewBox="0 0 100 100" className="w-full h-full -rotate-90">
                     <circle
                       cx="50"
@@ -750,100 +938,61 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
                       stroke="#10b981"
                       strokeWidth="14"
                       strokeDasharray="251.32"
-                      strokeDashoffset="62.83" // 75%
+                      strokeDashoffset={251.32 * (1 - (pulse.averageCompliance / 100))}
                       strokeLinecap="round"
                       fill="none"
                     />
                   </svg>
                   <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
-                    <span className="text-base font-black text-slate-900 leading-tight">75%</span>
-                    <span className="text-[10px] font-bold text-emerald-700 leading-none">Compliant</span>
-                    <span className="text-[9px] text-slate-400 mt-0.5">Click to view</span>
+                    <span className="text-xl font-black text-slate-900 leading-tight">{pulse.averageCompliance}%</span>
+                    <span className="text-[10px] font-bold text-emerald-700 leading-none">Portfolio Average</span>
+                    <span className="text-[9px] text-slate-400 mt-1">PFMA &amp; MOA Scored</span>
                   </div>
                 </div>
               </div>
 
-              {/* Legend with counts */}
-              <div className="space-y-1 text-xs border-t border-slate-100 pt-2">
+              {/* Legend with dynamic counts */}
+              <div className="grid grid-cols-3 gap-2 text-xs border-t border-slate-100 pt-3">
                 <div 
                   onClick={() => openFeatureInSideView('compliance')}
-                  className="flex items-center justify-between p-1 rounded hover:bg-slate-50 cursor-pointer"
+                  className="flex flex-col items-center p-2 rounded-lg bg-emerald-50/60 border border-emerald-100 hover:bg-emerald-50 cursor-pointer text-center"
                 >
-                  <div className="flex items-center gap-2">
-                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
-                    <span className="text-slate-600">Compliant</span>
-                  </div>
-                  <span className="font-bold text-slate-900">24</span>
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 mb-1"></span>
+                  <span className="text-xs text-slate-600 font-medium">Compliant</span>
+                  <span className="font-black text-base text-emerald-900">
+                    {entities.filter(e => e.overallComplianceScore >= 80).length}
+                  </span>
                 </div>
                 <div 
                   onClick={() => openFeatureInSideView('compliance')}
-                  className="flex items-center justify-between p-1 rounded hover:bg-slate-50 cursor-pointer"
+                  className="flex flex-col items-center p-2 rounded-lg bg-amber-50/60 border border-amber-100 hover:bg-amber-50 cursor-pointer text-center"
                 >
-                  <div className="flex items-center gap-2">
-                    <span className="w-2.5 h-2.5 rounded-full bg-amber-400"></span>
-                    <span className="text-slate-600">At Risk</span>
-                  </div>
-                  <span className="font-bold text-slate-900">5</span>
+                  <span className="w-2 h-2 rounded-full bg-amber-400 mb-1"></span>
+                  <span className="text-xs text-slate-600 font-medium">At Risk</span>
+                  <span className="font-black text-base text-amber-900">
+                    {entities.filter(e => e.overallComplianceScore >= 60 && e.overallComplianceScore < 80).length}
+                  </span>
                 </div>
                 <div 
                   onClick={() => openFeatureInSideView('compliance')}
-                  className="flex items-center justify-between p-1 rounded hover:bg-slate-50 cursor-pointer"
+                  className="flex flex-col items-center p-2 rounded-lg bg-rose-50/60 border border-rose-100 hover:bg-rose-50 cursor-pointer text-center"
                 >
-                  <div className="flex items-center gap-2">
-                    <span className="w-2.5 h-2.5 rounded-full bg-rose-500"></span>
-                    <span className="text-slate-600">Overdue</span>
-                  </div>
-                  <span className="font-bold text-slate-900">3</span>
+                  <span className="w-2 h-2 rounded-full bg-rose-500 mb-1"></span>
+                  <span className="text-xs text-slate-600 font-medium">Overdue / Non-Comp</span>
+                  <span className="font-black text-base text-rose-900">
+                    {entities.filter(e => e.overallComplianceScore < 60 || e.overdueReportsCount > 0).length}
+                  </span>
                 </div>
               </div>
             </div>
 
-            {/* Column 2: Support Given by Type */}
+            {/* Column 2: PFMA Risk Overview & Early Warning */}
             <div className="bg-white rounded-xl p-5 border border-slate-200 shadow-xs flex flex-col justify-between">
               <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-                <h3 className="text-sm font-bold text-slate-900">Support Given by Type</h3>
-                <select 
-                  value={supportFilter}
-                  onChange={(e) => setSupportFilter(e.target.value)}
-                  className="text-xs font-semibold text-slate-600 bg-slate-50 border border-slate-200 rounded px-1.5 py-0.5"
-                >
-                  <option>This Year</option>
-                  <option>All Time</option>
-                </select>
-              </div>
-
-              {/* Bars */}
-              <div className="py-2 space-y-2.5">
-                {supportTypeData.map((item, idx) => (
-                  <div 
-                    key={idx} 
-                    onClick={() => openFeatureInSideView('support')}
-                    className="space-y-0.5 p-1 rounded hover:bg-slate-50 cursor-pointer group"
-                    title={`Open ${item.type} in Support Side View`}
-                  >
-                    <div className="flex items-center justify-between text-xs text-slate-700">
-                      <span className="font-medium text-[11px] truncate group-hover:text-emerald-700">{item.type}</span>
-                      <span className="font-bold text-slate-900 text-xs">{item.count}</span>
-                    </div>
-                    <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
-                      <div 
-                        style={{ width: `${(item.count / item.max) * 100}%` }}
-                        className={`h-full ${item.color} rounded-full`}
-                      />
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <div className="text-[10px] text-slate-400 text-right pt-1 border-t border-slate-100">
-                Aggregate Statutory Capacity Support
-              </div>
-            </div>
-
-            {/* Column 3: Risk Overview */}
-            <div className="bg-white rounded-xl p-5 border border-slate-200 shadow-xs flex flex-col justify-between">
-              <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-                <h3 className="text-sm font-bold text-slate-900">Risk Overview</h3>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">PFMA Risk Overview &amp; Early Warning</h3>
+                  <p className="text-[11px] text-slate-500">Section 38 PFMA Risk Classifications</p>
+                </div>
                 <button 
                   onClick={() => openFeatureInSideView('risks')}
                   className="text-xs text-emerald-700 hover:text-emerald-800 font-semibold cursor-pointer flex items-center gap-1"
@@ -856,55 +1005,75 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
               <div className="py-2 space-y-2">
                 <div 
                   onClick={() => openFeatureInSideView('risks')}
-                  className="flex items-center justify-between p-2 rounded-lg bg-emerald-50/60 border border-emerald-100 hover:bg-emerald-50 cursor-pointer group transition-colors"
+                  className="flex items-center justify-between p-2.5 rounded-lg bg-emerald-50/60 border border-emerald-100 hover:bg-emerald-50 cursor-pointer group transition-colors"
                   title="Open Low Risk in Side View"
                 >
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2.5">
                     <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
-                    <span className="text-xs font-semibold text-emerald-900 group-hover:underline">Low Risk</span>
+                    <div>
+                      <span className="text-xs font-bold text-emerald-900 group-hover:underline">Low Risk (Stable)</span>
+                      <div className="text-[10px] text-slate-500">Fully compliant with PFMA reporting &amp; financial ratios</div>
+                    </div>
                   </div>
-                  <span className="font-black text-sm text-emerald-950">18</span>
+                  <span className="font-black text-base text-emerald-950">
+                    {entities.filter(e => e.riskLevel === 'LOW').length}
+                  </span>
                 </div>
 
                 <div 
                   onClick={() => openFeatureInSideView('risks')}
-                  className="flex items-center justify-between p-2 rounded-lg bg-amber-50/60 border border-amber-100 hover:bg-amber-50 cursor-pointer group transition-colors"
+                  className="flex items-center justify-between p-2.5 rounded-lg bg-amber-50/60 border border-amber-100 hover:bg-amber-50 cursor-pointer group transition-colors"
                   title="Open Medium Risk in Side View"
                 >
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2.5">
                     <span className="w-2.5 h-2.5 rounded-full bg-amber-400"></span>
-                    <span className="text-xs font-semibold text-amber-900 group-hover:underline">Medium Risk</span>
+                    <div>
+                      <span className="text-xs font-bold text-amber-900 group-hover:underline">Medium Risk (Watchlist)</span>
+                      <div className="text-[10px] text-slate-500">Minor governance lags or single target deviations</div>
+                    </div>
                   </div>
-                  <span className="font-black text-sm text-amber-950">9</span>
+                  <span className="font-black text-base text-amber-950">
+                    {entities.filter(e => e.riskLevel === 'MEDIUM').length}
+                  </span>
                 </div>
 
                 <div 
                   onClick={() => openFeatureInSideView('risks')}
-                  className="flex items-center justify-between p-2 rounded-lg bg-orange-50/60 border border-orange-100 hover:bg-orange-50 cursor-pointer group transition-colors"
+                  className="flex items-center justify-between p-2.5 rounded-lg bg-orange-50/60 border border-orange-100 hover:bg-orange-50 cursor-pointer group transition-colors"
                   title="Open High Risk in Side View"
                 >
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2.5">
                     <span className="w-2.5 h-2.5 rounded-full bg-orange-500"></span>
-                    <span className="text-xs font-semibold text-orange-900 group-hover:underline">High Risk</span>
+                    <div>
+                      <span className="text-xs font-bold text-orange-900 group-hover:underline">High Risk (Intervention Needed)</span>
+                      <div className="text-[10px] text-slate-500">AGSA audit findings or critical target delivery lags</div>
+                    </div>
                   </div>
-                  <span className="font-black text-sm text-orange-950">4</span>
+                  <span className="font-black text-base text-orange-950">
+                    {entities.filter(e => e.riskLevel === 'HIGH').length}
+                  </span>
                 </div>
 
                 <div 
                   onClick={() => openFeatureInSideView('risks')}
-                  className="flex items-center justify-between p-2 rounded-lg bg-rose-50/60 border border-rose-100 hover:bg-rose-50 cursor-pointer group transition-colors"
+                  className="flex items-center justify-between p-2.5 rounded-lg bg-rose-50/60 border border-rose-100 hover:bg-rose-50 cursor-pointer group transition-colors"
                   title="Open Critical Risk in Side View"
                 >
-                  <div className="flex items-center gap-2">
-                    <span className="w-2.5 h-2.5 rounded-full bg-rose-600"></span>
-                    <span className="text-xs font-semibold text-rose-900 group-hover:underline">Critical Risk</span>
+                  <div className="flex items-center gap-2.5">
+                    <span className="w-2.5 h-2.5 rounded-full bg-rose-600 animate-pulse"></span>
+                    <div>
+                      <span className="text-xs font-bold text-rose-900 group-hover:underline">Critical Risk (Ministerial Escalation)</span>
+                      <div className="text-[10px] text-slate-500">Section 100/38 PFMA recovery interventions active</div>
+                    </div>
                   </div>
-                  <span className="font-black text-sm text-rose-950">1</span>
+                  <span className="font-black text-base text-rose-950">
+                    {entities.filter(e => e.riskLevel === 'CRITICAL').length}
+                  </span>
                 </div>
               </div>
 
               <div className="text-[10px] text-slate-400 text-center pt-1 border-t border-slate-100">
-                Section 38 PFMA Risk Classifications
+                Departmental Oversight &amp; Audit Alert System
               </div>
             </div>
 
@@ -913,13 +1082,18 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
           {/* ROW 6: UPCOMING DEADLINES & RECENT ALERTS */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
             
-            {/* Upcoming Deadlines */}
+            {/* Upcoming Deadlines (Statutory Rules: Annual & Budget Submission due December; Quarterly reports due after every 3 months on the last day) */}
             <div className="bg-white rounded-xl p-5 border border-slate-200 shadow-xs flex flex-col justify-between">
-              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-                <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                  <Calendar className="w-4 h-4 text-emerald-600" />
-                  <span>Upcoming Deadlines</span>
-                </h3>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 pb-3 border-b border-slate-100">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                    <Calendar className="w-4 h-4 text-emerald-600" />
+                    <span>Statutory Reporting Deadlines</span>
+                  </h3>
+                  <p className="text-[10px] text-slate-500 mt-0.5">
+                    Annual &amp; Budget due Dec • Quarterly reports due after every 3 months on last day
+                  </p>
+                </div>
                 <button 
                   onClick={() => openFeatureInSideView('reports')}
                   className="text-xs text-emerald-700 hover:text-emerald-800 font-semibold cursor-pointer flex items-center gap-1"
@@ -928,84 +1102,104 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
                 </button>
               </div>
 
-              <div className="py-3 space-y-3">
-                {/* Q2 Reports */}
+              <div className="py-3 space-y-2.5">
+                {/* 1. Annual Budget Submission */}
                 <div 
                   onClick={() => openFeatureInSideView('reports')}
-                  className="flex items-center justify-between text-xs p-1.5 rounded-lg hover:bg-slate-50 cursor-pointer transition-colors"
+                  className="flex items-center justify-between text-xs p-2 rounded-lg bg-emerald-50/50 border border-emerald-100 hover:bg-emerald-50 cursor-pointer transition-colors"
                 >
                   <div className="flex items-start gap-2.5">
-                    <Calendar className="w-4 h-4 text-slate-400 mt-0.5 shrink-0" />
+                    <Calendar className="w-4 h-4 text-emerald-700 mt-0.5 shrink-0" />
                     <div>
-                      <div className="font-semibold text-slate-800">Q2 Reports – 5 entities</div>
-                      <div className="text-[11px] text-slate-400">15 Aug 2025</div>
+                      <div className="font-bold text-slate-900">Budget Submission &amp; Annual Strategic Plan</div>
+                      <div className="text-[11px] text-slate-500">All 26 Public Entities &amp; 6 Subsidized NPOs • Due 31 Dec 2026</div>
                     </div>
                   </div>
-                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
-                    5 days left
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 shrink-0">
+                    Annual: 31 Dec
                   </span>
                 </div>
 
-                {/* Annual Reports */}
+                {/* 2. Annual Performance Reports */}
                 <div 
                   onClick={() => openFeatureInSideView('reports')}
-                  className="flex items-center justify-between text-xs p-1.5 rounded-lg hover:bg-slate-50 cursor-pointer transition-colors"
+                  className="flex items-center justify-between text-xs p-2 rounded-lg bg-emerald-50/50 border border-emerald-100 hover:bg-emerald-50 cursor-pointer transition-colors"
                 >
                   <div className="flex items-start gap-2.5">
-                    <Calendar className="w-4 h-4 text-slate-400 mt-0.5 shrink-0" />
+                    <Calendar className="w-4 h-4 text-emerald-700 mt-0.5 shrink-0" />
                     <div>
-                      <div className="font-semibold text-slate-800">Annual Reports – 3 entities</div>
-                      <div className="text-[11px] text-slate-400">31 Aug 2025</div>
+                      <div className="font-bold text-slate-900">Annual Performance Report &amp; Audited Statements</div>
+                      <div className="text-[11px] text-slate-500">Annual statutory submission to Parliamentary tabling • Due 31 Dec 2026</div>
                     </div>
                   </div>
-                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
-                    21 days left
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 shrink-0">
+                    Annual: 31 Dec
                   </span>
                 </div>
 
-                {/* Budget Submissions */}
+                {/* 3. Q3 Report */}
                 <div 
                   onClick={() => openFeatureInSideView('reports')}
-                  className="flex items-center justify-between text-xs p-1.5 rounded-lg hover:bg-slate-50 cursor-pointer transition-colors"
+                  className="flex items-center justify-between text-xs p-2 rounded-lg hover:bg-slate-50 border border-slate-100 cursor-pointer transition-colors"
                 >
                   <div className="flex items-start gap-2.5">
-                    <Calendar className="w-4 h-4 text-slate-400 mt-0.5 shrink-0" />
+                    <Clock className="w-4 h-4 text-blue-600 mt-0.5 shrink-0" />
                     <div>
-                      <div className="font-semibold text-slate-800">Budget Submissions – 4 NPOs</div>
-                      <div className="text-[11px] text-slate-400">31 Aug 2025</div>
+                      <div className="font-semibold text-slate-800">Q3 Performance &amp; Expenditure Report (Oct – Dec)</div>
+                      <div className="text-[11px] text-slate-500">Due after 3 months on last day: 31 Jan 2026</div>
                     </div>
                   </div>
-                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
-                    21 days left
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-800 border border-blue-200 shrink-0">
+                    Q3: 31 Jan
                   </span>
                 </div>
 
-                {/* Audit Reports */}
+                {/* 4. Q4 Report */}
                 <div 
                   onClick={() => openFeatureInSideView('reports')}
-                  className="flex items-center justify-between text-xs p-1.5 rounded-lg hover:bg-slate-50 cursor-pointer transition-colors"
+                  className="flex items-center justify-between text-xs p-2 rounded-lg hover:bg-slate-50 border border-slate-100 cursor-pointer transition-colors"
                 >
                   <div className="flex items-start gap-2.5">
-                    <Calendar className="w-4 h-4 text-slate-400 mt-0.5 shrink-0" />
+                    <Clock className="w-4 h-4 text-blue-600 mt-0.5 shrink-0" />
                     <div>
-                      <div className="font-semibold text-slate-800">Audit Reports – 2 entities</div>
-                      <div className="text-[11px] text-slate-400">30 Sep 2025</div>
+                      <div className="font-semibold text-slate-800">Q4 Closeout Report (Jan – Mar)</div>
+                      <div className="text-[11px] text-slate-500">Due after 3 months on last day: 30 Apr 2026</div>
                     </div>
                   </div>
-                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-cyan-100 text-cyan-800 border border-cyan-200">
-                    51 days left
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-800 border border-blue-200 shrink-0">
+                    Q4: 30 Apr
+                  </span>
+                </div>
+
+                {/* 5. Q1 Report */}
+                <div 
+                  onClick={() => openFeatureInSideView('reports')}
+                  className="flex items-center justify-between text-xs p-2 rounded-lg hover:bg-slate-50 border border-slate-100 cursor-pointer transition-colors"
+                >
+                  <div className="flex items-start gap-2.5">
+                    <Clock className="w-4 h-4 text-blue-600 mt-0.5 shrink-0" />
+                    <div>
+                      <div className="font-semibold text-slate-800">Q1 Performance &amp; Expenditure Report (Apr – Jun)</div>
+                      <div className="text-[11px] text-slate-500">Due after 3 months on last day: 31 Jul 2026</div>
+                    </div>
+                  </div>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-800 border border-blue-200 shrink-0">
+                    Q1: 31 Jul
                   </span>
                 </div>
               </div>
             </div>
 
-            {/* Recent Alerts */}
+            {/* Recent Alerts (Accurate and relevant to actual entities) */}
             <div className="bg-white rounded-xl p-5 border border-slate-200 shadow-xs flex flex-col justify-between">
               <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-                <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4 text-rose-600" />
-                  <span>Recent Alerts</span>
-                </h3>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 text-rose-600" />
+                    <span>Relevant Entity Alerts</span>
+                  </h3>
+                  <p className="text-[10px] text-slate-500 mt-0.5">Real-time alerts for department oversight</p>
+                </div>
                 <button 
                   onClick={() => openFeatureInSideView('risks')}
                   className="text-xs text-emerald-700 hover:text-emerald-800 font-semibold cursor-pointer flex items-center gap-1"
@@ -1014,71 +1208,113 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
                 </button>
               </div>
 
-              <div className="py-3 space-y-3">
-                {/* Alert 1 */}
+              <div className="py-3 space-y-2.5">
+                {/* Alert 1: National Arts Council */}
                 <div 
-                  onClick={() => openFeatureInSideView('compliance')}
-                  className="flex items-start justify-between text-xs p-1.5 rounded-lg hover:bg-slate-50 cursor-pointer transition-colors"
-                  title="Inspect non-compliant reporting in Side View"
+                  onClick={() => openFeatureInSideView('performance', 'ent-nac')}
+                  className="flex items-start justify-between text-xs p-2 rounded-lg bg-rose-50/50 border border-rose-100 hover:bg-rose-50 cursor-pointer transition-colors"
+                  title="Inspect National Arts Council in Performance Side View"
                 >
                   <div className="flex items-start gap-2.5">
                     <div className="w-4 h-4 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center shrink-0 mt-0.5 font-bold text-[9px]">
                       !
                     </div>
                     <div>
-                      <div className="font-semibold text-slate-800 hover:text-rose-700">Entity B has missed two consecutive reporting periods</div>
-                      <div className="text-[11px] text-slate-400">2 hours ago · Click to inspect in Compliance Side View</div>
+                      <div className="font-bold text-slate-900 hover:text-rose-700">
+                        National Arts Council (NAC)
+                      </div>
+                      <div className="text-[11px] text-slate-600 mt-0.5">
+                        Artist grant disbursement rate (51.7%) lagging behind quarterly targets; overdue Q3 report.
+                      </div>
+                      <div className="text-[10px] text-slate-400 mt-0.5">35 mins ago · Click to inspect Performance</div>
                     </div>
                   </div>
                 </div>
 
-                {/* Alert 2 */}
+                {/* Alert 2: Boxing South Africa */}
                 <div 
-                  onClick={() => openFeatureInSideView('support')}
-                  className="flex items-start justify-between text-xs p-1.5 rounded-lg hover:bg-slate-50 cursor-pointer transition-colors"
-                  title="Inspect NPO budget utilization in Support Side View"
-                >
-                  <div className="flex items-start gap-2.5">
-                    <div className="w-4 h-4 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center shrink-0 mt-0.5 font-bold text-[9px]">
-                      !
-                    </div>
-                    <div>
-                      <div className="font-semibold text-slate-800 hover:text-amber-700">NPO C budget utilization is below 40%</div>
-                      <div className="text-[11px] text-slate-400">5 hours ago · Click to inspect in Support Side View</div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Alert 3 */}
-                <div 
-                  onClick={() => openFeatureInSideView('risks')}
-                  className="flex items-start justify-between text-xs p-1.5 rounded-lg hover:bg-slate-50 cursor-pointer transition-colors"
-                  title="Inspect unresolved audit findings in Risk Side View"
+                  onClick={() => openFeatureInSideView('risks', 'ent-bsa')}
+                  className="flex items-start justify-between text-xs p-2 rounded-lg bg-rose-50/50 border border-rose-100 hover:bg-rose-50 cursor-pointer transition-colors"
+                  title="Inspect Boxing South Africa in Risk Side View"
                 >
                   <div className="flex items-start gap-2.5">
                     <div className="w-4 h-4 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center shrink-0 mt-0.5 font-bold text-[9px]">
                       !
                     </div>
                     <div>
-                      <div className="font-semibold text-slate-800 hover:text-rose-700">Entity D has 3 unresolved audit findings</div>
-                      <div className="text-[11px] text-slate-400">1 day ago · Click to inspect in Risk Side View</div>
+                      <div className="font-bold text-slate-900 hover:text-rose-700">
+                        Boxing South Africa (BSA)
+                      </div>
+                      <div className="text-[11px] text-slate-600 mt-0.5">
+                        Sanctioned tournament compliance at 40%; Ministerial intervention team convened.
+                      </div>
+                      <div className="text-[10px] text-slate-400 mt-0.5">2 hours ago · Click to inspect Risk Side View</div>
                     </div>
                   </div>
                 </div>
 
-                {/* Alert 4 */}
+                {/* Alert 3: PACOFS */}
                 <div 
-                  onClick={() => openFeatureInSideView('compliance')}
-                  className="flex items-start justify-between text-xs p-1.5 rounded-lg hover:bg-slate-50 cursor-pointer transition-colors"
-                  title="Inspect governance documents in Compliance Side View"
+                  onClick={() => openFeatureInSideView('risks', 'ent-pacofs')}
+                  className="flex items-start justify-between text-xs p-2 rounded-lg bg-amber-50/50 border border-amber-100 hover:bg-amber-50 cursor-pointer transition-colors"
+                  title="Inspect PACOFS in Risk Side View"
                 >
                   <div className="flex items-start gap-2.5">
                     <div className="w-4 h-4 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center shrink-0 mt-0.5 font-bold text-[9px]">
                       !
                     </div>
                     <div>
-                      <div className="font-semibold text-slate-800 hover:text-amber-700">5 entities have outstanding governance documents</div>
-                      <div className="text-[11px] text-slate-400">1 day ago · Click to inspect in Compliance Side View</div>
+                      <div className="font-bold text-slate-900 hover:text-amber-700">
+                        Performing Arts Centre of the Free State (PACOFS)
+                      </div>
+                      <div className="text-[11px] text-slate-600 mt-0.5">
+                        3 unresolved AGSA findings on theatre fixed asset register reconciliation outstanding &gt;90 days.
+                      </div>
+                      <div className="text-[10px] text-slate-400 mt-0.5">5 hours ago · Click to inspect Risk Side View</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Alert 4: Ubuntu Arts NPO */}
+                <div 
+                  onClick={() => openFeatureInSideView('support', 'ent-ubuntu-arts')}
+                  className="flex items-start justify-between text-xs p-2 rounded-lg bg-amber-50/50 border border-amber-100 hover:bg-amber-50 cursor-pointer transition-colors"
+                  title="Inspect Ubuntu Arts in Support Side View"
+                >
+                  <div className="flex items-start gap-2.5">
+                    <div className="w-4 h-4 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center shrink-0 mt-0.5 font-bold text-[9px]">
+                      !
+                    </div>
+                    <div>
+                      <div className="font-bold text-slate-900 hover:text-amber-700">
+                        Ubuntu Arts Community NPO
+                      </div>
+                      <div className="text-[11px] text-slate-600 mt-0.5">
+                        Community arts touring tranche expenditure at 41% pending Bizana venue verification.
+                      </div>
+                      <div className="text-[10px] text-slate-400 mt-0.5">1 day ago · Click to inspect Support Side View</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Alert 5: SAHRA */}
+                <div 
+                  onClick={() => openFeatureInSideView('performance', 'ent-sahra')}
+                  className="flex items-start justify-between text-xs p-2 rounded-lg hover:bg-slate-50 border border-slate-100 cursor-pointer transition-colors"
+                  title="Inspect SAHRA in Performance Side View"
+                >
+                  <div className="flex items-start gap-2.5">
+                    <div className="w-4 h-4 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center shrink-0 mt-0.5 font-bold text-[9px]">
+                      i
+                    </div>
+                    <div>
+                      <div className="font-bold text-slate-900 hover:text-blue-700">
+                        South African Heritage Resources Agency (SAHRA)
+                      </div>
+                      <div className="text-[11px] text-slate-600 mt-0.5">
+                        Heritage site grading lag in Sarah Baartman district (8 of 15 expected assessments logged).
+                      </div>
+                      <div className="text-[10px] text-slate-400 mt-0.5">2 days ago · Click to inspect Performance</div>
                     </div>
                   </div>
                 </div>
@@ -1141,6 +1377,7 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
               entities={entities}
               onSelectEntity={onNavigateToEntity}
               onOpenWorkspace={onNavigateToEntity}
+              onOpenSideView={(feature, entityId) => openFeatureInSideView(feature, entityId)}
             />
           </div>
         )}
@@ -1170,7 +1407,12 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
         {/* VIEW 8: ANALYTICS */}
         {activeSidebar === 'analytics' && (
           <div className="p-4 sm:p-6 overflow-y-auto">
-            <AIPerformanceAnalyst />
+            <DsacAnalyticsView
+              entities={entities}
+              onSelectEntity={onNavigateToEntity}
+              onOpenWorkspace={onNavigateToEntity}
+              onOpenSideView={(feature, entityId) => openFeatureInSideView(feature, entityId)}
+            />
           </div>
         )}
 
@@ -1184,7 +1426,7 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
         {/* VIEW 10: SETTINGS */}
         {activeSidebar === 'settings' && (
           <div className="p-4 sm:p-6 overflow-y-auto">
-            <AuditLogView />
+            <DsacSettingsView />
           </div>
         )}
 
@@ -1203,6 +1445,7 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
           selectedEntityId={selectedSideViewEntityId}
           onSelectEntityId={(id) => setSelectedSideViewEntityId(id)}
           onOpenWorkspace={onNavigateToEntity}
+          initialEntityFilter={sideViewEntityFilter}
         />
 
         {/* Entity Inspection Drawer (fallback for direct entity clicks if needed) */}

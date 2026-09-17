@@ -26,6 +26,7 @@ interface DsacSupportViewProps {
   entities: PublicEntity[];
   onSelectEntity?: (entityId: string) => void;
   onOpenWorkspace?: (entityId: string) => void;
+  onOpenSideView?: (feature: 'compliance' | 'performance' | 'support' | 'reports' | 'entities' | 'risks', entityId?: string) => void;
 }
 
 interface SupportRequestItem {
@@ -152,7 +153,8 @@ const INITIAL_SUPPORT_REQUESTS: SupportRequestItem[] = [
 export const DsacSupportView: React.FC<DsacSupportViewProps> = ({
   entities,
   onSelectEntity,
-  onOpenWorkspace
+  onOpenWorkspace,
+  onOpenSideView
 }) => {
   const [requests, setRequests] = useState<SupportRequestItem[]>(INITIAL_SUPPORT_REQUESTS);
   const [selectedRequestId, setSelectedRequestId] = useState<string>(INITIAL_SUPPORT_REQUESTS[0].id);
@@ -229,16 +231,41 @@ export const DsacSupportView: React.FC<DsacSupportViewProps> = ({
 
         {/* 6 Categories Breakdown */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 pt-3">
-          {categories.map((cat) => (
-            <div key={cat.name} className="p-2.5 rounded-lg bg-slate-50 border border-slate-200/70">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-semibold text-slate-600 truncate">{cat.name}</span>
-                <span className={`w-2 h-2 rounded-full ${cat.color}`}></span>
+          {categories.map((cat) => {
+            const isSelected = categoryFilter === cat.name;
+            return (
+              <div 
+                key={cat.name} 
+                onClick={() => {
+                  if (categoryFilter === cat.name) {
+                    setCategoryFilter('ALL');
+                  } else {
+                    setCategoryFilter(cat.name);
+                    const match = requests.find(r => r.category === cat.name);
+                    if (match) {
+                      setSelectedRequestId(match.id);
+                      onOpenSideView?.('support', match.entityId);
+                    } else {
+                      onOpenSideView?.('support', 'ent-sahra');
+                    }
+                  }
+                }}
+                className={`p-2.5 rounded-lg border transition-all cursor-pointer hover:shadow-xs ${
+                  isSelected 
+                    ? 'bg-blue-50/80 border-blue-500 shadow-2xs ring-1 ring-blue-300' 
+                    : 'bg-slate-50 border-slate-200/70 hover:bg-slate-100/70'
+                }`}
+                title={`Filter by ${cat.name} & inspect in side view`}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-semibold text-slate-600 truncate">{cat.name}</span>
+                  <span className={`w-2 h-2 rounded-full ${cat.color}`}></span>
+                </div>
+                <div className="text-xl font-black text-slate-900 mt-1">{cat.count}</div>
+                <div className="text-[10px] text-slate-400">Interventions</div>
               </div>
-              <div className="text-xl font-black text-slate-900 mt-1">{cat.count}</div>
-              <div className="text-[10px] text-slate-400">Interventions</div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 
@@ -295,7 +322,14 @@ export const DsacSupportView: React.FC<DsacSupportViewProps> = ({
             <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">
               Support Pipeline ({filteredRequests.length})
             </span>
-            <span className="text-[11px] text-slate-400 font-medium">Click to inspect in side view</span>
+            <button
+              onClick={() => onOpenSideView?.('support', selectedRequest?.entityId || 'ent-sahra')}
+              className="text-[11px] text-emerald-700 hover:text-emerald-800 font-semibold cursor-pointer flex items-center gap-1 hover:underline"
+              title="Inspect in side view"
+            >
+              <span>Click to inspect in side view</span>
+              <ArrowUpRight className="w-3 h-3" />
+            </button>
           </div>
 
           <div className="flex-1 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
@@ -305,7 +339,10 @@ export const DsacSupportView: React.FC<DsacSupportViewProps> = ({
               return (
                 <div
                   key={req.id}
-                  onClick={() => setSelectedRequestId(req.id)}
+                  onClick={() => {
+                    setSelectedRequestId(req.id);
+                    onOpenSideView?.('support', req.entityId);
+                  }}
                   className={`p-3 rounded-xl border transition-all cursor-pointer text-left ${
                     isSelected
                       ? 'bg-blue-50/80 border-blue-600 shadow-xs ring-1 ring-blue-400/40'
@@ -375,7 +412,7 @@ export const DsacSupportView: React.FC<DsacSupportViewProps> = ({
                     {selectedRequest.title}
                   </h3>
                   <p className="text-xs text-slate-600 mt-0.5">
-                    Submitting Institution: <strong className="text-slate-800">{selectedRequest.entityName}</strong> • Date: {selectedRequest.submittedDate}
+                    Submitting Institution: <button onClick={() => onOpenSideView?.('support', selectedRequest.entityId)} className="font-bold text-blue-700 hover:underline cursor-pointer">{selectedRequest.entityName}</button> • Date: {selectedRequest.submittedDate}
                   </p>
                 </div>
 
@@ -395,14 +432,14 @@ export const DsacSupportView: React.FC<DsacSupportViewProps> = ({
                   <>
                     <button
                       onClick={() => handleApprove(selectedRequest.id)}
-                      className="px-3.5 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-semibold flex items-center gap-1.5 shadow-xs transition-colors"
+                      className="px-3.5 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-semibold flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
                     >
                       <Check className="w-3.5 h-3.5" />
                       <span>Approve Support Package</span>
                     </button>
                     <button
                       onClick={() => handleDecline(selectedRequest.id)}
-                      className="px-3 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-800 text-xs font-semibold flex items-center gap-1.5 transition-colors"
+                      className="px-3.5 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-800 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
                     >
                       <X className="w-3.5 h-3.5" />
                       <span>Decline Request</span>
@@ -413,7 +450,7 @@ export const DsacSupportView: React.FC<DsacSupportViewProps> = ({
                 {selectedRequest.status === 'APPROVED' && (
                   <button
                     onClick={() => handleDisburse(selectedRequest.id)}
-                    className="px-3.5 py-1.5 rounded-lg bg-teal-700 hover:bg-teal-800 text-white text-xs font-semibold flex items-center gap-1.5 shadow-xs transition-colors"
+                    className="px-3.5 py-1.5 rounded-lg bg-teal-700 hover:bg-teal-800 text-white text-xs font-semibold flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
                   >
                     <ArrowUpRight className="w-3.5 h-3.5" />
                     <span>Disburse Funds via National Treasury BAS</span>
@@ -426,6 +463,15 @@ export const DsacSupportView: React.FC<DsacSupportViewProps> = ({
                     <span>Funds Successfully Disbursed &amp; Reconciled</span>
                   </div>
                 )}
+
+                <button
+                  onClick={() => onOpenSideView?.('support', selectedRequest.entityId)}
+                  className="px-3.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer ml-auto"
+                  title="Inspect this entity's full statutory tranche and capacity support dossier in side view"
+                >
+                  <Coins className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Inspect in Side View</span>
+                </button>
               </div>
 
               {/* Scope & Justification */}
