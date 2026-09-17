@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { UserRole } from '../types';
 import { store } from '../services/store';
+import { SouthAfricanCoatOfArms } from './SouthAfricanCoatOfArms';
 
 interface HeaderProps {
   currentTab: string;
@@ -86,9 +87,9 @@ export const Header: React.FC<HeaderProps> = ({
         <div className="flex items-center justify-between h-16 gap-4">
           
           {/* Logo & Platform Tagline */}
-          <div className="flex items-center gap-3 cursor-pointer" onClick={() => onSelectTab('dashboard')}>
-            <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-emerald-600 to-teal-800 flex items-center justify-center shadow-lg border border-emerald-400/30">
-              <Landmark className="w-6 h-6 text-white" />
+          <div className="flex items-center gap-3 cursor-pointer" onClick={() => onSelectTab('dsac-repo')}>
+            <div className="w-10 h-10 rounded-lg bg-emerald-950 border border-emerald-500/40 flex items-center justify-center p-1 shadow-lg shrink-0">
+              <SouthAfricanCoatOfArms size={34} variant="gold" />
             </div>
             <div>
               <div className="flex items-center gap-2">
@@ -100,43 +101,55 @@ export const Header: React.FC<HeaderProps> = ({
                 </span>
               </div>
               <p className="text-[11px] text-slate-400 -mt-0.5 font-medium">
-                National Public Entities &amp; NPOs Statutory Performance Management
+                Department of Sport, Arts and Culture • Statutory Performance Management
               </p>
             </div>
           </div>
 
           {/* Navigation Links */}
-          <nav className="hidden lg:flex items-center gap-1">
+          <nav className="hidden xl:flex items-center gap-1.5">
+            {/* 1. DSAC REPO Dashboard (Left view from image) */}
             <button
-              onClick={() => onSelectTab('dashboard')}
-              className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                currentTab === 'dashboard' 
-                  ? 'bg-slate-800 text-white border border-slate-700 shadow-sm' 
-                  : 'text-slate-300 hover:text-white hover:bg-slate-800/50'
+              onClick={() => onSelectTab('dsac-repo')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                currentTab === 'dsac-repo' || currentTab === 'dashboard'
+                  ? 'bg-emerald-700 text-white shadow-md border border-emerald-500' 
+                  : 'text-emerald-300 hover:text-white hover:bg-emerald-950/60 border border-emerald-900/60'
               }`}
             >
-              Executive Pulse
+              <span>🏛️ DSAC REPO Dashboard</span>
             </button>
 
+            {/* 2. Entity / NPO Dashboard (Right view from image - Ubuntu Arts NPO) */}
             <button
-              onClick={() => onSelectTab('radar')}
-              className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-1.5 ${
-                currentTab === 'radar' 
-                  ? 'bg-slate-800 text-white border border-slate-700 shadow-sm' 
-                  : 'text-slate-300 hover:text-white hover:bg-slate-800/50'
+              onClick={() => onSelectTab('entity-portal')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                currentTab === 'entity-portal'
+                  ? 'bg-indigo-700 text-white shadow-md border border-indigo-500' 
+                  : 'text-indigo-300 hover:text-white hover:bg-indigo-950/60 border border-indigo-900/60'
               }`}
             >
-              <span>Early Warning</span>
-              {pulse.highRiskEntitiesCount > 0 && (
-                <span className="px-1.5 py-0.2 bg-rose-500/20 text-rose-300 border border-rose-500/30 rounded text-[10px] font-bold">
-                  {pulse.highRiskEntitiesCount}
-                </span>
-              )}
+              <span>🎭 Entity / NPO Dashboard</span>
             </button>
+
+            {/* 3. Side-by-Side Comparison */}
+            <button
+              onClick={() => onSelectTab('side-by-side')}
+              className={`px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1 ${
+                currentTab === 'side-by-side'
+                  ? 'bg-slate-700 text-white shadow-md border border-slate-500' 
+                  : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+              }`}
+              title="View both DSAC and Entity Dashboards side-by-side"
+            >
+              <span>◫ Side-by-Side</span>
+            </button>
+
+            <div className="h-5 w-px bg-slate-800 mx-1" />
 
             <button
               onClick={() => onSelectTab('entities')}
-              className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+              className={`px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors ${
                 currentTab === 'entities' 
                   ? 'bg-slate-800 text-white border border-slate-700 shadow-sm' 
                   : 'text-slate-300 hover:text-white hover:bg-slate-800/50'
@@ -146,8 +159,24 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
 
             <button
+              onClick={() => onSelectTab('radar')}
+              className={`px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors flex items-center gap-1 ${
+                currentTab === 'radar' 
+                  ? 'bg-slate-800 text-white border border-slate-700 shadow-sm' 
+                  : 'text-slate-300 hover:text-white hover:bg-slate-800/50'
+              }`}
+            >
+              <span>Early Warning</span>
+              {pulse.highRiskEntitiesCount > 0 && (
+                <span className="px-1 py-0.2 bg-rose-500/20 text-rose-300 border border-rose-500/30 rounded text-[9px] font-bold">
+                  {pulse.highRiskEntitiesCount}
+                </span>
+              )}
+            </button>
+
+            <button
               onClick={() => onSelectTab('workspace')}
-              className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+              className={`px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors ${
                 currentTab === 'workspace' 
                   ? 'bg-slate-800 text-white border border-slate-700 shadow-sm' 
                   : 'text-slate-300 hover:text-white hover:bg-slate-800/50'
@@ -158,52 +187,36 @@ export const Header: React.FC<HeaderProps> = ({
 
             <button
               onClick={() => onSelectTab('documents')}
-              className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+              className={`px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors ${
                 currentTab === 'documents' 
                   ? 'bg-slate-800 text-white border border-slate-700 shadow-sm' 
                   : 'text-slate-300 hover:text-white hover:bg-slate-800/50'
               }`}
             >
-              Documents &amp; PoE
+              Documents
             </button>
 
             <button
               onClick={() => onSelectTab('tasks')}
-              className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-1.5 ${
+              className={`px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors flex items-center gap-1 ${
                 currentTab === 'tasks' 
                   ? 'bg-slate-800 text-white border border-slate-700 shadow-sm' 
                   : 'text-slate-300 hover:text-white hover:bg-slate-800/50'
               }`}
             >
               <span>Directives</span>
-              {pulse.openTasksCount > 0 && (
-                <span className="px-1.5 py-0.2 bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded text-[10px] font-bold">
-                  {pulse.openTasksCount}
-                </span>
-              )}
             </button>
 
             <button
               onClick={() => onSelectTab('ai')}
-              className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-1.5 ${
+              className={`px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors flex items-center gap-1 ${
                 currentTab === 'ai' 
                   ? 'bg-emerald-900/40 text-emerald-300 border border-emerald-700/60 shadow-sm' 
                   : 'text-slate-300 hover:text-white hover:bg-slate-800/50'
               }`}
             >
-              <Shield className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Grounded Analyst</span>
-            </button>
-
-            <button
-              onClick={() => onSelectTab('audit')}
-              className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                currentTab === 'audit' 
-                  ? 'bg-slate-800 text-white border border-slate-700 shadow-sm' 
-                  : 'text-slate-300 hover:text-white hover:bg-slate-800/50'
-              }`}
-            >
-              Audit Trail
+              <Shield className="w-3 h-3 text-emerald-400" />
+              <span>AI Analyst</span>
             </button>
           </nav>
 

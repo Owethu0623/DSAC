@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { store } from '../services/store';
 import { UserRole } from '../types';
+import { SouthAfricanCoatOfArms } from './SouthAfricanCoatOfArms';
 
 interface OfficialAuthPortalProps {
   onSuccess: () => void;
@@ -113,9 +114,13 @@ export const OfficialAuthPortal: React.FC<OfficialAuthPortalProps> = ({ onSucces
       <div className="max-w-xl w-full relative z-10">
         
         {/* Official Header Banner */}
-        <div className="text-center mb-6">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-950/80 border border-emerald-700/60 text-emerald-400 text-xs font-semibold uppercase tracking-wider mb-3">
-            <Landmark className="w-3.5 h-3.5" />
+        <div className="text-center mb-6 flex flex-col items-center">
+          {/* Official South African National Coat of Arms Emblem */}
+          <div className="w-16 h-16 rounded-2xl bg-emerald-950/80 border border-emerald-500/40 flex items-center justify-center p-2 mb-3 shadow-xl backdrop-blur-md">
+            <SouthAfricanCoatOfArms size={52} variant="gold" />
+          </div>
+
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-950/80 border border-emerald-700/60 text-emerald-400 text-xs font-semibold uppercase tracking-wider mb-2">
             <span>Republic of South Africa</span>
           </div>
 

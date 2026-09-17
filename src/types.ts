@@ -7,7 +7,9 @@ export type EntityCluster =
   | 'Performing Arts & Theatres'
   | 'Creative Industries & Film'
   | 'Language & Literature'
-  | 'Sport & Recreation';
+  | 'Languages, Literature & Libraries'
+  | 'Sport & Recreation'
+  | 'Subsidized Cultural NPOs';
 
 export type ReportStatus = 
   | 'DRAFT'
@@ -259,7 +261,8 @@ export interface AuditLogEntry {
     | 'EARLY_WARNING_TRIGGERED'
     | 'USER_REGISTRATION'
     | 'USER_LOGOUT'
-    | 'SYSTEM_BASELINE_SYNC';
+    | 'SYSTEM_BASELINE_SYNC'
+    | 'ENTITY_RECORD_UPDATED';
   details: string;
   ipAddress?: string;
 }

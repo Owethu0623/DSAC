@@ -75,6 +75,13 @@ export class GovTrackStore {
     if (!hasSicelo) {
       loadedUsers = [INITIAL_USERS[0], ...loadedUsers.filter(u => u.email.toLowerCase() !== 'n.sithole@dsac.gov.za')];
     }
+    // Ensure Lerato Phiri & Thandi Mokoena exist
+    INITIAL_USERS.forEach(initUser => {
+      if (!loadedUsers.some(u => u.email.toLowerCase() === initUser.email.toLowerCase())) {
+        loadedUsers.push(initUser);
+      }
+    });
+
     this.registeredUsers = loadedUsers.map(u => ({
       ...u,
       password: u.password || 'Password123!',
@@ -89,7 +96,14 @@ export class GovTrackStore {
     }
     this.currentUser = loadedCurrent;
 
-    this.entities = loadFromStorage<PublicEntity[]>(STORAGE_KEYS.ENTITIES, INITIAL_ENTITIES);
+    let loadedEntities = loadFromStorage<PublicEntity[]>(STORAGE_KEYS.ENTITIES, INITIAL_ENTITIES);
+    INITIAL_ENTITIES.forEach(initEnt => {
+      if (!loadedEntities.some(e => e.id === initEnt.id)) {
+        loadedEntities.push(initEnt);
+      }
+    });
+    this.entities = loadedEntities;
+    saveToStorage(STORAGE_KEYS.ENTITIES, this.entities);
     this.kpis = loadFromStorage<KPIRecord[]>(STORAGE_KEYS.KPIS, INITIAL_KPIS);
     this.reports = loadFromStorage<QuarterlyReport[]>(STORAGE_KEYS.REPORTS, INITIAL_REPORTS);
     this.documents = loadFromStorage<EntityDocument[]>(STORAGE_KEYS.DOCUMENTS, INITIAL_DOCUMENTS);
@@ -144,6 +158,15 @@ export class GovTrackStore {
       'Departmental statutory baseline datasets synchronized with gazetted PFMA Vote 37 appropriations.'
     );
     this.persistAll();
+  }
+
+  updateEntity(updated: PublicEntity): void {
+    const idx = this.entities.findIndex(e => e.id === updated.id);
+    if (idx !== -1) {
+      this.entities[idx] = { ...this.entities[idx], ...updated };
+      this.addAuditLog('ENTITY_RECORD_UPDATED', `Governance record updated for ${updated.name}`, updated.name);
+      this.persistAll();
+    }
   }
 
   // --- REAL AUTHENTICATION & SESSION MANAGEMENT ---
