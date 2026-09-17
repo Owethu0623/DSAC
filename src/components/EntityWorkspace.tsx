@@ -17,7 +17,8 @@ import {
   ShieldAlert,
   ChevronDown,
   Layers,
-  Sparkles
+  Sparkles,
+  LogOut
 } from 'lucide-react';
 import { store } from '../services/store';
 import { 
@@ -32,11 +33,13 @@ import {
 interface EntityWorkspaceProps {
   entityId: string;
   onBackToDashboard: () => void;
+  onLogout?: () => void;
 }
 
 export const EntityWorkspace: React.FC<EntityWorkspaceProps> = ({
   entityId,
   onBackToDashboard,
+  onLogout,
 }) => {
   const currentUser = store.currentUser;
   const isDSACReviewer = currentUser ? (currentUser.role === 'DSAC_ADMIN' || currentUser.role === 'DSAC_MANAGEMENT') : false;
@@ -211,10 +214,20 @@ export const EntityWorkspace: React.FC<EntityWorkspaceProps> = ({
           <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={onBackToDashboard}
-              className="px-3 py-1.5 border border-slate-300 hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-semibold transition-colors"
+              className="px-3 py-1.5 border border-slate-300 hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
             >
               ← Back to Overview
             </button>
+            {onLogout && (
+              <button
+                onClick={onLogout}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-rose-700 hover:text-white bg-rose-50 hover:bg-rose-600 border border-rose-200 hover:border-rose-600 rounded-lg transition-all cursor-pointer"
+                title="Sign Out"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                <span>Sign Out</span>
+              </button>
+            )}
             
             <div className={`px-3 py-1.5 rounded-lg border text-xs font-bold flex items-center gap-1.5 ${
               entity.riskLevel === 'LOW'

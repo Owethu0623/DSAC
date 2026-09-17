@@ -27,9 +27,9 @@ interface OfficialAuthPortalProps {
 export const OfficialAuthPortal: React.FC<OfficialAuthPortalProps> = ({ onSuccess, onCancel }) => {
   const [activeTab, setActiveTab] = useState<'signin' | 'signup'>('signin');
 
-  // Sign In State
-  const [loginEmail, setLoginEmail] = useState('');
-  const [loginPassword, setLoginPassword] = useState('');
+  // Sign In State - ready with official credentials
+  const [loginEmail, setLoginEmail] = useState('sakhilesicelo94@gmail.com');
+  const [loginPassword, setLoginPassword] = useState('Mkhize@550');
   const [showPassword, setShowPassword] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
 

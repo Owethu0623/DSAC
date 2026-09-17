@@ -18,7 +18,7 @@ export const INITIAL_USERS: User[] = [
     role: 'DSAC_ADMIN',
     designation: 'Chief Director: Public Entities Oversight & Governance',
     entityName: 'DSAC National Headquarters',
-    password: 'Password123!',
+    password: 'Mkhize@550',
   },
   {
     id: 'user-dsac-thandi',

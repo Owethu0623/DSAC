@@ -26,20 +26,32 @@ import {
   Filter,
   Check,
   ChevronRight,
-  ArrowLeft
+  ChevronLeft,
+  ArrowLeft,
+  LogOut
 } from 'lucide-react';
 import { store } from '../services/store';
 import { SouthAfricanCoatOfArms, DsacOfficialLogo } from './SouthAfricanCoatOfArms';
 import { PublicEntity } from '../types';
 import { DsacFeatureSideView, DsacFeatureId } from './features/DsacFeatureSideView';
 import { EntityInspectionDrawer } from './features/EntityInspectionDrawer';
+import { DsacEntitiesView } from './features/DsacEntitiesView';
+import { DsacPerformanceView } from './features/DsacPerformanceView';
+import { DsacComplianceView } from './features/DsacComplianceView';
+import { DsacSupportView } from './features/DsacSupportView';
+import { DsacReportsView } from './features/DsacReportsView';
+import { DsacRiskView } from './features/DsacRiskView';
+import { AIPerformanceAnalyst } from './AIPerformanceAnalyst';
+import { TaskManagementView } from './TaskManagementView';
+import { AuditLogView } from './AuditLogView';
 
 interface DsacRepoDashboardProps {
   onNavigateToEntity?: (entityId: string) => void;
   onNavigateToSection?: (section: string) => void;
   onNavigateToEntitiesList?: () => void;
   onOpenReportDetails?: () => void;
-  onOpenAuth?: () => void;
+  onLogout?: () => void;
+  initialSection?: string;
 }
 
 export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
@@ -47,9 +59,10 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
   onNavigateToSection,
   onNavigateToEntitiesList,
   onOpenReportDetails,
-  onOpenAuth,
+  onLogout,
+  initialSection = 'overview',
 }) => {
-  const [activeSidebar, setActiveSidebar] = useState<string>('overview');
+  const [activeSidebar, setActiveSidebar] = useState<string>(initialSection);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedYear, setSelectedYear] = useState<string>('This Financial Year');
   const [supportFilter, setSupportFilter] = useState<string>('This Year');
@@ -81,23 +94,23 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
     email: 'sakhilesicelo94@gmail.com'
   };
 
-  // Stacked KPI Performance by Entity
+  // Stacked KPI Performance by Entity (Matches image.png)
   const entityKpiData = [
-    { name: 'Entity A (SAHRA)', achieved: 65, inProgress: 20, notAchieved: 15, id: 'ent-sahra' },
-    { name: 'Entity B (NAC)', achieved: 48, inProgress: 27, notAchieved: 25, id: 'ent-nac' },
-    { name: 'Entity C (NFVF)', achieved: 74, inProgress: 16, notAchieved: 10, id: 'ent-nfvf' },
-    { name: 'Entity D (Freedom Park)', achieved: 38, inProgress: 32, notAchieved: 30, id: 'ent-fp' },
-    { name: 'Entity E (Ubuntu Arts)', achieved: 82, inProgress: 11, notAchieved: 7, id: 'ent-ubuntu-arts' },
+    { name: 'Entity A', fullName: 'Entity A (SAHRA)', achieved: 65, inProgress: 20, notAchieved: 15, id: 'ent-sahra' },
+    { name: 'Entity B', fullName: 'Entity B (NAC)', achieved: 48, inProgress: 27, notAchieved: 25, id: 'ent-nac' },
+    { name: 'Entity C', fullName: 'Entity C (NFVF)', achieved: 74, inProgress: 16, notAchieved: 10, id: 'ent-nfvf' },
+    { name: 'Entity D', fullName: 'Entity D (Freedom Park)', achieved: 38, inProgress: 32, notAchieved: 30, id: 'ent-fp' },
+    { name: 'Entity E', fullName: 'Entity E (Ubuntu Arts)', achieved: 82, inProgress: 11, notAchieved: 7, id: 'ent-ubuntu-arts' },
   ];
 
-  // Support Given by Type
+  // Support Given by Type (Exact match to image.png colors)
   const supportTypeData = [
-    { type: 'Financial Support', count: 18, color: 'bg-blue-500', max: 20 },
-    { type: 'Capacity Building', count: 12, color: 'bg-teal-500', max: 20 },
-    { type: 'Technical Support', count: 10, color: 'bg-amber-400', max: 20 },
-    { type: 'Governance Support', count: 6, color: 'bg-indigo-600', max: 20 },
-    { type: 'Programme Support', count: 5, color: 'bg-rose-400', max: 20 },
-    { type: 'Infrastructure Support', count: 3, color: 'bg-yellow-500', max: 20 },
+    { type: 'Financial Support', count: 18, color: 'bg-[#3b82f6]', max: 20 },
+    { type: 'Capacity Building', count: 12, color: 'bg-[#06b6d4]', max: 20 },
+    { type: 'Technical Support', count: 10, color: 'bg-[#38bdf8]', max: 20 },
+    { type: 'Governance Support', count: 6, color: 'bg-[#6366f1]', max: 20 },
+    { type: 'Programme Support', count: 5, color: 'bg-[#14b8a6]', max: 20 },
+    { type: 'Infrastructure Support', count: 3, color: 'bg-[#f59e0b]', max: 20 },
   ];
 
   const sidebarItems = [
@@ -114,216 +127,137 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
   ];
 
   return (
-    <div className="flex flex-col lg:flex-row min-h-[920px] bg-slate-100 rounded-xl overflow-hidden border border-slate-300/80 shadow-md">
+    <div className="flex flex-row min-h-screen w-full bg-slate-100">
       
-      {/* 1. LEFT SIDEBAR (Forest Green with African Motif) */}
-      <aside className="w-full lg:w-56 bg-[#044332] text-emerald-100 flex flex-col justify-between shrink-0 select-none">
+      {/* 1. Official DSAC Dark Green Sidebar (Always positioned on left of content) */}
+      <aside className="w-48 sm:w-56 shrink-0 bg-[#044332] text-emerald-100 flex flex-col justify-between select-none border-r border-emerald-950 min-h-screen sticky top-0 self-start z-30">
         <div>
-          {/* Top Logo Watermark in Sidebar */}
-          <div className="p-4 border-b border-emerald-800/40">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-lg bg-emerald-950/90 border border-emerald-500/40 flex items-center justify-center p-1 shadow-inner shrink-0">
-                <SouthAfricanCoatOfArms size={32} variant="gold" />
-              </div>
-              <div>
-                <div className="font-bold text-white text-xs tracking-wide">DSAC REPO</div>
-                <div className="text-[10px] text-emerald-300/80 font-medium">Statutory Oversight</div>
-              </div>
+          {/* Logo & Header in Sidebar */}
+          <div className="p-4 border-b border-emerald-800/60 flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-emerald-950 border border-emerald-500/40 flex items-center justify-center p-1 shadow-inner shrink-0">
+              <SouthAfricanCoatOfArms size={30} variant="gold" />
+            </div>
+            <div>
+              <div className="font-black text-white text-xs tracking-wider">DSAC REPO</div>
+              <div className="text-[10px] text-emerald-300/80 font-medium">Statutory Oversight</div>
             </div>
           </div>
 
           {/* Navigation Items */}
-          <nav className="p-3 space-y-1">
+          <nav className="p-2 space-y-1">
             {sidebarItems.map((item) => {
               const Icon = item.icon;
-              const isActive =
-                (!isSideViewOpen && activeSidebar === item.id) ||
-                (isSideViewOpen &&
-                  (sideViewFeature === item.id ||
-                    (item.id === 'analytics' && sideViewFeature === 'performance') ||
-                    (item.id === 'approvals' && sideViewFeature === 'reports')));
-
+              const isActive = activeSidebar === item.id;
               return (
                 <button
                   key={item.id}
                   onClick={() => {
-                    if (item.id === 'overview') {
-                      setIsSideViewOpen(false);
-                      setActiveSidebar('overview');
-                    } else if (
-                      item.id === 'compliance' ||
-                      item.id === 'performance' ||
-                      item.id === 'support' ||
-                      item.id === 'reports' ||
-                      item.id === 'entities' ||
-                      item.id === 'risks'
-                    ) {
-                      openFeatureInSideView(item.id as DsacFeatureId);
-                    } else if (item.id === 'analytics') {
-                      openFeatureInSideView('performance');
-                    } else if (item.id === 'approvals') {
-                      openFeatureInSideView('reports');
-                    } else {
-                      setActiveSidebar(item.id);
+                    setActiveSidebar(item.id);
+                    if (onNavigateToSection && item.id !== 'overview') {
+                      onNavigateToSection(item.id);
                     }
                   }}
-                  className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-xs font-medium transition-all ${
+                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-medium transition-all ${
                     isActive
-                      ? 'bg-[#0c5943] text-white shadow-sm font-semibold ring-1 ring-emerald-400/30'
+                      ? 'bg-[#0c5943] text-white shadow-sm font-bold ring-1 ring-emerald-400/40'
                       : 'text-emerald-200/80 hover:bg-[#07533f] hover:text-white'
                   }`}
                 >
                   <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-emerald-300' : 'text-emerald-400/80'}`} />
-                  <span className="flex-1 text-left">{item.label}</span>
-                  {['compliance', 'performance', 'support', 'reports', 'entities', 'risks'].includes(item.id) && (
-                    <span className="text-[9px] px-1 py-0.2 rounded bg-emerald-950/60 text-emerald-300/80 font-mono">
-                      Side
-                    </span>
-                  )}
+                  <span className="flex-1 text-left truncate">{item.label}</span>
                 </button>
               );
             })}
           </nav>
         </div>
 
-        {/* Bottom Geometric Motif & Slogan */}
-        <div className="p-4 pt-6 border-t border-emerald-800/50 relative overflow-hidden">
-          {/* Subtle South African Geometric Background lines */}
-          <div className="absolute inset-0 opacity-10 pointer-events-none flex items-center justify-center">
-            <svg viewBox="0 0 100 100" className="w-40 h-40 text-emerald-200 fill-current">
-              <polygon points="50,0 100,50 50,100 0,50" />
-              <polygon points="50,20 80,50 50,80 20,50" />
-            </svg>
-          </div>
-
-          <div className="relative z-10 space-y-0.5 text-[11px] font-semibold tracking-wider text-emerald-300 uppercase">
+        {/* Bottom Slogan Motif (Exact match to image.png) */}
+        <div className="p-4 pt-6 border-t border-emerald-800/60 relative overflow-hidden">
+          <div className="space-y-0.5 text-[11px] font-semibold tracking-wider text-emerald-300 uppercase">
             <div className="text-white font-bold text-xs">Culture</div>
             <div>Heritage</div>
             <div>People</div>
             <div className="text-emerald-400 font-bold pt-1">A Better South Africa</div>
           </div>
-
-          <div className="mt-3 pt-2 border-t border-emerald-700/40 flex items-center gap-1.5 text-[10px] text-emerald-300/70">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-            <span>Live REPO System</span>
-          </div>
         </div>
       </aside>
 
-      {/* 2. MAIN CONTENT AREA */}
-      <div className="flex-1 flex flex-col bg-slate-50 min-w-0 overflow-y-auto">
+      {/* 2. Main Content Area */}
+      <div className="flex-1 flex flex-col min-w-0 bg-slate-50">
         
         {/* Top Header Bar */}
-        <header className="bg-white border-b border-slate-200 px-6 py-3.5 flex flex-col sm:flex-row items-center justify-between gap-4 sticky top-0 z-20 shadow-xs">
-          {/* Official DSAC Coat of Arms & Titles */}
-          <div className="flex items-center gap-4">
-            {/* South African DSAC Brand Official Logo Lockup */}
+        <header className="bg-white border-b border-slate-200 px-4 sm:px-6 py-3 flex items-center justify-between gap-3 shrink-0 sticky top-0 z-20">
+          <div className="flex items-center gap-3.5 min-w-0">
             <DsacOfficialLogo variant="light" />
-
-            <div className="hidden md:block h-8 w-px bg-slate-200"></div>
-
-            <div>
-              <h1 className="text-base sm:text-lg font-black text-slate-900 leading-none">
+            <div className="hidden sm:block h-7 w-px bg-slate-200" />
+            <div className="truncate">
+              <h1 className="text-base sm:text-lg font-black text-slate-900 leading-tight truncate">
                 DSAC REPO Dashboard
               </h1>
-              <p className="text-[11px] text-slate-500 font-medium mt-0.5">
+              <p className="text-[11px] text-slate-500 font-medium truncate">
                 Oversight. Insight. Greater Impact.
               </p>
             </div>
           </div>
 
-          {/* Right Controls: Search, Notifications, Profile */}
-          <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
-            {/* Search input */}
-            <div className="relative w-48 sm:w-60">
-              <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+          <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+            {/* Search */}
+            <div className="relative hidden md:block w-48 lg:w-56">
+              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
               <input
                 type="text"
                 placeholder="Search entities, reports..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-8 pr-3 py-1.5 text-xs bg-slate-100 border border-slate-200 rounded-lg text-slate-800 placeholder-slate-400 focus:outline-hidden focus:bg-white focus:ring-1 focus:ring-emerald-600"
+                className="w-full pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:bg-white focus:outline-hidden focus:ring-1 focus:ring-emerald-600"
               />
             </div>
 
-            {/* Notification Bell */}
+            {/* Notification Bell with Badge 3 */}
             <div className="relative">
-              <button 
+              <button
                 onClick={() => setShowNotifications(!showNotifications)}
-                className="p-1.5 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100 relative transition-colors"
-                title="Notifications"
+                className="relative p-2 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors"
               >
                 <Bell className="w-4 h-4" />
-                <span className="absolute top-0.5 right-0.5 w-4 h-4 bg-rose-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center">
+                <span className="absolute top-1 right-1 w-4 h-4 bg-rose-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center">
                   3
                 </span>
               </button>
-
-              {showNotifications && (
-                <div className="absolute right-0 mt-2 w-72 bg-white rounded-xl shadow-lg border border-slate-200 p-3 z-30 text-xs">
-                  <div className="font-bold text-slate-800 pb-2 border-b border-slate-100 flex items-center justify-between">
-                    <span>Oversight Alerts</span>
-                    <span className="text-[10px] text-rose-600 font-semibold">3 Unread</span>
-                  </div>
-                  <div className="py-2 space-y-2">
-                    <div className="p-1.5 rounded bg-rose-50 border border-rose-100 text-rose-900 text-[11px]">
-                      Entity B (NAC) missed Q3 deadline.
-                    </div>
-                    <div className="p-1.5 rounded bg-amber-50 border border-amber-100 text-amber-900 text-[11px]">
-                      NPO C low budget utilization flag.
-                    </div>
-                    <div className="p-1.5 rounded bg-emerald-50 border border-emerald-100 text-emerald-900 text-[11px]">
-                      Ubuntu Arts NPO uploaded Q2 PoE.
-                    </div>
-                  </div>
-                </div>
-              )}
             </div>
 
-            {/* User Profile Pill */}
-            <div className="relative">
-              <button
-                onClick={() => setShowProfileMenu(!showProfileMenu)}
-                className="flex items-center gap-2 pl-1.5 pr-2.5 py-1 rounded-full bg-slate-100 hover:bg-slate-200/80 border border-slate-200 transition-colors"
-              >
-                <div className="w-6 h-6 rounded-full bg-teal-800 text-white font-bold text-[10px] flex items-center justify-center">
-                  {currentUser.name.split(' ').map(n => n[0]).slice(0, 2).join('')}
+            {/* User Profile & Sign Out */}
+            <div className="flex items-center gap-2 sm:gap-3 pl-2 sm:pl-3 border-l border-slate-200">
+              <div className="w-8 h-8 rounded-full bg-[#044332] text-emerald-300 font-bold text-xs flex items-center justify-center border border-emerald-700/50 shadow-xs shrink-0">
+                {store.currentUser?.name
+                  ? store.currentUser.name.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase()
+                  : 'SM'}
+              </div>
+              <div className="hidden lg:block text-left text-xs">
+                <div className="font-bold text-slate-800 leading-none">
+                  {store.currentUser?.name || 'Sicelo Sakhile Mkhize'}
                 </div>
-                <div className="text-left hidden sm:block">
-                  <div className="text-[11px] font-bold text-slate-800 leading-tight line-clamp-1">{currentUser.name}</div>
-                  <div className="text-[9px] text-emerald-700 font-medium leading-none">
-                    {currentUser.role === 'DSAC_ADMIN' ? 'DSAC Admin' : 'DSAC Official'}
-                  </div>
+                <div className="text-[10px] text-slate-500 mt-0.5">
+                  {store.currentUser?.designation || 'Chief Director: Oversight'}
                 </div>
-                <ChevronDown className="w-3 h-3 text-slate-500" />
-              </button>
-
-              {showProfileMenu && (
-                <div className="absolute right-0 mt-2 w-56 bg-white rounded-xl shadow-lg border border-slate-200 p-2 z-30 text-xs">
-                  <div className="p-2 border-b border-slate-100">
-                    <div className="font-bold text-slate-800">{currentUser.name}</div>
-                    <div className="text-[10px] text-slate-500 truncate">{currentUser.email}</div>
-                    <div className="text-[10px] text-emerald-700 font-semibold mt-0.5">{currentUser.designation}</div>
-                  </div>
-                  {onOpenAuth && (
-                    <button
-                      onClick={() => {
-                        setShowProfileMenu(false);
-                        onOpenAuth();
-                      }}
-                      className="w-full text-left px-2.5 py-2 hover:bg-slate-50 rounded-lg text-slate-700 text-xs font-medium mt-1"
-                    >
-                      Switch Account / Sign Out
-                    </button>
-                  )}
-                </div>
+              </div>
+              {onLogout && (
+                <button
+                  onClick={onLogout}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-rose-700 hover:text-white bg-rose-50 hover:bg-rose-600 border border-rose-200 hover:border-rose-600 rounded-lg transition-all shadow-xs cursor-pointer ml-1"
+                  title="Sign Out of DSAC REPO"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Sign Out</span>
+                </button>
               )}
             </div>
           </div>
         </header>
 
-        {/* Dashboard Content Container */}
-        <div className="p-4 sm:p-6 space-y-5">
+        {/* VIEW 1: OVERVIEW DASHBOARD */}
+        {activeSidebar === 'overview' && (
+          <div className="p-4 sm:p-6 space-y-5 overflow-y-auto">
           
           {/* DSAC Official Feature Toolbar: Click any feature to open dedicated Side View for all 26 PEs and 6 NPOs */}
           <div className="bg-white border border-slate-200 px-4 py-3 rounded-xl shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3">
@@ -615,8 +549,7 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
                   onClick={() => openFeatureInSideView('performance')}
                   className="text-xs text-emerald-700 hover:text-emerald-800 font-semibold cursor-pointer flex items-center gap-1"
                 >
-                  <span>Side View</span>
-                  <span>→</span>
+                  <span>View All</span>
                 </button>
               </div>
 
@@ -721,7 +654,7 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
                       cx="50"
                       cy="50"
                       r="38"
-                      stroke="#0ea5e9"
+                      stroke="#10b981"
                       strokeWidth="15"
                       strokeDasharray="238.76"
                       strokeDashoffset="50.14" // 79%
@@ -733,7 +666,7 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
                       cx="50"
                       cy="50"
                       r="38"
-                      stroke="#f43f5e"
+                      stroke="#38bdf8"
                       strokeWidth="15"
                       strokeDasharray="238.76"
                       strokeDashoffset="188.62" // 21%
@@ -769,7 +702,7 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
                 </div>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <span className="w-2.5 h-2.5 rounded-full bg-rose-500"></span>
+                    <span className="w-2.5 h-2.5 rounded-full bg-amber-400"></span>
                     <span className="text-slate-600">R 26.8M Remaining</span>
                   </div>
                   <span className="font-semibold text-slate-800">21%</span>
@@ -790,8 +723,7 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
                   onClick={() => openFeatureInSideView('compliance')}
                   className="text-xs text-emerald-700 hover:text-emerald-800 font-semibold cursor-pointer flex items-center gap-1"
                 >
-                  <span>Side View</span>
-                  <span>→</span>
+                  <span>View All</span>
                 </button>
               </div>
 
@@ -870,23 +802,14 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
             <div className="bg-white rounded-xl p-5 border border-slate-200 shadow-xs flex flex-col justify-between">
               <div className="flex items-center justify-between pb-2 border-b border-slate-100">
                 <h3 className="text-sm font-bold text-slate-900">Support Given by Type</h3>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => openFeatureInSideView('support')}
-                    className="text-xs text-emerald-700 hover:text-emerald-800 font-semibold cursor-pointer flex items-center gap-1"
-                  >
-                    <span>Side View</span>
-                    <span>→</span>
-                  </button>
-                  <select 
-                    value={supportFilter}
-                    onChange={(e) => setSupportFilter(e.target.value)}
-                    className="text-xs font-semibold text-slate-600 bg-slate-50 border border-slate-200 rounded px-1.5 py-0.5"
-                  >
-                    <option>This Year</option>
-                    <option>All Time</option>
-                  </select>
-                </div>
+                <select 
+                  value={supportFilter}
+                  onChange={(e) => setSupportFilter(e.target.value)}
+                  className="text-xs font-semibold text-slate-600 bg-slate-50 border border-slate-200 rounded px-1.5 py-0.5"
+                >
+                  <option>This Year</option>
+                  <option>All Time</option>
+                </select>
               </div>
 
               {/* Bars */}
@@ -925,8 +848,7 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
                   onClick={() => openFeatureInSideView('risks')}
                   className="text-xs text-emerald-700 hover:text-emerald-800 font-semibold cursor-pointer flex items-center gap-1"
                 >
-                  <span>Side View</span>
-                  <span>→</span>
+                  <span>View All</span>
                 </button>
               </div>
 
@@ -1002,8 +924,7 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
                   onClick={() => openFeatureInSideView('reports')}
                   className="text-xs text-emerald-700 hover:text-emerald-800 font-semibold cursor-pointer flex items-center gap-1"
                 >
-                  <span>Side View</span>
-                  <span>→</span>
+                  <span>View All</span>
                 </button>
               </div>
 
@@ -1089,8 +1010,7 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
                   onClick={() => openFeatureInSideView('risks')}
                   className="text-xs text-emerald-700 hover:text-emerald-800 font-semibold cursor-pointer flex items-center gap-1"
                 >
-                  <span>Side View</span>
-                  <span>→</span>
+                  <span>View All</span>
                 </button>
               </div>
 
@@ -1170,6 +1090,103 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
           </div>
 
         </div>
+        )}
+
+        {/* VIEW 2: ENTITIES & NPOS */}
+        {activeSidebar === 'entities' && (
+          <div className="p-4 sm:p-6 overflow-y-auto">
+            <DsacEntitiesView
+              entities={entities}
+              onSelectEntity={(entId) => {
+                if (onNavigateToEntity) onNavigateToEntity(entId);
+              }}
+              onOpenWorkspace={(entId) => {
+                if (onNavigateToEntity) onNavigateToEntity(entId);
+              }}
+              onNavigateToTab={(tab) => {
+                if (tab === 'reports') setActiveSidebar('reports');
+                else if (tab === 'compliance') setActiveSidebar('compliance');
+                else if (tab === 'performance') setActiveSidebar('performance');
+              }}
+            />
+          </div>
+        )}
+
+        {/* VIEW 3: PERFORMANCE */}
+        {activeSidebar === 'performance' && (
+          <div className="p-4 sm:p-6 overflow-y-auto">
+            <DsacPerformanceView
+              entities={entities}
+              onSelectEntity={onNavigateToEntity}
+              onOpenWorkspace={onNavigateToEntity}
+            />
+          </div>
+        )}
+
+        {/* VIEW 4: COMPLIANCE */}
+        {activeSidebar === 'compliance' && (
+          <div className="p-4 sm:p-6 overflow-y-auto">
+            <DsacComplianceView
+              entities={entities}
+              onSelectEntity={onNavigateToEntity}
+              onOpenWorkspace={onNavigateToEntity}
+            />
+          </div>
+        )}
+
+        {/* VIEW 5: SUPPORT & FUNDING */}
+        {activeSidebar === 'support' && (
+          <div className="p-4 sm:p-6 overflow-y-auto">
+            <DsacSupportView
+              entities={entities}
+              onSelectEntity={onNavigateToEntity}
+              onOpenWorkspace={onNavigateToEntity}
+            />
+          </div>
+        )}
+
+        {/* VIEW 6: REPORTS */}
+        {activeSidebar === 'reports' && (
+          <div className="p-4 sm:p-6 overflow-y-auto">
+            <DsacReportsView
+              entities={entities}
+              onSelectEntity={onNavigateToEntity}
+              onOpenWorkspace={onNavigateToEntity}
+            />
+          </div>
+        )}
+
+        {/* VIEW 7: RISK & ALERTS */}
+        {activeSidebar === 'risks' && (
+          <div className="p-4 sm:p-6 overflow-y-auto">
+            <DsacRiskView
+              entities={entities}
+              onSelectEntity={onNavigateToEntity}
+              onOpenWorkspace={onNavigateToEntity}
+            />
+          </div>
+        )}
+
+        {/* VIEW 8: ANALYTICS */}
+        {activeSidebar === 'analytics' && (
+          <div className="p-4 sm:p-6 overflow-y-auto">
+            <AIPerformanceAnalyst />
+          </div>
+        )}
+
+        {/* VIEW 9: APPROVALS */}
+        {activeSidebar === 'approvals' && (
+          <div className="p-4 sm:p-6 overflow-y-auto">
+            <TaskManagementView />
+          </div>
+        )}
+
+        {/* VIEW 10: SETTINGS */}
+        {activeSidebar === 'settings' && (
+          <div className="p-4 sm:p-6 overflow-y-auto">
+            <AuditLogView />
+          </div>
+        )}
 
         {/* Universal DSAC Feature Side View (Covers Compliance, Performance, Support & Funding, Reports, 32 Entities, and Risks) */}
         <DsacFeatureSideView

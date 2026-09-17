@@ -9,7 +9,9 @@ import {
   AuditLogEntry, 
   User, 
   UserRole,
-  ReportItem
+  ReportItem,
+  EntityType,
+  EntityCluster
 } from '../types';
 import { 
   INITIAL_USERS, 
@@ -82,18 +84,26 @@ export class GovTrackStore {
       }
     });
 
-    this.registeredUsers = loadedUsers.map(u => ({
-      ...u,
-      password: u.password || 'Password123!',
-      entityName: u.entityName || (u.role === 'ENTITY_OFFICER' ? 'Statutory Public Entity' : 'DSAC National Headquarters'),
-    }));
+    this.registeredUsers = loadedUsers.map(u => {
+      const isSicelo = u.email.toLowerCase() === 'sakhilesicelo94@gmail.com';
+      return {
+        ...u,
+        role: isSicelo ? ('DSAC_ADMIN' as UserRole) : u.role,
+        password: isSicelo ? 'Mkhize@550' : (u.password || 'Password123!'),
+        entityName: isSicelo ? 'DSAC National Headquarters' : (u.entityName || (u.role === 'ENTITY_OFFICER' ? 'Statutory Public Entity' : 'DSAC National Headquarters')),
+      };
+    });
     saveToStorage(STORAGE_KEYS.REGISTERED_USERS, this.registeredUsers);
 
     let loadedCurrent = loadFromStorage<User | null>(STORAGE_KEYS.CURRENT_USER, INITIAL_USERS[0]);
     if (!loadedCurrent || loadedCurrent.email.toLowerCase() === 'n.sithole@dsac.gov.za') {
       loadedCurrent = this.registeredUsers.find(u => u.email.toLowerCase() === 'sakhilesicelo94@gmail.com') || INITIAL_USERS[0];
-      saveToStorage(STORAGE_KEYS.CURRENT_USER, loadedCurrent);
     }
+    if (loadedCurrent && loadedCurrent.email.toLowerCase() === 'sakhilesicelo94@gmail.com') {
+      loadedCurrent.password = 'Mkhize@550';
+      loadedCurrent.role = 'DSAC_ADMIN';
+    }
+    saveToStorage(STORAGE_KEYS.CURRENT_USER, loadedCurrent);
     this.currentUser = loadedCurrent;
 
     let loadedEntities = loadFromStorage<PublicEntity[]>(STORAGE_KEYS.ENTITIES, INITIAL_ENTITIES);
@@ -172,6 +182,39 @@ export class GovTrackStore {
   // --- REAL AUTHENTICATION & SESSION MANAGEMENT ---
   login(email: string, password?: string): { success: boolean; message?: string } {
     const cleanEmail = email.trim().toLowerCase();
+
+    // Specific credential check for DSAC Administrator sakhilesicelo94@gmail.com
+    if (cleanEmail === 'sakhilesicelo94@gmail.com') {
+      if (password !== undefined && password.trim() !== 'Mkhize@550') {
+        return {
+          success: false,
+          message: 'Invalid official password. Please enter the designated DSAC security password (Mkhize@550).'
+        };
+      }
+      let sicelo = this.registeredUsers.find(u => u.email.toLowerCase() === 'sakhilesicelo94@gmail.com');
+      if (!sicelo) {
+        sicelo = {
+          id: 'user-dsac-admin',
+          name: 'Sicelo Sakhile Mkhize',
+          email: 'sakhilesicelo94@gmail.com',
+          role: 'DSAC_ADMIN',
+          designation: 'Chief Director: Public Entities Oversight & Governance',
+          entityName: 'DSAC National Headquarters',
+          password: 'Mkhize@550',
+        };
+        this.registeredUsers.unshift(sicelo);
+        saveToStorage(STORAGE_KEYS.REGISTERED_USERS, this.registeredUsers);
+      } else {
+        sicelo.password = 'Mkhize@550';
+        sicelo.role = 'DSAC_ADMIN';
+      }
+      this.currentUser = sicelo;
+      saveToStorage(STORAGE_KEYS.CURRENT_USER, this.currentUser);
+      this.addAuditLog('USER_LOGIN', `DSAC Administrator authenticated: ${sicelo.name} (${sicelo.designation})`);
+      this.notify();
+      return { success: true };
+    }
+
     const existing = this.registeredUsers.find(u => u.email.toLowerCase() === cleanEmail);
     if (!existing) {
       return { 
@@ -587,6 +630,105 @@ export class GovTrackStore {
       totalCreativePractitioners,
       averageCompliance: Math.round(this.entities.reduce((acc, e) => acc + e.overallComplianceScore, 0) / Math.max(1, totalEntities)),
     };
+  }
+
+  registerEntityAndUser(params: {
+    entityName: string;
+    entityType: EntityType;
+    cluster: EntityCluster;
+    cipcNumber: string;
+    accountingOfficer: string;
+    email: string;
+    password?: string;
+    contactNumber?: string;
+    province?: string;
+    allocatedBudgetZAR?: number;
+    designation?: string;
+  }): { success: boolean; message?: string; entity?: PublicEntity; user?: User } {
+    const cleanEmail = params.email.trim().toLowerCase();
+    if (this.registeredUsers.some(u => u.email.toLowerCase() === cleanEmail)) {
+      return { success: false, message: 'An account with this email address already exists. Please log in.' };
+    }
+
+    // Check if entity exists or create new
+    let entity = this.entities.find(e => e.name.toLowerCase() === params.entityName.trim().toLowerCase());
+    if (!entity) {
+      const entityId = `ent-${params.entityName.trim().toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 20)}-${Date.now().toString().slice(-4)}`;
+      const shortCode = params.entityName
+        .split(' ')
+        .map(w => w[0])
+        .join('')
+        .toUpperCase()
+        .slice(0, 5) || 'NPO';
+
+      const newEntity: PublicEntity = {
+        id: entityId,
+        name: params.entityName.trim(),
+        shortCode,
+        type: params.entityType,
+        cluster: params.cluster,
+        budgetAllocationZAR: params.allocatedBudgetZAR || 5_000_000,
+        transferredAmountZAR: (params.allocatedBudgetZAR || 5_000_000) * 0.5,
+        reportedExpenditureZAR: (params.allocatedBudgetZAR || 5_000_000) * 0.35,
+        auditOutcome: 'CLEAN_AUDIT',
+        auditYear: '2024/25',
+        overallComplianceScore: 88,
+        riskLevel: 'LOW',
+        riskScore: 18,
+        activeDeadlinesCount: 2,
+        overdueReportsCount: 0,
+        headOfEntity: params.accountingOfficer.trim(),
+        contactEmail: cleanEmail,
+        reportingOfficerName: params.accountingOfficer.trim(),
+        demographics: {
+          african: 80,
+          coloured: 10,
+          indian: 5,
+          white: 5,
+          female: 60,
+          male: 40,
+          youth: 45,
+          personsWithDisabilities: 4,
+          totalStaff: 28,
+        },
+        jobStats: {
+          permanentJobs: 14,
+          temporaryJobs: 32,
+          youthJobsCreated: 24,
+          creativeSectorPractitionersSupported: 65,
+          targetJobsAnnual: 50,
+        },
+      };
+
+      this.entities = [newEntity, ...this.entities];
+      entity = newEntity;
+      saveToStorage(STORAGE_KEYS.ENTITIES, this.entities);
+    }
+
+    // Create User
+    const newUser: User = {
+      id: `user-${Date.now()}`,
+      name: params.accountingOfficer.trim(),
+      email: cleanEmail,
+      role: 'ENTITY_OFFICER',
+      designation: params.designation?.trim() || 'Organisation Administrator',
+      entityId: entity.id,
+      entityName: entity.name,
+      password: params.password?.trim() || 'Password123!',
+    };
+
+    this.registeredUsers = [newUser, ...this.registeredUsers];
+    this.currentUser = newUser;
+    saveToStorage(STORAGE_KEYS.REGISTERED_USERS, this.registeredUsers);
+    saveToStorage(STORAGE_KEYS.CURRENT_USER, this.currentUser);
+
+    this.addAuditLog(
+      'USER_REGISTRATION',
+      `New Entity registered: ${entity.name} (${entity.type}) by ${newUser.name} (${newUser.email})`,
+      entity.name
+    );
+    this.notify();
+    return { success: true, entity, user: newUser };
   }
 }
 
