@@ -135,14 +135,9 @@ export function calculateEntityFinancialSummary(
         requestedAmount = Math.round((entityMeta?.budgetAllocationZAR || 10000000) * 0.90);
         approvedAmount = Math.round((entityMeta?.budgetAllocationZAR || 10000000) * 0.90);
       }
-    } else if (normYear === '2025/26') {
-      if (entityId === 'ent-ubuntu-arts') {
-        requestedAmount = 5500000;
-        approvedAmount = 5000000;
-      } else {
-        requestedAmount = entityMeta?.budgetAllocationZAR || 10000000;
-        approvedAmount = entityMeta?.budgetAllocationZAR || 10000000;
-      }
+    } else if (normYear === '2025/26' || normYear === '2026/27') {
+      requestedAmount = entityMeta?.budgetAllocationZAR || 10000000;
+      approvedAmount = entityMeta?.budgetAllocationZAR || 10000000;
     }
   }
 
@@ -161,26 +156,25 @@ export function calculateEntityFinancialSummary(
 
   // Baseline fallback calculations per quarter
   let baseQ1 = 0, baseQ2 = 0, baseQ3 = 0, baseQ4 = 0;
-  if (entityId === 'ent-ubuntu-arts') {
-    if (financialYear.includes('2024')) {
-      baseQ1 = 1200000; baseQ2 = 1200000; baseQ3 = 1150000; baseQ4 = 1170000;
-    } else if (financialYear.includes('2023')) {
-      baseQ1 = 1120000; baseQ2 = 1120000; baseQ3 = 1120000; baseQ4 = 1120000;
-    } else if (financialYear.includes('2025')) {
-      baseQ1 = 1050000; baseQ2 = 1050000; baseQ3 = 1100000; baseQ4 = 0;
-    }
-  } else {
-    if (financialYear.includes('2024') || financialYear.includes('2023')) {
+  if (financialYear.includes('2024') || financialYear.includes('2023')) {
+    if (entityId === 'ent-ubuntu-arts') {
+      if (financialYear.includes('2024')) {
+        baseQ1 = 1200000; baseQ2 = 1200000; baseQ3 = 1150000; baseQ4 = 1170000;
+      } else {
+        baseQ1 = 1120000; baseQ2 = 1120000; baseQ3 = 1120000; baseQ4 = 1120000;
+      }
+    } else {
       const fullYearSpend = Math.round(approvedAmount * 0.98);
       const qSpend = Math.round(fullYearSpend / 4);
       baseQ1 = qSpend; baseQ2 = qSpend; baseQ3 = qSpend; baseQ4 = fullYearSpend - (qSpend * 3);
-    } else if (financialYear.includes('2025')) {
-      const activeYtd = entityMeta?.transferredAmountZAR || entityMeta?.reportedExpenditureZAR || Math.round(approvedAmount * 0.75);
-      baseQ1 = Math.round(activeYtd * 0.32);
-      baseQ2 = Math.round(activeYtd * 0.34);
-      baseQ3 = Math.max(0, activeYtd - baseQ1 - baseQ2);
-      baseQ4 = 0;
     }
+  } else {
+    // Current financial year cycle (2025/26 / 2026/27): corresponds to Vote 40 dashboard figures
+    const activeYtd = entityMeta?.reportedExpenditureZAR ?? Math.round((entityMeta?.transferredAmountZAR || approvedAmount * 0.75) * 0.6264);
+    baseQ1 = Math.round(activeYtd * 0.32);
+    baseQ2 = Math.round(activeYtd * 0.34);
+    baseQ3 = Math.max(0, activeYtd - baseQ1 - baseQ2);
+    baseQ4 = 0;
   }
 
   const q1Actual = q1Sub ? q1Sub.totalQuarterlyActual : baseQ1;

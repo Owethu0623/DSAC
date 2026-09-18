@@ -96,11 +96,11 @@ export const INITIAL_EXPENSE_CATEGORIES: ExpenseCategory[] = [
 ];
 
 export const INITIAL_BUDGET_PROFILES: EntityBudgetProfile[] = [
-  // 1. Acceptance Test Entity: Example Arts Foundation
+  // 1. Acceptance Test Entity: Business and Arts South Africa (BASA)
   {
     id: 'bp-example-arts',
-    entityId: 'ent-example-arts',
-    entityName: 'Example Arts Foundation',
+    entityId: 'ent-basa',
+    entityName: 'Business and Arts South Africa (BASA)',
     financialYear: '2026/27',
     requestedAmount: 12000000,
     approvedAmount: 10000000,
@@ -453,9 +453,9 @@ export const INITIAL_BUDGET_PROFILES: EntityBudgetProfile[] = [
     entityId: 'ent-ubuntu-arts',
     entityName: 'Ubuntu Arts NPO',
     financialYear: '2025/26',
-    requestedAmount: 5500000,
-    approvedAmount: 5000000,
-    fundingGap: 500000,
+    requestedAmount: 16500000,
+    approvedAmount: 15000000,
+    fundingGap: 1500000,
     status: 'APPROVED',
     requestDate: '2025-01-14',
     approvalDate: '2025-03-22',
@@ -540,7 +540,7 @@ export const INITIAL_BUDGET_PROFILES: EntityBudgetProfile[] = [
 
 export const INITIAL_QUARTERLY_SUBMISSIONS: QuarterlyFinancialSubmission[] = [
   // ==========================================
-  // 1. Example Arts Foundation (Section 34 Exact Numbers)
+  // 1. Business and Arts South Africa (BASA) (Section 34 Exact Numbers)
   // Approved Budget = R10,000,000
   // Q1 = R1,800,000 -> YTD R1.8m (18%)
   // Q2 = R2,200,000 -> YTD R4.0m (40%)
@@ -549,8 +549,8 @@ export const INITIAL_QUARTERLY_SUBMISSIONS: QuarterlyFinancialSubmission[] = [
   // ==========================================
   {
     id: 'qs-ea-q1',
-    entityId: 'ent-example-arts',
-    entityName: 'Example Arts Foundation',
+    entityId: 'ent-basa',
+    entityName: 'Business and Arts South Africa (BASA)',
     financialYear: '2026/27',
     quarter: 'Q1',
     status: 'APPROVED',
@@ -578,8 +578,8 @@ export const INITIAL_QUARTERLY_SUBMISSIONS: QuarterlyFinancialSubmission[] = [
   },
   {
     id: 'qs-ea-q2',
-    entityId: 'ent-example-arts',
-    entityName: 'Example Arts Foundation',
+    entityId: 'ent-basa',
+    entityName: 'Business and Arts South Africa (BASA)',
     financialYear: '2026/27',
     quarter: 'Q2',
     status: 'APPROVED',
@@ -607,8 +607,8 @@ export const INITIAL_QUARTERLY_SUBMISSIONS: QuarterlyFinancialSubmission[] = [
   },
   {
     id: 'qs-ea-q3',
-    entityId: 'ent-example-arts',
-    entityName: 'Example Arts Foundation',
+    entityId: 'ent-basa',
+    entityName: 'Business and Arts South Africa (BASA)',
     financialYear: '2026/27',
     quarter: 'Q3',
     status: 'APPROVED',
@@ -636,8 +636,8 @@ export const INITIAL_QUARTERLY_SUBMISSIONS: QuarterlyFinancialSubmission[] = [
   },
   {
     id: 'qs-ea-q4',
-    entityId: 'ent-example-arts',
-    entityName: 'Example Arts Foundation',
+    entityId: 'ent-basa',
+    entityName: 'Business and Arts South Africa (BASA)',
     financialYear: '2026/27',
     quarter: 'Q4',
     status: 'APPROVED',
@@ -1164,16 +1164,16 @@ export const INITIAL_QUARTERLY_SUBMISSIONS: QuarterlyFinancialSubmission[] = [
     quarter: 'Q1',
     status: 'APPROVED',
     submittedAt: '2025-07-25T10:00:00Z',
-    totalQuarterlyActual: 1050000,
+    totalQuarterlyActual: 2257814,
     supportingDocumentIds: ['doc-bank-ub-25-q1'],
     accountingOfficerAffirmation: true,
     createdAt: '2025-07-25T10:00:00Z',
     updatedAt: '2025-08-01T12:00:00Z',
     lines: [
-      { id: 'qsl-ub-25-1-1', quarterlySubmissionId: 'qs-ub-25-q1', categoryId: 'cat-comm', categoryName: 'Community Programmes', actualAmount: 550000, plannedAmount: 625000 },
-      { id: 'qsl-ub-25-1-2', quarterlySubmissionId: 'qs-ub-25-q1', categoryId: 'cat-comp', categoryName: 'Compensation of Employees', actualAmount: 300000, plannedAmount: 350000 },
-      { id: 'qsl-ub-25-1-3', quarterlySubmissionId: 'qs-ub-25-q1', categoryId: 'cat-travel', categoryName: 'Travel and Accommodation', actualAmount: 120000, plannedAmount: 150000 },
-      { id: 'qsl-ub-25-1-4', quarterlySubmissionId: 'qs-ub-25-q1', categoryId: 'cat-goods', categoryName: 'Goods and Services', actualAmount: 80000, plannedAmount: 125000 },
+      { id: 'qsl-ub-25-1-1', quarterlySubmissionId: 'qs-ub-25-q1', categoryId: 'cat-comm', categoryName: 'Community Programmes', actualAmount: 1180000, plannedAmount: 1250000 },
+      { id: 'qsl-ub-25-1-2', quarterlySubmissionId: 'qs-ub-25-q1', categoryId: 'cat-comp', categoryName: 'Compensation of Employees', actualAmount: 650000, plannedAmount: 700000 },
+      { id: 'qsl-ub-25-1-3', quarterlySubmissionId: 'qs-ub-25-q1', categoryId: 'cat-travel', categoryName: 'Travel and Accommodation', actualAmount: 250000, plannedAmount: 300000 },
+      { id: 'qsl-ub-25-1-4', quarterlySubmissionId: 'qs-ub-25-q1', categoryId: 'cat-goods', categoryName: 'Goods and Services', actualAmount: 177814, plannedAmount: 250000 },
     ]
   },
   {
@@ -1184,16 +1184,16 @@ export const INITIAL_QUARTERLY_SUBMISSIONS: QuarterlyFinancialSubmission[] = [
     quarter: 'Q2',
     status: 'APPROVED',
     submittedAt: '2025-10-24T14:00:00Z',
-    totalQuarterlyActual: 1050000,
+    totalQuarterlyActual: 2398927,
     supportingDocumentIds: ['doc-bank-ub-25-q2'],
     accountingOfficerAffirmation: true,
     createdAt: '2025-10-24T14:00:00Z',
     updatedAt: '2025-11-02T11:00:00Z',
     lines: [
-      { id: 'qsl-ub-25-2-1', quarterlySubmissionId: 'qs-ub-25-q2', categoryId: 'cat-comm', categoryName: 'Community Programmes', actualAmount: 550000, plannedAmount: 625000 },
-      { id: 'qsl-ub-25-2-2', quarterlySubmissionId: 'qs-ub-25-q2', categoryId: 'cat-comp', categoryName: 'Compensation of Employees', actualAmount: 300000, plannedAmount: 350000 },
-      { id: 'qsl-ub-25-2-3', quarterlySubmissionId: 'qs-ub-25-q2', categoryId: 'cat-travel', categoryName: 'Travel and Accommodation', actualAmount: 120000, plannedAmount: 150000 },
-      { id: 'qsl-ub-25-2-4', quarterlySubmissionId: 'qs-ub-25-q2', categoryId: 'cat-goods', categoryName: 'Goods and Services', actualAmount: 80000, plannedAmount: 125000 },
+      { id: 'qsl-ub-25-2-1', quarterlySubmissionId: 'qs-ub-25-q2', categoryId: 'cat-comm', categoryName: 'Community Programmes', actualAmount: 1250000, plannedAmount: 1250000 },
+      { id: 'qsl-ub-25-2-2', quarterlySubmissionId: 'qs-ub-25-q2', categoryId: 'cat-comp', categoryName: 'Compensation of Employees', actualAmount: 690000, plannedAmount: 700000 },
+      { id: 'qsl-ub-25-2-3', quarterlySubmissionId: 'qs-ub-25-q2', categoryId: 'cat-travel', categoryName: 'Travel and Accommodation', actualAmount: 260000, plannedAmount: 300000 },
+      { id: 'qsl-ub-25-2-4', quarterlySubmissionId: 'qs-ub-25-q2', categoryId: 'cat-goods', categoryName: 'Goods and Services', actualAmount: 198927, plannedAmount: 250000 },
     ]
   },
   {
@@ -1204,16 +1204,16 @@ export const INITIAL_QUARTERLY_SUBMISSIONS: QuarterlyFinancialSubmission[] = [
     quarter: 'Q3',
     status: 'APPROVED',
     submittedAt: '2026-01-26T11:00:00Z',
-    totalQuarterlyActual: 1100000,
+    totalQuarterlyActual: 2398928,
     supportingDocumentIds: ['doc-bank-ub-25-q3'],
     accountingOfficerAffirmation: true,
     createdAt: '2026-01-26T11:00:00Z',
     updatedAt: '2026-02-03T16:00:00Z',
     lines: [
-      { id: 'qsl-ub-25-3-1', quarterlySubmissionId: 'qs-ub-25-q3', categoryId: 'cat-comm', categoryName: 'Community Programmes', actualAmount: 600000, plannedAmount: 625000 },
-      { id: 'qsl-ub-25-3-2', quarterlySubmissionId: 'qs-ub-25-q3', categoryId: 'cat-comp', categoryName: 'Compensation of Employees', actualAmount: 300000, plannedAmount: 350000 },
-      { id: 'qsl-ub-25-3-3', quarterlySubmissionId: 'qs-ub-25-q3', categoryId: 'cat-travel', categoryName: 'Travel and Accommodation', actualAmount: 120000, plannedAmount: 150000 },
-      { id: 'qsl-ub-25-3-4', quarterlySubmissionId: 'qs-ub-25-q3', categoryId: 'cat-goods', categoryName: 'Goods and Services', actualAmount: 80000, plannedAmount: 125000 },
+      { id: 'qsl-ub-25-3-1', quarterlySubmissionId: 'qs-ub-25-q3', categoryId: 'cat-comm', categoryName: 'Community Programmes', actualAmount: 1250000, plannedAmount: 1250000 },
+      { id: 'qsl-ub-25-3-2', quarterlySubmissionId: 'qs-ub-25-q3', categoryId: 'cat-comp', categoryName: 'Compensation of Employees', actualAmount: 690000, plannedAmount: 700000 },
+      { id: 'qsl-ub-25-3-3', quarterlySubmissionId: 'qs-ub-25-q3', categoryId: 'cat-travel', categoryName: 'Travel and Accommodation', actualAmount: 260000, plannedAmount: 300000 },
+      { id: 'qsl-ub-25-3-4', quarterlySubmissionId: 'qs-ub-25-q3', categoryId: 'cat-goods', categoryName: 'Goods and Services', actualAmount: 198928, plannedAmount: 250000 },
     ]
   },
 

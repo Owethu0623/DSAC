@@ -56,6 +56,7 @@ import { DsacRiskView } from './features/DsacRiskView';
 import { DsacAnalyticsView } from './features/DsacAnalyticsView';
 import { DsacSettingsView } from './features/DsacSettingsView';
 import { DsacOverviewView } from './features/DsacOverviewView';
+import { DsacEntitiesView } from './features/DsacEntitiesView';
 import { AIPerformanceAnalyst } from './AIPerformanceAnalyst';
 import { TaskManagementView } from './TaskManagementView';
 import { AuditLogView } from './AuditLogView';
@@ -141,7 +142,9 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
     setIsSideViewOpen(false);
     setIsMobileMenuOpen(false);
 
-    if (sectionId === 'documents') {
+    if (sectionId === 'entities') {
+      setActiveSidebar('entities');
+    } else if (sectionId === 'documents') {
       setActiveSidebar('documents');
     } else if (sectionId === 'reports' || sectionId === 'submissions' || sectionId === 'review') {
       setActiveSidebar('reports');
@@ -271,7 +274,8 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
     {
       title: 'Main Oversight',
       items: [
-        { id: 'overview', label: 'Dashboard Overview', desc: 'At-a-glance portfolio status', icon: Building2 },
+        { id: 'overview', label: 'Dashboard Overview', desc: 'At-a-glance portfolio status', icon: BarChart3 },
+        { id: 'entities', label: 'Entities', desc: 'All 32 registered institutions', icon: Building2, count: entities.length },
         { id: 'reports', label: 'Quarterly Reports', desc: 'Check submissions & approvals', icon: FileText, count: pulse.q3OutstandingCount > 0 ? pulse.q3OutstandingCount : undefined, badgeColor: 'bg-amber-500/30 text-amber-300' },
         { id: 'performance', label: 'Targets & Delivery', desc: 'Are annual goals being met?', icon: Target },
         { id: 'financials', label: 'Budgets & Spending', desc: 'Vote 40 grants & expenditures', icon: Coins },
@@ -300,6 +304,7 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
   const getPageTitle = (id: string): { title: string; subtitle: string } => {
     switch (id) {
       case 'overview': return { title: 'Executive Oversight Dashboard', subtitle: 'National portfolio monitoring, delivery tracking, and early risk detection' };
+      case 'entities': return { title: 'Registered Public Entities & Subsidized NPOs', subtitle: 'Statutory database of all 32 institutions: reports, targets & delivery, and budgets & spendings' };
       case 'reports': return { title: 'Quarterly Reporting & Clearances', subtitle: 'Statutory quarterly performance and expenditure submission clearances' };
       case 'performance':
       case 'kpis':
@@ -610,6 +615,7 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
             highRiskEntities={highRiskEntities}
             totalApprovedBudget={totalApprovedBudget}
             totalTransferredToDate={totalTransferredToDate}
+            totalReportedExpenditure={totalReportedExpenditure}
             remainingDisbursement={remainingDisbursement}
             transferRate={transferRate}
             expenditureRate={expenditureRate}
@@ -619,6 +625,17 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
             onOpenDemo={() => setIsDemoModeOpen(true)}
             onOpenGuide={() => setIsGuideModalOpen(true)}
           />
+        )}
+
+        {/* VIEW 2: ENTITIES DIRECTORY & DRILL-DOWN (Reports, Targets, Budgets) */}
+        {activeSidebar === 'entities' && (
+          <div className="p-4 sm:p-6 overflow-y-auto flex-1 w-full">
+            <DsacEntitiesView
+              entities={entities}
+              onOpenWorkspace={onNavigateToEntity}
+              onNavigateToTab={handleNavSelect}
+            />
+          </div>
         )}
 
         {/* VIEW 3: PERFORMANCE, KPIS & TARGETS */}

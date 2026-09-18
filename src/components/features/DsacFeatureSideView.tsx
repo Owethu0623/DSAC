@@ -844,71 +844,139 @@ export const DsacFeatureSideView: React.FC<DsacFeatureSideViewProps> = ({
                 </div>
               </div>
 
-              {/* Budget Utilization (Matched to portfolio allocations) */}
-              <div className="p-4 bg-white border border-slate-200 rounded-xl space-y-3 shadow-xs">
+              {/* Budget Utilization (Matched to Vote 40 Portfolio Dashboard) */}
+              <div className="p-4 bg-white border border-slate-200 rounded-xl space-y-3.5 shadow-xs">
                 <div className="flex items-center justify-between">
                   <div className="font-bold text-slate-800 text-[11px] uppercase tracking-wider flex items-center gap-1.5">
                     <Coins className="w-3.5 h-3.5 text-emerald-700" />
                     <span>Budget Utilization</span>
                   </div>
-                  <span className="text-[10px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded">
-                    Matched to portfolio allocations
+                  <span className="text-[10px] font-black text-slate-700 bg-slate-100 border border-slate-300 px-2 py-0.5 rounded">
+                    Vote 40
                   </span>
                 </div>
 
-                {/* Primary Metric Banner */}
-                <div className="p-3 bg-gradient-to-br from-slate-900 to-slate-800 text-white rounded-xl shadow-xs space-y-1">
-                  <div className="text-[10px] font-semibold text-slate-300 uppercase tracking-wider">
-                    This Financial Year
+                <div className="text-[11px] text-slate-500 font-medium">
+                  Burn rate of total money spent vs. disbursed total
+                </div>
+
+                {/* Primary Metric Banner - This Financial Year */}
+                <div className="p-3.5 bg-gradient-to-br from-slate-900 via-slate-850 to-slate-800 text-white rounded-xl shadow-xs space-y-2">
+                  <div className="flex items-center justify-between text-[10px] font-bold text-slate-300 uppercase tracking-wider">
+                    <span>This Financial Year</span>
+                    <span className="text-emerald-400 font-mono">THIS FINANCIAL YEAR</span>
                   </div>
+
                   <div className="flex items-baseline gap-2">
-                    <span className="text-2xl font-black text-emerald-400">R 1.54B</span>
-                    <span className="text-xs font-semibold text-slate-200">Transferred to Date (75%)</span>
+                    <span className="text-2xl font-black text-emerald-400">R 1.00B</span>
+                    <span className="text-xs font-semibold text-slate-200">
+                      Total Spent to Date <span className="text-emerald-400 font-bold">(63%)</span>
+                    </span>
                   </div>
-                  <div className="text-[10px] text-slate-400">
-                    Portfolio Total: R 2.05B Approved • {currentEntity.shortCode} Statutory Allocation: R {(currentEntity.budgetAllocationZAR / 1_000_000).toFixed(1)}M
+
+                  {/* 3 Progress Bars */}
+                  <div className="space-y-2 pt-1 text-xs">
+                    <div>
+                      <div className="flex justify-between text-[10px] font-bold text-slate-300 mb-0.5">
+                        <span>R 1.60B Disbursed Total</span>
+                        <span className="font-mono text-white">100%</span>
+                      </div>
+                      <div className="w-full bg-slate-700 rounded-full h-1.5 overflow-hidden">
+                        <div className="bg-slate-300 h-full rounded-full" style={{ width: '100%' }}></div>
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="flex justify-between text-[10px] font-bold text-slate-300 mb-0.5">
+                        <span className="text-emerald-300">R 1.00B Total Spent to Date</span>
+                        <span className="font-mono text-emerald-300">63%</span>
+                      </div>
+                      <div className="w-full bg-slate-700 rounded-full h-1.5 overflow-hidden">
+                        <div className="bg-emerald-400 h-full rounded-full" style={{ width: '63%' }}></div>
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="flex justify-between text-[10px] font-bold text-slate-300 mb-0.5">
+                        <span className="text-sky-300">R 596.4M Unspent Balance</span>
+                        <span className="font-mono text-sky-300">37%</span>
+                      </div>
+                      <div className="w-full bg-slate-700 rounded-full h-1.5 overflow-hidden">
+                        <div className="bg-sky-400 h-full rounded-full" style={{ width: '37%' }}></div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="pt-1 border-t border-slate-700/60 flex items-center justify-between text-[10px] text-slate-400">
+                    <span>Entity Expenditure Absorption</span>
+                    <span className="font-semibold text-slate-300">PFMA Sec 38 Burn Rate</span>
                   </div>
                 </div>
 
-                {/* 3 Progress Bars */}
-                <div className="space-y-2.5 pt-1 text-xs">
-                  <div>
-                    <div className="flex justify-between text-[11px] font-bold text-slate-700 mb-1">
-                      <span>R 2.05B Approved</span>
-                      <span className="font-black text-slate-900">100%</span>
+                {/* Portfolio Aggregation Cards matching Dashboard Overview */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                  {/* Total Approved Budget Card */}
+                  <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-lg space-y-1">
+                    <div className="text-[10px] font-bold text-slate-500 uppercase">Total Approved Budget</div>
+                    <div className="text-base font-black text-slate-900">R 2.13B</div>
+                    <div className="text-[10px] text-slate-600 font-medium">All 26 PEs &amp; 6 Subsidized NPOs</div>
+                    <div className="pt-1 border-t border-slate-200/80 flex items-center justify-between text-[10px] text-slate-600 font-mono">
+                      <span>26 PEs (96%)</span>
+                      <span>6 NPOs (4%)</span>
                     </div>
-                    <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden border border-slate-200">
-                      <div className="bg-slate-800 h-full rounded-full" style={{ width: '100%' }}></div>
-                    </div>
-                  </div>
-
-                  <div>
-                    <div className="flex justify-between text-[11px] font-bold text-slate-700 mb-1">
-                      <span>R 1.54B Transferred to Date</span>
-                      <span className="font-black text-emerald-700">75%</span>
-                    </div>
-                    <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden border border-slate-200">
-                      <div className="bg-emerald-600 h-full rounded-full" style={{ width: '75%' }}></div>
+                    <div className="flex items-center justify-between text-[9px] text-slate-500 font-mono">
+                      <span>PEs: R 2.04B</span>
+                      <span>NPOs: R 83.8M</span>
                     </div>
                   </div>
 
-                  <div>
-                    <div className="flex justify-between text-[11px] font-bold text-slate-700 mb-1">
-                      <span>R 514.0M Balance Pending</span>
-                      <span className="font-black text-amber-700">25%</span>
+                  {/* Total Disbursed Card */}
+                  <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-lg space-y-1">
+                    <div className="text-[10px] font-bold text-slate-500 uppercase">Total Disbursed</div>
+                    <div className="text-base font-black text-slate-900">
+                      R 1.60B <span className="text-xs font-bold text-indigo-600">(75.0%)</span>
                     </div>
-                    <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden border border-slate-200">
-                      <div className="bg-amber-500 h-full rounded-full" style={{ width: '25%' }}></div>
+                    <div className="text-[10px] text-slate-600 font-medium">Transfer to Date (Overall)</div>
+                    <div className="text-[9px] text-slate-500">Combined Disbursed Tranches</div>
+                    <div className="pt-1 border-t border-slate-200/80 flex items-center justify-between text-[9px] font-bold text-slate-700">
+                      <span>Tranche Milestones:</span>
+                      <span className="text-indigo-700 font-mono">3 of 4 Released</span>
+                    </div>
+                    <div className="flex items-center justify-between text-[9px] text-slate-500 font-mono">
+                      <span>Q1-Q3 Paid (R 1.60B)</span>
+                      <span>Q4 Bal (R 529.5M)</span>
                     </div>
                   </div>
                 </div>
 
-                {/* Entity-specific utilization breakdown footer */}
-                <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[10px] text-slate-500">
-                  <span>{currentEntity.shortCode} Reported Expenditure:</span>
-                  <strong className="text-slate-800 font-bold">
-                    R {(currentEntity.reportedExpenditureZAR / 1_000_000).toFixed(1)}M ({Math.round((currentEntity.reportedExpenditureZAR / (currentEntity.transferredAmountZAR || 1)) * 100)}% of disbursed tranche)
-                  </strong>
+                {/* Selected Entity Statutory Breakdown */}
+                <div className="p-3 bg-emerald-50/50 border border-emerald-200/70 rounded-lg space-y-1.5 text-xs">
+                  <div className="flex items-center justify-between font-bold text-emerald-900 text-[11px]">
+                    <span>{currentEntity.shortCode} Statutory Financials</span>
+                    <span className="text-[10px] font-normal text-emerald-700">{currentEntity.type === 'NPO' ? 'Subsidized NPO' : 'Schedule 3A PE'}</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-[10px]">
+                    <div>
+                      <span className="text-slate-500 block">Approved Allocation:</span>
+                      <span className="font-bold text-slate-800 font-mono">R {(currentEntity.budgetAllocationZAR / 1_000_000).toFixed(1)}M</span>
+                    </div>
+                    <div>
+                      <span className="text-slate-500 block">Disbursed to Date (75%):</span>
+                      <span className="font-bold text-emerald-800 font-mono">R {(currentEntity.transferredAmountZAR / 1_000_000).toFixed(1)}M</span>
+                    </div>
+                    <div>
+                      <span className="text-slate-500 block">Reported Spend:</span>
+                      <span className="font-bold text-slate-800 font-mono">
+                        R {(currentEntity.reportedExpenditureZAR / 1_000_000).toFixed(1)}M ({Math.round((currentEntity.reportedExpenditureZAR / (currentEntity.transferredAmountZAR || 1)) * 100)}%)
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-slate-500 block">Unspent in Account:</span>
+                      <span className="font-bold text-sky-800 font-mono">
+                        R {(Math.max(0, currentEntity.transferredAmountZAR - currentEntity.reportedExpenditureZAR) / 1_000_000).toFixed(1)}M
+                      </span>
+                    </div>
+                  </div>
                 </div>
               </div>
 

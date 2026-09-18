@@ -35,8 +35,8 @@ export const INITIAL_USERS: User[] = [
     name: 'Thandi Nkosi',
     email: 'cfo@examplearts.org.za',
     role: 'ENTITY_OFFICER',
-    entityId: 'ent-example-arts',
-    entityName: 'Example Arts Foundation',
+    entityId: 'ent-basa',
+    entityName: 'Business and Arts South Africa (BASA)',
     designation: 'Chief Financial Officer & Reporting Officer',
     password: 'Password123!',
   },
@@ -93,52 +93,14 @@ export const INITIAL_USERS: User[] = [
 
 export const INITIAL_ENTITIES: PublicEntity[] = [
   {
-    id: 'ent-example-arts',
-    name: 'Example Arts Foundation',
-    shortCode: 'EAF',
-    type: 'NPO',
-    cluster: 'Subsidized Cultural NPOs',
-    budgetAllocationZAR: 10000000,
-    transferredAmountZAR: 10000000,
-    reportedExpenditureZAR: 10000000,
-    auditOutcome: 'CLEAN_AUDIT',
-    auditYear: '2024/2025',
-    overallComplianceScore: 96,
-    riskLevel: 'LOW',
-    riskScore: 12,
-    activeDeadlinesCount: 1,
-    overdueReportsCount: 0,
-    demographics: {
-      african: 48,
-      coloured: 12,
-      indian: 6,
-      white: 8,
-      female: 44,
-      male: 30,
-      youth: 38,
-      personsWithDisabilities: 4,
-      totalStaff: 74,
-    },
-    jobStats: {
-      permanentJobs: 32,
-      temporaryJobs: 110,
-      youthJobsCreated: 85,
-      creativeSectorPractitionersSupported: 320,
-      targetJobsAnnual: 400,
-    },
-    headOfEntity: 'Dr. Michael Khumalo (CEO)',
-    contactEmail: 'governance@examplearts.org.za',
-    reportingOfficerName: 'Thandi Nkosi',
-  },
-  {
     id: 'ent-sahra',
     name: 'South African Heritage Resources Agency (SAHRA)',
     shortCode: 'SAHRA',
     type: 'PUBLIC_ENTITY',
     cluster: 'Heritage & Museums',
     budgetAllocationZAR: 118450000,
-    transferredAmountZAR: 88837500, // 75%
-    reportedExpenditureZAR: 76400000,
+    transferredAmountZAR: 88945450, // 75% Q1-Q3 Tranches // 75%
+    reportedExpenditureZAR: 55716268, // ~63% Burn Rate
     auditOutcome: 'UNQUALIFIED_WITH_FINDINGS',
     auditYear: '2024/2025',
     overallComplianceScore: 78,
@@ -175,8 +137,8 @@ export const INITIAL_ENTITIES: PublicEntity[] = [
     type: 'PUBLIC_ENTITY',
     cluster: 'Creative Industries & Film',
     budgetAllocationZAR: 154200000,
-    transferredAmountZAR: 115650000, // 75%
-    reportedExpenditureZAR: 104200000,
+    transferredAmountZAR: 115790531, // 75% Q1-Q3 Tranches // 75%
+    reportedExpenditureZAR: 72532280, // ~63% Burn Rate
     auditOutcome: 'QUALIFIED',
     auditYear: '2024/2025',
     overallComplianceScore: 54,
@@ -213,8 +175,8 @@ export const INITIAL_ENTITIES: PublicEntity[] = [
     type: 'PUBLIC_ENTITY',
     cluster: 'Sport & Recreation',
     budgetAllocationZAR: 26800000,
-    transferredAmountZAR: 20100000,
-    reportedExpenditureZAR: 19800000,
+    transferredAmountZAR: 20124424, // 75% Q1-Q3 Tranches
+    reportedExpenditureZAR: 12606129, // ~63% Burn Rate
     auditOutcome: 'QUALIFIED',
     auditYear: '2024/2025',
     overallComplianceScore: 42,
@@ -251,8 +213,8 @@ export const INITIAL_ENTITIES: PublicEntity[] = [
     type: 'PUBLIC_ENTITY',
     cluster: 'Creative Industries & Film',
     budgetAllocationZAR: 188600000,
-    transferredAmountZAR: 141450000,
-    reportedExpenditureZAR: 126900000,
+    transferredAmountZAR: 141621882, // 75% Q1-Q3 Tranches
+    reportedExpenditureZAR: 88713281, // ~63% Burn Rate
     auditOutcome: 'CLEAN_AUDIT',
     auditYear: '2024/2025',
     overallComplianceScore: 94,
@@ -289,8 +251,8 @@ export const INITIAL_ENTITIES: PublicEntity[] = [
     type: 'PUBLIC_ENTITY',
     cluster: 'Heritage & Museums',
     budgetAllocationZAR: 142300000,
-    transferredAmountZAR: 106725000,
-    reportedExpenditureZAR: 98400000,
+    transferredAmountZAR: 106854686, // 75% Q1-Q3 Tranches
+    reportedExpenditureZAR: 66934782, // ~63% Burn Rate
     auditOutcome: 'UNQUALIFIED_WITH_FINDINGS',
     auditYear: '2024/2025',
     overallComplianceScore: 82,
@@ -327,8 +289,8 @@ export const INITIAL_ENTITIES: PublicEntity[] = [
     type: 'PUBLIC_ENTITY',
     cluster: 'Language & Literature',
     budgetAllocationZAR: 134500000,
-    transferredAmountZAR: 100875000,
-    reportedExpenditureZAR: 82100000,
+    transferredAmountZAR: 100997578, // 75% Q1-Q3 Tranches
+    reportedExpenditureZAR: 63265834, // ~63% Burn Rate
     auditOutcome: 'CLEAN_AUDIT',
     auditYear: '2024/2025',
     overallComplianceScore: 89,
@@ -365,8 +327,8 @@ export const INITIAL_ENTITIES: PublicEntity[] = [
     type: 'PUBLIC_ENTITY',
     cluster: 'Performing Arts & Theatres',
     budgetAllocationZAR: 72400000,
-    transferredAmountZAR: 54300000,
-    reportedExpenditureZAR: 52800000,
+    transferredAmountZAR: 54365982, // 75% Q1-Q3 Tranches
+    reportedExpenditureZAR: 34055363, // ~63% Burn Rate
     auditOutcome: 'CLEAN_AUDIT',
     auditYear: '2024/2025',
     overallComplianceScore: 91,
@@ -403,8 +365,8 @@ export const INITIAL_ENTITIES: PublicEntity[] = [
     type: 'NPO',
     cluster: 'Creative Industries & Film',
     budgetAllocationZAR: 24500000,
-    transferredAmountZAR: 18375000,
-    reportedExpenditureZAR: 17900000,
+    transferredAmountZAR: 18397328, // 75% Q1-Q3 Tranches
+    reportedExpenditureZAR: 11524260, // ~63% Burn Rate
     auditOutcome: 'CLEAN_AUDIT',
     auditYear: '2024/2025',
     overallComplianceScore: 86,
@@ -440,9 +402,9 @@ export const INITIAL_ENTITIES: PublicEntity[] = [
     shortCode: 'Ubuntu Arts',
     type: 'NPO',
     cluster: 'Creative Industries & Film',
-    budgetAllocationZAR: 5000000, // R 5.0M Approved
-    transferredAmountZAR: 3200000, // R 3.2M Utilized (64%)
-    reportedExpenditureZAR: 3200000,
+    budgetAllocationZAR: 15000000, // R 15.0M Approved
+    transferredAmountZAR: 11263670, // 75% Q1-Q3 Tranches // R 3.2M Utilized (64%)
+    reportedExpenditureZAR: 7055669, // ~63% Burn Rate
     auditOutcome: 'CLEAN_AUDIT',
     auditYear: '2024/2025',
     overallComplianceScore: 88,
@@ -479,8 +441,8 @@ export const INITIAL_ENTITIES: PublicEntity[] = [
     type: 'PUBLIC_ENTITY',
     cluster: 'Performing Arts & Theatres',
     budgetAllocationZAR: 78500000,
-    transferredAmountZAR: 58875000,
-    reportedExpenditureZAR: 54200000,
+    transferredAmountZAR: 58946542, // 75% Q1-Q3 Tranches
+    reportedExpenditureZAR: 36924669, // ~63% Burn Rate
     auditOutcome: 'CLEAN_AUDIT',
     auditYear: '2024/2025',
     overallComplianceScore: 92,
@@ -501,8 +463,8 @@ export const INITIAL_ENTITIES: PublicEntity[] = [
     type: 'PUBLIC_ENTITY',
     cluster: 'Performing Arts & Theatres',
     budgetAllocationZAR: 84200000,
-    transferredAmountZAR: 63150000,
-    reportedExpenditureZAR: 61800000,
+    transferredAmountZAR: 63226736, // 75% Q1-Q3 Tranches
+    reportedExpenditureZAR: 39605823, // ~63% Burn Rate
     auditOutcome: 'CLEAN_AUDIT',
     auditYear: '2024/2025',
     overallComplianceScore: 94,
@@ -523,8 +485,8 @@ export const INITIAL_ENTITIES: PublicEntity[] = [
     type: 'PUBLIC_ENTITY',
     cluster: 'Performing Arts & Theatres',
     budgetAllocationZAR: 96400000,
-    transferredAmountZAR: 72300000,
-    reportedExpenditureZAR: 68900000,
+    transferredAmountZAR: 72387855, // 75% Q1-Q3 Tranches
+    reportedExpenditureZAR: 45344434, // ~63% Burn Rate
     auditOutcome: 'UNQUALIFIED_WITH_FINDINGS',
     auditYear: '2024/2025',
     overallComplianceScore: 76,
@@ -545,8 +507,8 @@ export const INITIAL_ENTITIES: PublicEntity[] = [
     type: 'PUBLIC_ENTITY',
     cluster: 'Performing Arts & Theatres',
     budgetAllocationZAR: 54100000,
-    transferredAmountZAR: 40575000,
-    reportedExpenditureZAR: 36200000,
+    transferredAmountZAR: 40624304, // 75% Q1-Q3 Tranches
+    reportedExpenditureZAR: 25447447, // ~63% Burn Rate
     auditOutcome: 'QUALIFIED',
     auditYear: '2024/2025',
     overallComplianceScore: 61,
@@ -567,8 +529,8 @@ export const INITIAL_ENTITIES: PublicEntity[] = [
     type: 'PUBLIC_ENTITY',
     cluster: 'Heritage & Museums',
     budgetAllocationZAR: 112000000,
-    transferredAmountZAR: 84000000,
-    reportedExpenditureZAR: 81200000,
+    transferredAmountZAR: 84102072, // 75% Q1-Q3 Tranches
+    reportedExpenditureZAR: 52682330, // ~63% Burn Rate
     auditOutcome: 'CLEAN_AUDIT',
     auditYear: '2024/2025',
     overallComplianceScore: 91,
@@ -589,8 +551,8 @@ export const INITIAL_ENTITIES: PublicEntity[] = [
     type: 'PUBLIC_ENTITY',
     cluster: 'Heritage & Museums',
     budgetAllocationZAR: 89600000,
-    transferredAmountZAR: 67200000,
-    reportedExpenditureZAR: 63800000,
+    transferredAmountZAR: 67281658, // 75% Q1-Q3 Tranches
+    reportedExpenditureZAR: 42145864, // ~63% Burn Rate
     auditOutcome: 'UNQUALIFIED_WITH_FINDINGS',
     auditYear: '2024/2025',
     overallComplianceScore: 79,
@@ -611,8 +573,8 @@ export const INITIAL_ENTITIES: PublicEntity[] = [
     type: 'PUBLIC_ENTITY',
     cluster: 'Heritage & Museums',
     budgetAllocationZAR: 124800000,
-    transferredAmountZAR: 93600000,
-    reportedExpenditureZAR: 88400000,
+    transferredAmountZAR: 93713737, // 75% Q1-Q3 Tranches
+    reportedExpenditureZAR: 58703168, // ~63% Burn Rate
     auditOutcome: 'UNQUALIFIED_WITH_FINDINGS',
     auditYear: '2024/2025',
     overallComplianceScore: 73,
@@ -633,8 +595,8 @@ export const INITIAL_ENTITIES: PublicEntity[] = [
     type: 'PUBLIC_ENTITY',
     cluster: 'Heritage & Museums',
     budgetAllocationZAR: 38400000,
-    transferredAmountZAR: 28800000,
-    reportedExpenditureZAR: 27100000,
+    transferredAmountZAR: 28834996, // 75% Q1-Q3 Tranches
+    reportedExpenditureZAR: 18062513, // ~63% Burn Rate
     auditOutcome: 'CLEAN_AUDIT',
     auditYear: '2024/2025',
     overallComplianceScore: 89,
@@ -655,8 +617,8 @@ export const INITIAL_ENTITIES: PublicEntity[] = [
     type: 'PUBLIC_ENTITY',
     cluster: 'Heritage & Museums',
     budgetAllocationZAR: 24500000,
-    transferredAmountZAR: 18375000,
-    reportedExpenditureZAR: 17200000,
+    transferredAmountZAR: 18397328, // 75% Q1-Q3 Tranches
+    reportedExpenditureZAR: 11524260, // ~63% Burn Rate
     auditOutcome: 'CLEAN_AUDIT',
     auditYear: '2024/2025',
     overallComplianceScore: 92,
@@ -677,8 +639,8 @@ export const INITIAL_ENTITIES: PublicEntity[] = [
     type: 'PUBLIC_ENTITY',
     cluster: 'Heritage & Museums',
     budgetAllocationZAR: 32100000,
-    transferredAmountZAR: 24075000,
-    reportedExpenditureZAR: 22800000,
+    transferredAmountZAR: 24104255, // 75% Q1-Q3 Tranches
+    reportedExpenditureZAR: 15099132, // ~63% Burn Rate
     auditOutcome: 'UNQUALIFIED_WITH_FINDINGS',
     auditYear: '2024/2025',
     overallComplianceScore: 81,
@@ -699,8 +661,8 @@ export const INITIAL_ENTITIES: PublicEntity[] = [
     type: 'PUBLIC_ENTITY',
     cluster: 'Heritage & Museums',
     budgetAllocationZAR: 21800000,
-    transferredAmountZAR: 16350000,
-    reportedExpenditureZAR: 15400000,
+    transferredAmountZAR: 16369868, // 75% Q1-Q3 Tranches
+    reportedExpenditureZAR: 10254239, // ~63% Burn Rate
     auditOutcome: 'CLEAN_AUDIT',
     auditYear: '2024/2025',
     overallComplianceScore: 90,
@@ -721,8 +683,8 @@ export const INITIAL_ENTITIES: PublicEntity[] = [
     type: 'PUBLIC_ENTITY',
     cluster: 'Heritage & Museums',
     budgetAllocationZAR: 62400000,
-    transferredAmountZAR: 46800000,
-    reportedExpenditureZAR: 44100000,
+    transferredAmountZAR: 46856869, // 75% Q1-Q3 Tranches
+    reportedExpenditureZAR: 29351584, // ~63% Burn Rate
     auditOutcome: 'CLEAN_AUDIT',
     auditYear: '2024/2025',
     overallComplianceScore: 88,
@@ -743,8 +705,8 @@ export const INITIAL_ENTITIES: PublicEntity[] = [
     type: 'PUBLIC_ENTITY',
     cluster: 'Heritage & Museums',
     budgetAllocationZAR: 44200000,
-    transferredAmountZAR: 33150000,
-    reportedExpenditureZAR: 31900000,
+    transferredAmountZAR: 33190282, // 75% Q1-Q3 Tranches
+    reportedExpenditureZAR: 20790705, // ~63% Burn Rate
     auditOutcome: 'CLEAN_AUDIT',
     auditYear: '2024/2025',
     overallComplianceScore: 93,
@@ -765,8 +727,8 @@ export const INITIAL_ENTITIES: PublicEntity[] = [
     type: 'PUBLIC_ENTITY',
     cluster: 'Heritage & Museums',
     budgetAllocationZAR: 18900000,
-    transferredAmountZAR: 14175000,
-    reportedExpenditureZAR: 13600000,
+    transferredAmountZAR: 14192225, // 75% Q1-Q3 Tranches
+    reportedExpenditureZAR: 8890143, // ~63% Burn Rate
     auditOutcome: 'CLEAN_AUDIT',
     auditYear: '2024/2025',
     overallComplianceScore: 91,
@@ -787,8 +749,8 @@ export const INITIAL_ENTITIES: PublicEntity[] = [
     type: 'PUBLIC_ENTITY',
     cluster: 'Languages, Literature & Libraries',
     budgetAllocationZAR: 26500000,
-    transferredAmountZAR: 19875000,
-    reportedExpenditureZAR: 19100000,
+    transferredAmountZAR: 19899151, // 75% Q1-Q3 Tranches
+    reportedExpenditureZAR: 12465016, // ~63% Burn Rate
     auditOutcome: 'CLEAN_AUDIT',
     auditYear: '2024/2025',
     overallComplianceScore: 95,
@@ -809,8 +771,8 @@ export const INITIAL_ENTITIES: PublicEntity[] = [
     type: 'PUBLIC_ENTITY',
     cluster: 'Sport & Recreation',
     budgetAllocationZAR: 48600000,
-    transferredAmountZAR: 36450000,
-    reportedExpenditureZAR: 35200000,
+    transferredAmountZAR: 36494292, // 75% Q1-Q3 Tranches
+    reportedExpenditureZAR: 22860368, // ~63% Burn Rate
     auditOutcome: 'CLEAN_AUDIT',
     auditYear: '2024/2025',
     overallComplianceScore: 96,
@@ -831,8 +793,8 @@ export const INITIAL_ENTITIES: PublicEntity[] = [
     type: 'PUBLIC_ENTITY',
     cluster: 'Heritage & Museums',
     budgetAllocationZAR: 78500000,
-    transferredAmountZAR: 58875000,
-    reportedExpenditureZAR: 56200000,
+    transferredAmountZAR: 58946542, // 75% Q1-Q3 Tranches
+    reportedExpenditureZAR: 36924669, // ~63% Burn Rate
     auditOutcome: 'CLEAN_AUDIT',
     auditYear: '2024/2025',
     overallComplianceScore: 92,
@@ -853,8 +815,8 @@ export const INITIAL_ENTITIES: PublicEntity[] = [
     type: 'PUBLIC_ENTITY',
     cluster: 'Languages, Literature & Libraries',
     budgetAllocationZAR: 31400000,
-    transferredAmountZAR: 23550000,
-    reportedExpenditureZAR: 22700000,
+    transferredAmountZAR: 23578617, // 75% Q1-Q3 Tranches
+    reportedExpenditureZAR: 14769868, // ~63% Burn Rate
     auditOutcome: 'CLEAN_AUDIT',
     auditYear: '2024/2025',
     overallComplianceScore: 94,
@@ -875,8 +837,8 @@ export const INITIAL_ENTITIES: PublicEntity[] = [
     type: 'PUBLIC_ENTITY',
     cluster: 'Languages, Literature & Libraries',
     budgetAllocationZAR: 138000000,
-    transferredAmountZAR: 103500000,
-    reportedExpenditureZAR: 99400000,
+    transferredAmountZAR: 103625767, // 75% Q1-Q3 Tranches
+    reportedExpenditureZAR: 64912157, // ~63% Burn Rate
     auditOutcome: 'UNQUALIFIED_WITH_FINDINGS',
     auditYear: '2024/2025',
     overallComplianceScore: 82,
@@ -897,8 +859,8 @@ export const INITIAL_ENTITIES: PublicEntity[] = [
     type: 'NPO',
     cluster: 'Subsidized Cultural NPOs',
     budgetAllocationZAR: 14500000,
-    transferredAmountZAR: 10875000,
-    reportedExpenditureZAR: 10400000,
+    transferredAmountZAR: 10888215, // 75% Q1-Q3 Tranches
+    reportedExpenditureZAR: 6820480, // ~63% Burn Rate
     auditOutcome: 'CLEAN_AUDIT',
     auditYear: '2024/2025',
     overallComplianceScore: 95,
@@ -919,8 +881,8 @@ export const INITIAL_ENTITIES: PublicEntity[] = [
     type: 'NPO',
     cluster: 'Subsidized Cultural NPOs',
     budgetAllocationZAR: 8600000,
-    transferredAmountZAR: 6450000,
-    reportedExpenditureZAR: 6200000,
+    transferredAmountZAR: 6457838, // 75% Q1-Q3 Tranches
+    reportedExpenditureZAR: 4045250, // ~63% Burn Rate
     auditOutcome: 'CLEAN_AUDIT',
     auditYear: '2024/2025',
     overallComplianceScore: 91,
@@ -941,8 +903,8 @@ export const INITIAL_ENTITIES: PublicEntity[] = [
     type: 'NPO',
     cluster: 'Subsidized Cultural NPOs',
     budgetAllocationZAR: 12000000,
-    transferredAmountZAR: 9000000,
-    reportedExpenditureZAR: 8750000,
+    transferredAmountZAR: 9010936, // 75% Q1-Q3 Tranches
+    reportedExpenditureZAR: 5644535, // ~63% Burn Rate
     auditOutcome: 'CLEAN_AUDIT',
     auditYear: '2024/2025',
     overallComplianceScore: 92,
@@ -963,8 +925,8 @@ export const INITIAL_ENTITIES: PublicEntity[] = [
     type: 'NPO',
     cluster: 'Subsidized Cultural NPOs',
     budgetAllocationZAR: 9200000,
-    transferredAmountZAR: 6900000,
-    reportedExpenditureZAR: 6600000,
+    transferredAmountZAR: 6908384, // 75% Q1-Q3 Tranches
+    reportedExpenditureZAR: 4327480, // ~63% Burn Rate
     auditOutcome: 'CLEAN_AUDIT',
     auditYear: '2024/2025',
     overallComplianceScore: 93,
