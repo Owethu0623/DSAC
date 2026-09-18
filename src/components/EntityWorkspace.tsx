@@ -32,6 +32,7 @@ import {
   ReportItem 
 } from '../types';
 import { DocumentVerificationDossier } from './DocumentVerificationDossier';
+import { EntityFinancialView } from './features/EntityFinancialView';
 
 interface EntityWorkspaceProps {
   entityId: string;
@@ -54,19 +55,13 @@ export const EntityWorkspace: React.FC<EntityWorkspaceProps> = ({
   const entityTasks = store.tasks.filter(t => t.entityId === entity.id);
 
   // Tabs inside Workspace
-  const [activeTab, setActiveTab] = useState<'kpis' | 'reports' | 'documents' | 'tasks'>('reports');
+  const [activeTab, setActiveTab] = useState<'reports' | 'financials' | 'kpis' | 'documents' | 'tasks'>('reports');
   const [docSubTab, setDocSubTab] = useState<'verification' | 'repository'>('verification');
 
   // Report Review State (for DSAC Admin)
   const [reviewReportModal, setReviewReportModal] = useState<QuarterlyReport | null>(null);
   const [reviewDecision, setReviewDecision] = useState<'APPROVE' | 'REQUEST_CORRECTION'>('APPROVE');
   const [reviewNotes, setReviewNotes] = useState<string>('');
-
-  // Report Submission State (for Entity Officer)
-  const [activeReportDraft, setActiveReportDraft] = useState<QuarterlyReport | null>(entityReports[0] || null);
-  const [editableItems, setEditableItems] = useState<Record<string, { actual: number; varianceReason: string; correctiveAction: string }>>({});
-  const [spentThisQuarter, setSpentThisQuarter] = useState<number>(24800000);
-  const [submitSuccess, setSubmitSuccess] = useState<string | null>(null);
 
   // Document Upload State
   const [showUploadModal, setShowUploadModal] = useState(false);
@@ -87,47 +82,6 @@ export const EntityWorkspace: React.FC<EntityWorkspaceProps> = ({
   // Task Resolution
   const [resolvingTask, setResolvingTask] = useState<CorrectiveTask | null>(null);
   const [taskResolutionNotes, setTaskResolutionNotes] = useState('');
-
-  // Handle Form Inputs for KPI actuals
-  const handleItemChange = (kpiId: string, field: 'actual' | 'varianceReason' | 'correctiveAction', value: any) => {
-    setEditableItems(prev => ({
-      ...prev,
-      [kpiId]: {
-        ...prev[kpiId],
-        [field]: value,
-      },
-    }));
-  };
-
-  // Submit Report (Entity Action)
-  const handleSubmitReport = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!activeReportDraft) return;
-
-    const updatedItems: ReportItem[] = entityKPIs.map(kpi => {
-      const draft = editableItems[kpi.id] || { actual: kpi.currentValue, varianceReason: '', correctiveAction: '' };
-      const target = kpi.expectedValue;
-      const actual = Number(draft.actual) || 0;
-      const variance = target > 0 ? Math.round(((actual - target) / target) * 1000) / 10 : 0;
-
-      return {
-        id: `item-${kpi.id}-${Date.now()}`,
-        kpiId: kpi.id,
-        kpiName: kpi.name,
-        targetToDate: target,
-        actualAchieved: actual,
-        unit: kpi.unitOfMeasure,
-        status: actual >= target ? 'ON_TRACK' : actual >= target * 0.8 ? 'AT_RISK' : 'MISSED',
-        variancePercentage: variance,
-        varianceReason: draft.varianceReason || 'Field conditions documented in Portfolio of Evidence.',
-        correctiveAction: draft.correctiveAction || 'Inspection cadence expanded to clear backlog.',
-      };
-    });
-
-    store.submitReport(activeReportDraft.id, updatedItems, spentThisQuarter);
-    setSubmitSuccess(`Quarterly Report ${activeReportDraft.quarter} submitted successfully to DSAC National for review.`);
-    setTimeout(() => setSubmitSuccess(null), 4000);
-  };
 
   // Review Report (DSAC Admin Action)
   const handleExecuteReview = (e: React.FormEvent) => {
@@ -291,6 +245,18 @@ export const EntityWorkspace: React.FC<EntityWorkspaceProps> = ({
           </button>
 
           <button
+            onClick={() => setActiveTab('financials')}
+            className={`px-4 py-2.5 text-xs font-bold border-b-2 transition-colors flex items-center gap-1.5 ${
+              activeTab === 'financials'
+                ? 'border-emerald-600 text-emerald-700'
+                : 'border-transparent text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            <Coins className="w-4 h-4" />
+            <span>Budget & Financial Utilisation</span>
+          </button>
+
+          <button
             onClick={() => setActiveTab('kpis')}
             className={`px-4 py-2.5 text-xs font-bold border-b-2 transition-colors flex items-center gap-1.5 ${
               activeTab === 'kpis'
@@ -327,14 +293,6 @@ export const EntityWorkspace: React.FC<EntityWorkspaceProps> = ({
           </button>
         </div>
       </div>
-
-      {/* Success Notification */}
-      {submitSuccess && (
-        <div className="bg-emerald-50 border border-emerald-300 text-emerald-900 p-3 rounded-xl text-xs font-semibold flex items-center gap-2 shadow-sm">
-          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-          <span>{submitSuccess}</span>
-        </div>
-      )}
 
       {/* TAB 1: REPORTS (THE CORE GOVERNMENT REPORTING & REVIEW WORKFLOW) */}
       {activeTab === 'reports' && (
@@ -517,15 +475,12 @@ export const EntityWorkspace: React.FC<EntityWorkspaceProps> = ({
                         </button>
                       )}
 
-                      {/* Entity Officer Resubmit Button */}
+                      {/* Entity Officer Resubmit Guidance */}
                       {!isDSACReviewer && report.submissionStatus === 'CORRECTION_REQUIRED' && (
-                        <button
-                          onClick={() => setActiveReportDraft(report)}
-                          className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-bold shadow-sm transition-colors flex items-center gap-1.5"
-                        >
-                          <Sparkles className="w-3.5 h-3.5 text-white" />
-                          <span>Rectify & Resubmit</span>
-                        </button>
+                        <div className="px-3 py-1.5 bg-amber-50 border border-amber-200 text-amber-800 rounded-lg text-xs font-semibold flex items-center gap-1.5">
+                          <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+                          <span>Rectify via Entity Portal</span>
+                        </div>
                       )}
                     </div>
                   </div>
@@ -578,133 +533,26 @@ export const EntityWorkspace: React.FC<EntityWorkspaceProps> = ({
             </div>
           </div>
 
-          {/* Interactive Quarterly Return Submission Form (For Entity Reporting Officer) */}
-          <div className="bg-white rounded-xl p-6 border border-slate-200 shadow-sm">
-            <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+          {/* Statutory Oversight Guidance: Submissions Managed via Entity Portal */}
+          <div className="bg-slate-50 rounded-xl p-5 border border-slate-200 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <div className="p-2.5 rounded-lg bg-emerald-100 text-emerald-800 shrink-0 mt-0.5">
+                <FileCheck className="w-5 h-5" />
+              </div>
               <div>
-                <h2 className="text-base font-bold text-slate-900">
-                  {entity.shortCode} Performance Return Ingestion Stepper
-                </h2>
-                <p className="text-xs text-slate-500">
-                  Enter verified quarterly figures, document variance justifications, and submit for DSAC National sign-off.
+                <h4 className="font-bold text-slate-900 text-sm">
+                  Statutory Return Ingestion Managed in Entity Portal
+                </h4>
+                <p className="text-slate-500 mt-1 max-w-2xl leading-relaxed">
+                  Quarterly indicator actuals, variance justifications, and Portfolio of Evidence (PoE) are captured and submitted directly by {entity.name} via the Entity / NPO Self-Reporting Portal. DSAC reviews and audits these figures upon submission.
                 </p>
               </div>
-              <span className="text-xs bg-emerald-50 text-emerald-800 font-bold px-2.5 py-1 rounded border border-emerald-200">
-                Step 1 of 2: Indicator Values
+            </div>
+            <div className="shrink-0 flex items-center gap-2">
+              <span className="text-[11px] font-bold text-emerald-800 bg-emerald-50 px-3 py-1.5 rounded-lg border border-emerald-200">
+                PFMA Section 38(1)(j) Oversight
               </span>
             </div>
-
-            <form onSubmit={handleSubmitReport} className="mt-5 space-y-5">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Reporting Quarter & Financial Year
-                  </label>
-                  <input 
-                    type="text" 
-                    readOnly 
-                    value="Q3 (2025/2026 Financial Year)" 
-                    className="w-full text-xs p-2.5 rounded-lg bg-slate-50 border border-slate-300 font-medium text-slate-700 cursor-not-allowed"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Verified Quarterly Operational Expenditure (ZAR)
-                  </label>
-                  <input 
-                    type="number" 
-                    value={spentThisQuarter} 
-                    onChange={(e) => setSpentThisQuarter(Number(e.target.value))}
-                    className="w-full text-xs p-2.5 rounded-lg border border-slate-300 font-mono text-slate-900 focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
-                    placeholder="e.g. 24800000"
-                  />
-                  <span className="text-[10px] text-slate-500 mt-0.5 block">
-                    PFMA Vote 37: Disbursed towards agreed programme outputs.
-                  </span>
-                </div>
-              </div>
-
-              {/* Indicator Inputs */}
-              <div className="space-y-4 pt-3">
-                <div className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                  KPI Achievement Entries & Remedial Evidence:
-                </div>
-
-                {entityKPIs.map(kpi => {
-                  const state = editableItems[kpi.id] || { actual: kpi.currentValue, varianceReason: '', correctiveAction: '' };
-
-                  return (
-                    <div key={kpi.id} className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                        <div>
-                          <div className="font-bold text-slate-900 text-xs">{kpi.name}</div>
-                          <div className="text-[11px] text-slate-500">Programme: {kpi.programmeName} • Unit: {kpi.unitOfMeasure}</div>
-                        </div>
-                        <div className="text-xs font-mono font-semibold text-slate-700 bg-white px-2 py-1 rounded border border-slate-200">
-                          Expected Trajectory: {kpi.expectedValue} {kpi.unitOfMeasure}
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-                        <div>
-                          <label className="block text-[11px] font-semibold text-slate-700 mb-1">
-                            Verified Actual Achieved
-                          </label>
-                          <input
-                            type="number"
-                            value={state.actual}
-                            onChange={(e) => handleItemChange(kpi.id, 'actual', Number(e.target.value))}
-                            className="w-full p-2 bg-white rounded border border-slate-300 font-mono text-slate-900 focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block text-[11px] font-semibold text-slate-700 mb-1">
-                            Variance Explanation (if lag {'>'}10%)
-                          </label>
-                          <input
-                            type="text"
-                            value={state.varianceReason}
-                            placeholder="Reason for delay or over-achievement"
-                            onChange={(e) => handleItemChange(kpi.id, 'varianceReason', e.target.value)}
-                            className="w-full p-2 bg-white rounded border border-slate-300 text-slate-900 focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block text-[11px] font-semibold text-slate-700 mb-1">
-                            Proposed Mitigation Action
-                          </label>
-                          <input
-                            type="text"
-                            value={state.correctiveAction}
-                            placeholder="Corrective steps planned for next quarter"
-                            onChange={(e) => handleItemChange(kpi.id, 'correctiveAction', e.target.value)}
-                            className="w-full p-2 bg-white rounded border border-slate-300 text-slate-900 focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              <div className="pt-4 border-t border-slate-100 flex items-center justify-between">
-                <div className="text-xs text-slate-500 flex items-center gap-1.5">
-                  <ShieldAlert className="w-4 h-4 text-emerald-600" />
-                  <span>Submission triggers automated risk recalculation and immutable audit stamp.</span>
-                </div>
-
-                <button
-                  type="submit"
-                  className="px-5 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-xs font-bold shadow transition-all flex items-center gap-2"
-                >
-                  <Send className="w-3.5 h-3.5" />
-                  <span>Submit Performance Return to DSAC</span>
-                </button>
-              </div>
-            </form>
           </div>
 
         </div>

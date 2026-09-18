@@ -1,4 +1,5 @@
 import React from 'react';
+import dsacLogo from '../assets/images/dsac_official_logo_1789660825303.jpg';
 
 interface SouthAfricanCoatOfArmsProps {
   className?: string;
@@ -182,9 +183,10 @@ export const DsacOfficialLogo: React.FC<DsacOfficialLogoProps> = ({
       {/* Coat of Arms Image Asset with SVG fallback */}
       <div className="relative shrink-0 flex items-center justify-center">
         <img
-          src="/src/assets/images/dsac_official_logo_1789660825303.jpg"
+          src={dsacLogo}
           alt="Department of Sport, Arts and Culture"
           className="h-11 w-auto max-w-[140px] object-contain rounded drop-shadow-xs"
+          referrerPolicy="no-referrer"
           onError={(e) => {
             // If image fails or on custom backgrounds, fallback to vector SVG
             e.currentTarget.style.display = 'none';

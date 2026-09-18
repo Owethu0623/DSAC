@@ -17,6 +17,7 @@ import {
   ChevronDown,
   Building,
   ShieldCheck,
+  ShieldAlert,
   FolderLock,
   MessageSquare,
   HelpCircle,
@@ -47,6 +48,7 @@ import { store } from '../services/store';
 import { UbuntuArtsLogo } from './UbuntuArtsLogo';
 import { downloadStatutoryDocument } from '../services/downloadHelper';
 import { DocumentVerificationDossier } from './DocumentVerificationDossier';
+import { EntityFinancialView } from './features/EntityFinancialView';
 
 interface EntityPortalDashboardProps {
   entityId?: string;
@@ -76,10 +78,102 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
 
   // Resolve current entity from store
-  const targetEntityId = entityId || store.currentUser?.entityId || 'ent-ubuntu-arts';
-  const entity = store.entities.find(e => e.id === targetEntityId) || store.entities.find(e => e.id === 'ent-ubuntu-arts') || store.entities[0];
+  const [selectedEntityId, setSelectedEntityId] = useState<string>(() => {
+    return entityId || store.currentUser?.entityId || 'ent-sahra';
+  });
+
+  useEffect(() => {
+    if (entityId) {
+      setSelectedEntityId(entityId);
+    }
+  }, [entityId]);
+
+  const entity = store.entities.find(e => e.id === selectedEntityId) || store.entities.find(e => e.id === 'ent-sahra') || store.entities[0];
+  const entityKPIs = store.kpis.filter(k => k.entityId === entity.id);
   const entityDocuments = store.documents.filter(d => d.entityId === entity.id);
   const entityReports = store.reports.filter(r => r.entityId === entity.id);
+
+  // Performance Return Ingestion Stepper State (Entity Side)
+  const [stepperStep, setStepperStep] = useState<1 | 2>(1);
+  const [reportingQuarter, setReportingQuarter] = useState<string>('Q3 (2025/2026 Financial Year)');
+  const [spentThisQuarter, setSpentThisQuarter] = useState<number>(entity.shortCode === 'SAHRA' ? 24800000 : 1200000);
+  const [stepperKpiEntries, setStepperKpiEntries] = useState<Record<string, { actual: number; varianceReason: string; correctiveAction: string }>>({});
+  const [stepperPoeDocId, setStepperPoeDocId] = useState<string>('');
+  const [stepperAffirmed, setStepperAffirmed] = useState<boolean>(true);
+  const [stepperSuccessMessage, setStepperSuccessMessage] = useState<string | null>(null);
+
+  // Sync spentThisQuarter and KPI entries whenever entity changes
+  useEffect(() => {
+    setSpentThisQuarter(entity.shortCode === 'SAHRA' ? 24800000 : 1200000);
+    const initialEntries: Record<string, { actual: number; varianceReason: string; correctiveAction: string }> = {};
+    entityKPIs.forEach(k => {
+      const defaultActual = entity.shortCode === 'SAHRA' && k.name.includes('Sites') ? 38 :
+                            entity.shortCode === 'SAHRA' && k.name.includes('Workshops') ? 33 :
+                            k.currentValue;
+      initialEntries[k.id] = {
+        actual: defaultActual,
+        varianceReason: defaultActual < k.expectedValue ? 'Reason for delay or over-achievement' : '',
+        correctiveAction: defaultActual < k.expectedValue ? 'Corrective steps planned for next quarter' : '',
+      };
+    });
+    setStepperKpiEntries(initialEntries);
+  }, [entity.id]);
+
+  const handleStepperKpiChange = (kpiId: string, field: 'actual' | 'varianceReason' | 'correctiveAction', value: any) => {
+    setStepperKpiEntries(prev => ({
+      ...prev,
+      [kpiId]: {
+        ...prev[kpiId],
+        [field]: value,
+      }
+    }));
+  };
+
+  const handleSubmitStepper = (e: React.FormEvent) => {
+    e.preventDefault();
+    const updatedItems = entityKPIs.map(kpi => {
+      const entry = stepperKpiEntries[kpi.id] || { actual: kpi.currentValue, varianceReason: '', correctiveAction: '' };
+      const target = kpi.expectedValue;
+      const actual = Number(entry.actual) || 0;
+      const variance = target > 0 ? Math.round(((actual - target) / target) * 1000) / 10 : 0;
+      return {
+        id: `item-${kpi.id}-${Date.now()}`,
+        kpiId: kpi.id,
+        kpiName: kpi.name,
+        targetToDate: target,
+        actualAchieved: actual,
+        unit: kpi.unitOfMeasure,
+        status: (actual >= target ? 'ON_TRACK' : actual >= target * 0.8 ? 'AT_RISK' : 'MISSED') as any,
+        variancePercentage: variance,
+        varianceReason: entry.varianceReason || 'Documented in Portfolio of Evidence.',
+        correctiveAction: entry.correctiveAction || 'Corrective steps planned for next quarter.',
+      };
+    });
+
+    const quarterCode = (reportingQuarter.includes('Q3') ? 'Q3' : reportingQuarter.includes('Q2') ? 'Q2' : reportingQuarter.includes('Q1') ? 'Q1' : 'Q4') as any;
+    const existingReport = entityReports.find(r => r.quarter === quarterCode);
+
+    if (existingReport) {
+      store.submitReport(existingReport.id, updatedItems, spentThisQuarter);
+    } else {
+      store.submitQuarterlyReport({
+        entityId: entity.id,
+        quarter: quarterCode,
+        financialYear: '2025/2026',
+        expenditureClaimedZAR: spentThisQuarter,
+        declarationNotes: `Q3 statutory performance return submitted with verified figures and Section 38(1)(j) sign-off.`,
+        poeDocId: stepperPoeDocId || entityDocuments[0]?.id,
+      });
+    }
+
+    setStepperSuccessMessage(`Quarterly Performance Return for ${entity.shortCode} submitted successfully to DSAC National.`);
+    setActionSuccess(`Performance Return submitted to DSAC.`);
+    setStepperStep(1);
+    setTimeout(() => {
+      setStepperSuccessMessage(null);
+      setActionSuccess(null);
+    }, 5000);
+  };
 
   // Drag & Drop States
   const [isDraggingModal, setIsDraggingModal] = useState(false);
@@ -504,20 +598,42 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
         {/* Top Header Bar */}
         <header className="bg-white border-b border-slate-200 px-4 sm:px-6 py-3 flex items-center justify-between gap-3 shrink-0 sticky top-0 z-20">
           <div className="flex items-center gap-3 min-w-0">
-            <div className="w-8 h-8 rounded-lg bg-indigo-50 border border-indigo-200 flex items-center justify-center p-1 shrink-0">
-              <UbuntuArtsLogo size={24} />
+            <div className="w-8 h-8 rounded-lg bg-indigo-50 border border-indigo-200 flex items-center justify-center p-1 shrink-0 font-bold text-indigo-700 text-xs">
+              {entity.shortCode === 'UBUNTU' ? <UbuntuArtsLogo size={24} /> : entity.shortCode.slice(0, 4)}
             </div>
             <div className="truncate">
-              <h2 className="text-sm sm:text-base font-black text-slate-900 leading-tight truncate">
-                Ubuntu Arts NPO
-              </h2>
+              <div className="flex items-center gap-2">
+                <h2 className="text-sm sm:text-base font-black text-slate-900 leading-tight truncate">
+                  {entity.name}
+                </h2>
+                <span className="hidden md:inline-block text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200">
+                  {entity.shortCode}
+                </span>
+              </div>
               <p className="text-[11px] text-slate-500 font-medium truncate">
-                Inspiring Communities Through Creative Arts
+                {entity.type === 'PUBLIC_ENTITY' ? 'PFMA Schedule 3A Public Entity' : 'Subsidized Cultural NPO'} • Reporting Officer: {entity.reportingOfficerName || 'Institutional Officer'}
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-2 sm:gap-3">
+            {/* Institution Switcher for Portal */}
+            <div className="relative hidden md:block">
+              <select
+                id="portal-entity-switcher"
+                value={entity.id}
+                onChange={(e) => setSelectedEntityId(e.target.value)}
+                className="text-xs bg-slate-50 hover:bg-slate-100 border border-slate-300 rounded-lg px-2.5 py-1.5 font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 focus:outline-hidden cursor-pointer"
+                title="Select Reporting Entity"
+              >
+                {store.entities.map(e => (
+                  <option key={e.id} value={e.id}>
+                    {e.shortCode} — {e.name.length > 32 ? e.name.slice(0, 32) + '...' : e.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
             {/* Quick Action: Upload PoE */}
             <button
               onClick={() => setActiveModal('uploadPoE')}
@@ -1380,109 +1496,11 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
 
           {/* ================= VIEW 5: BUDGET & FINANCIAL UTILIZATION ================= */}
           {activeSidebar === 'budget' && (
-            <div className="space-y-5">
-              <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100">
-                  <div>
-                    <h3 className="text-base font-black text-slate-900 flex items-center gap-2">
-                      <Coins className="w-5 h-5 text-amber-600" />
-                      <span>Financial Utilization &amp; Tranche Claims</span>
-                    </h3>
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      National Treasury Vote 37 subvention allocation and tranche disbursements.
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => {
-                      setActionSuccess('Tranche 3 disbursement claim submitted to DSAC Finance Directorate.');
-                      setTimeout(() => setActionSuccess(null), 1500);
-                    }}
-                    className="px-4 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs rounded-lg shadow-xs"
-                  >
-                    Claim Tranche 3 (R 1.0M)
-                  </button>
-                </div>
-
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 my-4 text-xs">
-                  <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
-                    <div className="text-slate-500">Voted Allocation</div>
-                    <div className="text-lg font-black text-slate-900 mt-1">R 5 000 000</div>
-                  </div>
-                  <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200">
-                    <div className="text-emerald-700">Total Expended</div>
-                    <div className="text-lg font-black text-emerald-900 mt-1">R 3 200 000</div>
-                  </div>
-                  <div className="p-3 bg-blue-50 rounded-xl border border-blue-200">
-                    <div className="text-blue-700">Committed Orders</div>
-                    <div className="text-lg font-black text-blue-900 mt-1">R 950 000</div>
-                  </div>
-                  <div className="p-3 bg-amber-50 rounded-xl border border-amber-200">
-                    <div className="text-amber-700">Liquid Balance</div>
-                    <div className="text-lg font-black text-amber-900 mt-1">R 850 000</div>
-                  </div>
-                </div>
-
-                <h4 className="font-bold text-xs text-slate-800 uppercase tracking-wider mb-2">
-                  Tranche Disbursement Schedule
-                </h4>
-                <div className="divide-y divide-slate-100 text-xs">
-                  <div className="py-2.5 flex items-center justify-between">
-                    <div>
-                      <div className="font-bold text-slate-900">Tranche 1 (Initial Statutory Advance)</div>
-                      <div className="text-slate-500">Disbursed on approval of 2025/26 Annual Performance Plan</div>
-                    </div>
-                    <div className="text-right">
-                      <div className="font-black text-emerald-700">R 1 500 000</div>
-                      <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded-full text-[10px] font-bold">
-                        Paid 15 May 2025
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="py-2.5 flex items-center justify-between">
-                    <div>
-                      <div className="font-bold text-slate-900">Tranche 2 (Q1 Performance Verified)</div>
-                      <div className="text-slate-500">Disbursed following acceptance of Q1 Performance Report</div>
-                    </div>
-                    <div className="text-right">
-                      <div className="font-black text-emerald-700">R 1 700 000</div>
-                      <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded-full text-[10px] font-bold">
-                        Paid 02 Aug 2025
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="py-2.5 flex items-center justify-between">
-                    <div>
-                      <div className="font-bold text-slate-900">Tranche 3 (Mid-Term Claim Eligible)</div>
-                      <div className="text-slate-500">Pending Q2 report submission &amp; expenditure audit</div>
-                    </div>
-                    <div className="text-right flex items-center gap-2">
-                      <div className="font-black text-amber-700">R 1 000 000</div>
-                      <button
-                        onClick={() => handleClaimTranche('Tranche 3 (Mid-Term Claim)', 1000000)}
-                        className="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-[10px] font-bold shadow-xs cursor-pointer transition-colors"
-                      >
-                        Claim Tranche 3
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="py-2.5 flex items-center justify-between">
-                    <div>
-                      <div className="font-bold text-slate-900">Tranche 4 (Final Reconciliation)</div>
-                      <div className="text-slate-500">Scheduled for Q4 following close-out audit</div>
-                    </div>
-                    <div className="text-right">
-                      <div className="font-black text-slate-600">R 800 000</div>
-                      <span className="px-2 py-0.5 bg-slate-100 text-slate-600 rounded-full text-[10px] font-medium">
-                        Q4 FY2026
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
+            <EntityFinancialView
+              entityId={entity.id}
+              financialYear={selectedYear.includes('2024') ? '2024/25' : selectedYear.includes('2025') ? '2025/26' : '2026/27'}
+              readOnly={false}
+            />
           )}
 
           {/* ================= VIEW 6: SUPPORT REQUESTS ================= */}
@@ -1543,51 +1561,312 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
             </div>
           )}
 
-          {/* ================= VIEW 7: REPORTS SUBMISSION ================= */}
+          {/* ================= VIEW 7: REPORTS SUBMISSION & STEPPER ================= */}
           {activeSidebar === 'submissions' && (
-            <div className="space-y-5">
+            <div className="space-y-6">
+              {/* Stepper Success Banner */}
+              {stepperSuccessMessage && (
+                <div className="bg-emerald-50 border border-emerald-300 text-emerald-900 p-4 rounded-xl text-xs font-semibold flex items-center gap-2 shadow-xs">
+                  <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+                  <span>{stepperSuccessMessage}</span>
+                </div>
+              )}
+
+              {/* Performance Return Ingestion Stepper (Entity Reporting Action) */}
+              <div className="bg-white rounded-xl p-6 border border-slate-200 shadow-xs">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-slate-100 gap-3">
+                  <div>
+                    <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                      <FileText className="w-5 h-5 text-indigo-700" />
+                      <span>{entity.shortCode} Performance Return Ingestion Stepper</span>
+                    </h2>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Enter verified quarterly figures, document variance justifications, and submit for DSAC National sign-off.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setStepperStep(1)}
+                      className={`text-xs font-bold px-3 py-1.5 rounded-lg border transition-all cursor-pointer ${
+                        stepperStep === 1
+                          ? 'bg-emerald-50 text-emerald-800 border-emerald-300 ring-1 ring-emerald-200'
+                          : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      Step 1 of 2: Indicator Values
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setStepperStep(2)}
+                      className={`text-xs font-bold px-3 py-1.5 rounded-lg border transition-all cursor-pointer ${
+                        stepperStep === 2
+                          ? 'bg-emerald-50 text-emerald-800 border-emerald-300 ring-1 ring-emerald-200'
+                          : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      Step 2 of 2: Evidence &amp; Sign-Off
+                    </button>
+                  </div>
+                </div>
+
+                {/* STEP 1: INDICATOR VALUES */}
+                {stepperStep === 1 && (
+                  <div className="mt-5 space-y-5">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1">
+                          Reporting Quarter &amp; Financial Year
+                        </label>
+                        <select
+                          value={reportingQuarter}
+                          onChange={(e) => setReportingQuarter(e.target.value)}
+                          className="w-full text-xs p-2.5 rounded-lg bg-slate-50 border border-slate-300 font-semibold text-slate-800 focus:bg-white focus:outline-hidden focus:ring-1 focus:ring-emerald-600"
+                        >
+                          <option value="Q3 (2025/2026 Financial Year)">Q3 (2025/2026 Financial Year)</option>
+                          <option value="Q2 (2025/2026 Financial Year)">Q2 (2025/2026 Financial Year)</option>
+                          <option value="Q1 (2025/2026 Financial Year)">Q1 (2025/2026 Financial Year)</option>
+                          <option value="Q4 (2025/2026 Financial Year)">Q4 (2025/2026 Financial Year)</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1">
+                          Verified Quarterly Operational Expenditure (ZAR)
+                        </label>
+                        <input 
+                          type="number" 
+                          value={spentThisQuarter} 
+                          onChange={(e) => setSpentThisQuarter(Number(e.target.value))}
+                          className="w-full text-xs p-2.5 rounded-lg border border-slate-300 font-mono text-slate-900 focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
+                          placeholder="e.g. 24800000"
+                        />
+                        <span className="text-[10px] text-slate-500 mt-0.5 block">
+                          PFMA Vote 37: Disbursed towards agreed programme outputs.
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Indicator Inputs */}
+                    <div className="space-y-4 pt-3">
+                      <div className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center justify-between">
+                        <span>KPI Achievement Entries &amp; Remedial Evidence:</span>
+                        <span className="text-[11px] font-medium text-slate-400">
+                          {entityKPIs.length} Agreed Trajectories
+                        </span>
+                      </div>
+
+                      {entityKPIs.length === 0 ? (
+                        <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl text-center text-xs text-slate-500">
+                          No specific indicator trajectories configured for {entity.shortCode}. Using baseline statutory metrics.
+                        </div>
+                      ) : (
+                        entityKPIs.map(kpi => {
+                          const state = stepperKpiEntries[kpi.id] || { 
+                            actual: kpi.currentValue, 
+                            varianceReason: '', 
+                            correctiveAction: '' 
+                          };
+
+                          return (
+                            <div key={kpi.id} className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
+                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                                <div>
+                                  <div className="font-bold text-slate-900 text-xs">{kpi.name}</div>
+                                  <div className="text-[11px] text-slate-500">Programme: {kpi.programmeName} • Unit: {kpi.unitOfMeasure}</div>
+                                </div>
+                                <div className="text-xs font-mono font-semibold text-slate-700 bg-white px-2.5 py-1 rounded-md border border-slate-200 shrink-0">
+                                  Expected Trajectory: {kpi.expectedValue} {kpi.unitOfMeasure}
+                                </div>
+                              </div>
+
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                                <div>
+                                  <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                                    Verified Actual Achieved
+                                  </label>
+                                  <input
+                                    type="number"
+                                    value={state.actual}
+                                    onChange={(e) => handleStepperKpiChange(kpi.id, 'actual', Number(e.target.value))}
+                                    className="w-full p-2 bg-white rounded-lg border border-slate-300 font-mono text-slate-900 focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
+                                  />
+                                </div>
+
+                                <div>
+                                  <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                                    Variance Explanation (if lag {'>'}10%)
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={state.varianceReason}
+                                    placeholder="Reason for delay or over-achievement"
+                                    onChange={(e) => handleStepperKpiChange(kpi.id, 'varianceReason', e.target.value)}
+                                    className="w-full p-2 bg-white rounded-lg border border-slate-300 text-slate-900 focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
+                                  />
+                                </div>
+
+                                <div>
+                                  <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                                    Proposed Mitigation Action
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={state.correctiveAction}
+                                    placeholder="Corrective steps planned for next quarter"
+                                    onChange={(e) => handleStepperKpiChange(kpi.id, 'correctiveAction', e.target.value)}
+                                    className="w-full p-2 bg-white rounded-lg border border-slate-300 text-slate-900 focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+
+                    <div className="pt-4 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div className="text-xs text-slate-500 flex items-center gap-1.5">
+                        <ShieldAlert className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span>Submission triggers automated risk recalculation and immutable audit stamp.</span>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => setStepperStep(2)}
+                        className="px-5 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-xs font-bold shadow-xs transition-all flex items-center justify-center gap-2 cursor-pointer"
+                      >
+                        <span>Continue to Evidence &amp; Sign-Off (Step 2)</span>
+                        <ChevronRight className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* STEP 2: EVIDENCE & SIGN-OFF */}
+                {stepperStep === 2 && (
+                  <form onSubmit={handleSubmitStepper} className="mt-5 space-y-5">
+                    {/* Portfolio of Evidence Link */}
+                    <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h4 className="font-bold text-slate-900 text-xs">Portfolio of Evidence (PoE) Dossier</h4>
+                          <p className="text-[11px] text-slate-500">
+                            Attach verified registers, minutes, or vouchers supporting quarterly indicator achievements.
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setActiveModal('uploadPoE')}
+                          className="text-xs text-emerald-700 hover:text-emerald-800 font-bold flex items-center gap-1 cursor-pointer"
+                        >
+                          <Upload className="w-3.5 h-3.5" />
+                          <span>Upload New File</span>
+                        </button>
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                          Select Linked Verified Document
+                        </label>
+                        <select
+                          value={stepperPoeDocId}
+                          onChange={(e) => setStepperPoeDocId(e.target.value)}
+                          className="w-full text-xs p-2.5 bg-white border border-slate-300 rounded-lg text-slate-800 focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
+                        >
+                          <option value="">-- Select from verified repository ({entityDocuments.length} files available) --</option>
+                          {entityDocuments.map(doc => (
+                            <option key={doc.id} value={doc.id}>
+                              {doc.fileName || doc.title} • {doc.category.replace(/_/g, ' ')} ({doc.approvalStatus})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* Section 38 Accounting Officer Sign-Off */}
+                    <div className="p-4 bg-emerald-50/60 rounded-xl border border-emerald-200 space-y-3">
+                      <div className="flex items-center gap-2">
+                        <ShieldCheck className="w-5 h-5 text-emerald-700" />
+                        <h4 className="font-bold text-slate-900 text-xs">
+                          Section 38(1)(j) Accounting Officer Statutory Affirmation
+                        </h4>
+                      </div>
+                      <p className="text-[11px] text-slate-600 leading-relaxed">
+                        I hereby affirm that the programmatic targets, verified actual figures, and operational expenditure of R {spentThisQuarter.toLocaleString()} reported herein for {reportingQuarter} have been audited in accordance with PFMA Section 38(1)(j) and reflect bona fide delivery outputs for {entity.name}.
+                      </p>
+                      <div className="flex items-center gap-2 pt-1">
+                        <input
+                          type="checkbox"
+                          id="stepperAffirm"
+                          checked={stepperAffirmed}
+                          onChange={(e) => setStepperAffirmed(e.target.checked)}
+                          className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                        />
+                        <label htmlFor="stepperAffirm" className="text-xs font-semibold text-slate-800 cursor-pointer select-none">
+                          I formally sign and warrant the accuracy of these figures for submission to DSAC National.
+                        </label>
+                      </div>
+                    </div>
+
+                    <div className="pt-4 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setStepperStep(1)}
+                        className="px-4 py-2 border border-slate-300 hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-semibold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                      >
+                        <ChevronLeft className="w-3.5 h-3.5" />
+                        <span>Back to Indicator Values</span>
+                      </button>
+
+                      <div className="flex items-center gap-3">
+                        <div className="text-xs text-slate-500 hidden sm:flex items-center gap-1.5">
+                          <ShieldAlert className="w-4 h-4 text-emerald-600 shrink-0" />
+                          <span>Submission triggers automated risk recalculation and immutable audit stamp.</span>
+                        </div>
+
+                        <button
+                          type="submit"
+                          disabled={!stepperAffirmed}
+                          className="px-5 py-2.5 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-xs font-bold shadow-xs transition-all flex items-center justify-center gap-2 cursor-pointer"
+                        >
+                          <Send className="w-3.5 h-3.5" />
+                          <span>Submit Performance Return to DSAC</span>
+                        </button>
+                      </div>
+                    </div>
+                  </form>
+                )}
+              </div>
+
+              {/* Submitted Returns & Audit History Section */}
               <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100">
                   <div>
                     <h3 className="text-base font-black text-slate-900 flex items-center gap-2">
-                      <FileText className="w-5 h-5 text-indigo-600" />
-                      <span>Quarterly Statutory Reporting Wizard</span>
+                      <FileCheck2 className="w-5 h-5 text-indigo-600" />
+                      <span>Statutory Return Records &amp; DSAC Audit History</span>
                     </h3>
                     <p className="text-xs text-slate-500 mt-0.5">
-                      Submit verified performance reports with mandatory Portfolio of Evidence (PoE).
+                      Historical quarterly performance submissions, review comments, and verified expenditure claims.
                     </p>
                   </div>
-                  <button
-                    onClick={() => {
-                      setReportQuarter('Q2');
-                      setActiveModal('report');
-                    }}
-                    className="px-4 py-1.5 bg-indigo-700 hover:bg-indigo-800 text-white font-bold text-xs rounded-lg shadow-xs flex items-center gap-1.5 transition-colors"
-                  >
-                    <Upload className="w-3.5 h-3.5" />
-                    <span>Submit Report</span>
-                  </button>
+                  <span className="text-xs bg-slate-100 text-slate-700 font-bold px-2.5 py-1 rounded-lg border border-slate-200">
+                    {entityReports.length} Recorded Submissions
+                  </span>
                 </div>
 
                 <div className="space-y-3 mt-4 text-xs">
                   {entityReports.length === 0 ? (
                     <div className="p-6 text-center text-slate-400 bg-slate-50 rounded-xl border border-slate-200">
                       <FileText className="w-8 h-8 text-slate-300 mx-auto mb-2" />
-                      <p>No quarterly statutory reports recorded yet.</p>
-                      <button
-                        onClick={() => {
-                          setReportQuarter('Q2');
-                          setActiveModal('report');
-                        }}
-                        className="mt-2 px-3 py-1 bg-indigo-50 text-indigo-700 font-bold rounded-lg hover:bg-indigo-100 transition-colors"
-                      >
-                        Submit Q2 Performance Report
-                      </button>
+                      <p>No quarterly statutory reports recorded yet for {entity.shortCode}.</p>
                     </div>
                   ) : (
                     entityReports.map((rep) => {
                       const isApproved = rep.submissionStatus === 'APPROVED';
                       const isUnderReview = rep.submissionStatus === 'SUBMITTED';
+                      const isCorrection = rep.submissionStatus === 'CORRECTION_REQUIRED';
 
                       return (
                         <div
@@ -1595,43 +1874,63 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
                           className={`p-4 rounded-xl border transition-all ${
                             isApproved
                               ? 'bg-emerald-50/60 border-emerald-200'
+                              : isCorrection
+                              ? 'bg-amber-50/60 border-amber-300'
                               : isUnderReview
-                              ? 'bg-amber-50/60 border-amber-200'
+                              ? 'bg-blue-50/60 border-blue-200'
                               : 'bg-slate-50 border-slate-200'
                           }`}
                         >
                           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                             <span className="font-bold text-slate-900 text-sm">
-                              {rep.quarter} ({rep.quarter === 'Q1' ? 'Apr - Jun 2025' : rep.quarter === 'Q2' ? 'Jul - Sep 2025' : 'Oct - Dec 2025'}) Performance Report
+                              {rep.quarter} ({rep.quarter === 'Q1' ? 'Apr - Jun' : rep.quarter === 'Q2' ? 'Jul - Sep' : rep.quarter === 'Q3' ? 'Oct - Dec' : 'Jan - Mar'} {rep.financialYear || '2025/2026'}) Performance Return
                             </span>
                             <span
                               className={`px-2.5 py-0.5 rounded-full font-bold text-[10px] w-fit ${
                                 isApproved
                                   ? 'bg-emerald-100 text-emerald-800'
-                                  : isUnderReview
+                                  : isCorrection
                                   ? 'bg-amber-100 text-amber-800'
+                                  : isUnderReview
+                                  ? 'bg-blue-100 text-blue-800'
                                   : 'bg-slate-100 text-slate-700'
                               }`}
                             >
-                              {isApproved ? 'Approved by DSAC' : isUnderReview ? 'Under DSAC Review' : 'Pending Submission'}
+                              {isApproved ? 'Approved by DSAC' : isCorrection ? 'Correction Required' : isUnderReview ? 'Under DSAC Review' : 'Draft'}
                             </span>
                           </div>
                           <p className="text-slate-600 mt-1.5">
-                            {rep.varianceExplanations || `Statutory submission with claimed expenditure of R ${((rep.fundsSpentThisQuarterZAR || 1200000) / 1_000_000).toFixed(2)}M. Audited against MTSF targets.`}
+                            {rep.varianceExplanations || `Statutory return claiming expenditure of R ${((rep.fundsSpentThisQuarterZAR || 24800000) / 1_000_000).toFixed(2)}M.`}
                           </p>
+
+                          {rep.items && rep.items.length > 0 && (
+                            <div className="mt-2.5 pt-2 border-t border-slate-200/60 grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
+                              {rep.items.slice(0, 4).map((it) => (
+                                <div key={it.id} className="flex items-center justify-between bg-white/70 px-2 py-1 rounded border border-slate-200/60">
+                                  <span className="truncate pr-2 text-slate-700">{it.kpiName}</span>
+                                  <span className="font-mono font-bold text-slate-900 shrink-0">
+                                    {it.actualAchieved} / {it.targetToDate} {it.unit}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
                           <div className="mt-3 flex items-center justify-between text-[11px] text-slate-400">
-                            <span>Submitted: {rep.submittedAt ? rep.submittedAt.split('T')[0] : '14 Jul 2025'}</span>
-                            {!isApproved && (
-                              <button
-                                onClick={() => {
-                                  setReportQuarter(rep.quarter);
-                                  setActiveModal('report');
-                                }}
-                                className="px-3 py-1 bg-indigo-700 text-white font-bold rounded-lg text-xs hover:bg-indigo-800 transition-colors"
-                              >
-                                Update Submission
-                              </button>
-                            )}
+                            <span>Submitted: {rep.submittedAt ? rep.submittedAt.split('T')[0] : 'Current Financial Year'}</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setStepperStep(1);
+                                setReportingQuarter(`${rep.quarter} (2025/2026 Financial Year)`);
+                                if (rep.fundsSpentThisQuarterZAR) {
+                                  setSpentThisQuarter(rep.fundsSpentThisQuarterZAR);
+                                }
+                              }}
+                              className="px-3 py-1 bg-slate-900 text-white font-bold rounded-lg text-xs hover:bg-slate-800 transition-colors cursor-pointer"
+                            >
+                              Load Into Stepper
+                            </button>
                           </div>
                         </div>
                       );

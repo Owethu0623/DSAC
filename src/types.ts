@@ -12,6 +12,7 @@ export type EntityCluster =
   | 'Subsidized Cultural NPOs';
 
 export * from './types/documentVerification';
+export * from './types/financial';
 import { 
   ControlledDocumentType, 
   ControlledDocumentStatus, 
@@ -303,7 +304,15 @@ export interface AuditLogEntry {
     | 'USER_REGISTRATION'
     | 'USER_LOGOUT'
     | 'SYSTEM_BASELINE_SYNC'
-    | 'ENTITY_RECORD_UPDATED';
+    | 'ENTITY_RECORD_UPDATED'
+    | 'BUDGET_REQUEST_CREATED'
+    | 'BUDGET_APPROVED'
+    | 'BUDGET_UPDATED'
+    | 'QUARTERLY_EXPENDITURE_SUBMITTED'
+    | 'EXPENDITURE_UPDATED'
+    | 'FINANCIAL_REPORT_APPROVED'
+    | 'FINANCIAL_REPORT_CORRECTION_REQUESTED'
+    | 'FINANCIAL_RECORD_UPDATED';
   details: string;
   ipAddress?: string;
 }

@@ -30,7 +30,14 @@ import {
   ArrowLeft,
   ArrowRight,
   LogOut,
-  Settings
+  Settings,
+  HelpCircle,
+  FolderLock,
+  History,
+  Award,
+  Menu,
+  X,
+  Shield
 } from 'lucide-react';
 import { store } from '../services/store';
 import { SouthAfricanCoatOfArms, DsacOfficialLogo } from './SouthAfricanCoatOfArms';
@@ -41,6 +48,7 @@ import { DsacEntitiesView } from './features/DsacEntitiesView';
 import { DsacPerformanceView } from './features/DsacPerformanceView';
 import { DsacComplianceView } from './features/DsacComplianceView';
 import { DsacSupportView } from './features/DsacSupportView';
+import { DsacFinancialDashboard } from './features/DsacFinancialDashboard';
 import { DsacReportsView } from './features/DsacReportsView';
 import { DsacRiskView } from './features/DsacRiskView';
 import { DsacAnalyticsView } from './features/DsacAnalyticsView';
@@ -48,6 +56,9 @@ import { DsacSettingsView } from './features/DsacSettingsView';
 import { AIPerformanceAnalyst } from './AIPerformanceAnalyst';
 import { TaskManagementView } from './TaskManagementView';
 import { AuditLogView } from './AuditLogView';
+import { DsacQueriesView } from './features/DsacQueriesView';
+import { DocumentRepositoryView } from './DocumentRepositoryView';
+import { DsacNotificationsView } from './features/DsacNotificationsView';
 
 interface DsacRepoDashboardProps {
   onNavigateToEntity?: (entityId: string) => void;
@@ -67,6 +78,7 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
   initialSection = 'overview',
 }) => {
   const [activeSidebar, setActiveSidebar] = useState<string>(initialSection);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedYear, setSelectedYear] = useState<string>('This Financial Year');
   const [showNotifications, setShowNotifications] = useState<boolean>(false);
@@ -75,13 +87,21 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
   const [isDrawerOpen, setIsDrawerOpen] = useState<boolean>(false);
   const [kpiFilter, setKpiFilter] = useState<'ALL' | 'PUBLIC_ENTITY' | 'NPO'>('ALL');
 
+  // Keep activeSidebar in sync with initialSection changes from routing
+  useEffect(() => {
+    if (initialSection) {
+      setActiveSidebar(initialSection);
+      setIsSideViewOpen(false);
+    }
+  }, [initialSection]);
+
   // Real-time store subscription
   const [, setTick] = useState(0);
   useEffect(() => {
     return store.subscribe(() => setTick(t => t + 1));
   }, []);
 
-  // Dedicated Side View feature state (covers all 26 Public Entities & 6 NPOs)
+  // Dedicated Side View feature state (supplementary inspector drawer)
   const [sideViewFeature, setSideViewFeature] = useState<DsacFeatureId>('compliance');
   const [isSideViewOpen, setIsSideViewOpen] = useState<boolean>(false);
   const [selectedSideViewEntityId, setSelectedSideViewEntityId] = useState<string>('ent-sahra');
@@ -98,7 +118,16 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
       setSelectedSideViewEntityId('ent-sahra');
     }
     setIsSideViewOpen(true);
-    setActiveSidebar(feature);
+  };
+
+  // Direct full-page workspace navigation
+  const handleNavSelect = (sectionId: string) => {
+    setActiveSidebar(sectionId);
+    setIsSideViewOpen(false);
+    setIsMobileMenuOpen(false);
+    if (onNavigateToSection && sectionId !== 'overview') {
+      onNavigateToSection(sectionId);
+    }
   };
 
   const entities = store.entities;
@@ -209,97 +238,212 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
     ? actualEntityKpis
     : actualEntityKpis.filter(e => e.type === kpiFilter);
 
-  const sidebarItems = [
-    { id: 'overview', label: 'Overview', icon: Building2 },
-    { id: 'entities', label: 'Entities & NPOs', icon: Users },
-    { id: 'performance', label: 'Performance', icon: Target },
-    { id: 'compliance', label: 'Compliance', icon: ShieldCheck },
-    { id: 'support', label: 'Support & Funding', icon: Coins },
-    { id: 'reports', label: 'Reports', icon: FileText },
-    { id: 'risks', label: 'Risk & Alerts', icon: AlertTriangle },
-    { id: 'analytics', label: 'Analytics', icon: BarChart3 },
-    { id: 'approvals', label: 'Approvals', icon: FileCheck },
-    { id: 'settings', label: 'Settings', icon: Settings },
+  interface NavItem {
+    id: string;
+    label: string;
+    icon: React.ComponentType<{ className?: string }>;
+    count?: number | string;
+    badge?: string;
+    badgeColor?: string;
+  }
+
+  interface NavGroup {
+    title: string;
+    items: NavItem[];
+  }
+
+  const navGroups: NavGroup[] = [
+    {
+      title: 'Oversight & Directory',
+      items: [
+        { id: 'overview', label: 'Overview', icon: Building2 },
+        { id: 'entities', label: 'Entities & NPOs', icon: Users, count: pulse.totalEntities },
+        { id: 'performance', label: 'Performance', icon: Target },
+        { id: 'kpis', label: 'KPIs', icon: Award },
+        { id: 'targets', label: 'Targets', icon: Target },
+        { id: 'compliance', label: 'Compliance', icon: ShieldCheck },
+      ],
+    },
+    {
+      title: 'Statutory & Financial',
+      items: [
+        { id: 'financials', label: 'Financial Monitoring', icon: Coins },
+        { id: 'reports', label: 'Reports', icon: FileText },
+        { id: 'queries', label: 'Queries', icon: HelpCircle, count: 6 },
+        { id: 'documents', label: 'Documents', icon: FolderLock, count: store.documents.length },
+      ],
+    },
+    {
+      title: 'Risk & Operations',
+      items: [
+        { id: 'risks', label: 'Risk / Early Warnings', icon: AlertTriangle, count: highRiskEntitiesCount > 0 ? highRiskEntitiesCount : undefined, badgeColor: 'bg-rose-500/30 text-rose-300' },
+        { id: 'tasks', label: 'Action Centre & Tasks', icon: FileCheck, count: store.tasks.filter(t => t.status === 'OPEN').length > 0 ? store.tasks.filter(t => t.status === 'OPEN').length : undefined, badgeColor: 'bg-amber-500/30 text-amber-300' },
+        { id: 'notifications', label: 'Notifications', icon: Bell, count: 3, badgeColor: 'bg-rose-500/30 text-rose-300' },
+        { id: 'analytics', label: 'Analytics', icon: BarChart3 },
+        { id: 'audit', label: 'Audit Logs', icon: History },
+        { id: 'ai', label: 'AI Analyst', icon: Sparkles, badge: 'AI', badgeColor: 'bg-teal-500/30 text-teal-300' },
+        { id: 'settings', label: 'Settings', icon: Settings },
+      ],
+    },
   ];
+
+  const getPageTitle = (id: string): { title: string; subtitle: string } => {
+    switch (id) {
+      case 'overview': return { title: 'DSAC REPO Dashboard', subtitle: 'Oversight. Insight. Greater Impact.' };
+      case 'entities': return { title: '26 Public Entities & 6 NPOs Directory', subtitle: 'Statutory Entities and Subsidized Cultural Non-Profits' };
+      case 'performance': return { title: 'Performance Oversight', subtitle: 'APP Target Delivery & Strategic Goal Tracking' };
+      case 'kpis': return { title: 'Key Performance Indicators (KPIs)', subtitle: 'Annual Performance Plan Metric Analysis & Outcomes' };
+      case 'targets': return { title: 'Statutory Targets & Delivery Analysis', subtitle: 'Quarterly Milestones vs Actual Achievements' };
+      case 'compliance': return { title: 'Statutory Compliance Monitoring', subtitle: 'PFMA, Governance, and Statutory Submissions' };
+      case 'financials':
+      case 'support': return { title: 'Financial Monitoring & Subsidies', subtitle: 'Budget Transfers, Expenditure Rates & Fiscal Oversight' };
+      case 'reports': return { title: 'Statutory Reports Repository', subtitle: 'Quarterly, Annual & Special Parliamentary Filings' };
+      case 'queries': return { title: 'Queries & Clarifications', subtitle: 'Parliamentary Inquiries, PFMA Clarifications & Ministerials' };
+      case 'documents': return { title: 'Document Vault & Digital Archives', subtitle: 'PFMA Section 38 Verification Dossiers & Records' };
+      case 'risks':
+      case 'radar':
+      case 'early-warning': return { title: 'Risk & Early Warning Radar', subtitle: 'Proactive PFMA Risk Classifications & Governance Triggers' };
+      case 'tasks':
+      case 'approvals':
+      case 'action-centre':
+      case 'action_centre': return { title: 'Action Centre & Task Directives', subtitle: 'Department Directives, Corrective Actions & Approvals' };
+      case 'notifications': return { title: 'Statutory Alerts & Early Warnings', subtitle: 'Priority Notices, PFMA Triggers & Overdue Action Items' };
+      case 'analytics': return { title: 'Portfolio Analytics & Trends', subtitle: 'Multi-Year Cross-Entity Comparative Intelligence' };
+      case 'audit':
+      case 'audit_logs': return { title: 'Statutory Audit Logs', subtitle: 'Immutable Log of Oversight Actions and Verifications' };
+      case 'ai': return { title: 'AI Performance Analyst', subtitle: 'Automated Diagnostic & Early Warning Intelligence' };
+      case 'settings': return { title: 'Department System Settings', subtitle: 'Thresholds, Reporting Cycles & System Preferences' };
+      default: return { title: 'DSAC REPO Dashboard', subtitle: 'Department of Sport, Arts and Culture' };
+    }
+  };
+
+  const currentPage = getPageTitle(activeSidebar);
 
   return (
     <div className="flex flex-row min-h-screen w-full bg-slate-100">
       
+      {/* Mobile Backdrop */}
+      {isMobileMenuOpen && (
+        <div
+          className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs z-30 md:hidden"
+          onClick={() => setIsMobileMenuOpen(false)}
+        />
+      )}
+
       {/* 1. Official DSAC Dark Green Sidebar (Always positioned on left of content) */}
-      <aside className="w-48 sm:w-56 shrink-0 bg-[#044332] text-emerald-100 flex flex-col justify-between select-none border-r border-emerald-950 min-h-screen sticky top-0 self-start z-30">
-        <div>
+      <aside className={`fixed md:sticky top-0 bottom-0 left-0 z-40 md:z-30 w-60 lg:w-64 shrink-0 bg-[#044332] text-emerald-100 flex flex-col justify-between select-none border-r border-emerald-950 h-screen transition-transform duration-200 ease-in-out ${
+        isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
+      }`}>
+        <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
           {/* Logo & Header in Sidebar */}
-          <div className="p-4 border-b border-emerald-800/60 flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-emerald-950 border border-emerald-500/40 flex items-center justify-center p-1 shadow-inner shrink-0">
-              <SouthAfricanCoatOfArms size={30} variant="gold" />
+          <div className="p-3.5 border-b border-emerald-800/60 flex items-center justify-between gap-3 shrink-0">
+            <div 
+              onClick={() => handleNavSelect('overview')}
+              className="flex items-center gap-3 cursor-pointer group"
+            >
+              <div className="w-9 h-9 rounded-xl bg-emerald-950 border border-emerald-500/40 flex items-center justify-center p-1 shadow-inner shrink-0 group-hover:border-emerald-400 transition-colors">
+                <SouthAfricanCoatOfArms size={30} variant="gold" />
+              </div>
+              <div>
+                <div className="font-black text-white text-xs tracking-wider font-['Cabinet_Grotesk']">DSAC REPO</div>
+                <div className="text-[10px] text-emerald-300/80 font-medium">Statutory Oversight</div>
+              </div>
             </div>
-            <div>
-              <div className="font-black text-white text-xs tracking-wider">DSAC REPO</div>
-              <div className="text-[10px] text-emerald-300/80 font-medium">Statutory Oversight</div>
-            </div>
+
+            <button
+              onClick={() => setIsMobileMenuOpen(false)}
+              className="md:hidden p-1.5 text-emerald-300 hover:text-white hover:bg-emerald-800/60 rounded-lg cursor-pointer"
+              title="Close menu"
+            >
+              <X className="w-4 h-4" />
+            </button>
           </div>
 
-          {/* Navigation Items */}
-          <nav className="p-2 space-y-1">
-            {sidebarItems.map((item) => {
-              const Icon = item.icon;
-              const isActive = activeSidebar === item.id;
-              return (
-                <button
-                  key={item.id}
-                  onClick={() => {
-                    if (item.id === 'support') {
-                      openFeatureInSideView('support', 'ent-sahra');
-                    } else if (item.id === 'compliance' || item.id === 'performance' || item.id === 'reports' || item.id === 'risks') {
-                      openFeatureInSideView(item.id as DsacFeatureId);
-                    } else if (item.id === 'entities') {
-                      openFeatureInSideView('entities');
-                    } else {
-                      setActiveSidebar(item.id);
-                    }
-                    if (onNavigateToSection && item.id !== 'overview') {
-                      onNavigateToSection(item.id);
-                    }
-                  }}
-                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-medium transition-all ${
-                    isActive
-                      ? 'bg-[#0c5943] text-white shadow-sm font-bold ring-1 ring-emerald-400/40'
-                      : 'text-emerald-200/80 hover:bg-[#07533f] hover:text-white'
-                  }`}
-                >
-                  <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-emerald-300' : 'text-emerald-400/80'}`} />
-                  <span className="flex-1 text-left truncate">{item.label}</span>
-                </button>
-              );
-            })}
+          {/* Navigation Groups */}
+          <nav className="flex-1 overflow-y-auto p-2.5 space-y-4 custom-scrollbar">
+            {navGroups.map((group, gIdx) => (
+              <div key={gIdx} className="space-y-1">
+                <div className="px-2.5 py-1 text-[10px] font-bold text-emerald-400/70 uppercase tracking-wider">
+                  {group.title}
+                </div>
+                {group.items.map((item) => {
+                  const Icon = item.icon;
+                  const isActive = activeSidebar === item.id ||
+                    (item.id === 'performance' && (activeSidebar === 'kpis' || activeSidebar === 'targets')) ||
+                    (item.id === 'financials' && activeSidebar === 'support') ||
+                    (item.id === 'risks' && (activeSidebar === 'radar' || activeSidebar === 'early-warning')) ||
+                    (item.id === 'tasks' && (activeSidebar === 'approvals' || activeSidebar === 'action-centre' || activeSidebar === 'notifications'));
+                  
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => handleNavSelect(item.id)}
+                      className={`w-full flex items-center justify-between gap-2.5 px-3 py-2 rounded-xl text-xs transition-all cursor-pointer ${
+                        isActive
+                          ? 'bg-[#0c5943] text-white shadow-sm font-bold ring-1 ring-emerald-400/40'
+                          : 'text-emerald-200/80 hover:bg-[#07533f] hover:text-white font-medium'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-emerald-300' : 'text-emerald-400/80'}`} />
+                        <span className="truncate text-left">{item.label}</span>
+                      </div>
+                      
+                      {item.count !== undefined && (
+                        <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded-full shrink-0 ${
+                          item.badgeColor || (isActive ? 'bg-emerald-900 text-emerald-200' : 'bg-emerald-950/80 text-emerald-400 border border-emerald-800/40')
+                        }`}>
+                          {item.count}
+                        </span>
+                      )}
+
+                      {item.badge && (
+                        <span className={`text-[9px] font-extrabold uppercase px-1.5 py-0.2 rounded shrink-0 ${
+                          item.badgeColor || 'bg-emerald-950 text-emerald-400 border border-emerald-800/50'
+                        }`}>
+                          {item.badge}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            ))}
           </nav>
         </div>
 
-        {/* Bottom Slogan Motif (Exact match to image.png) */}
-        <div className="p-4 pt-6 border-t border-emerald-800/60 relative overflow-hidden">
-          <div className="space-y-0.5 text-[11px] font-semibold tracking-wider text-emerald-300 uppercase">
-            <div className="text-white font-bold text-xs">Culture</div>
-            <div>Heritage</div>
-            <div>People</div>
-            <div className="text-emerald-400 font-bold pt-1">A Better South Africa</div>
+        {/* Bottom Slogan Motif */}
+        <div className="p-3.5 border-t border-emerald-800/60 shrink-0 bg-[#033628]/40">
+          <div className="space-y-0.5 text-[10px] font-semibold tracking-wider text-emerald-300/80 uppercase">
+            <div className="text-white font-bold text-[11px]">Culture • Heritage • People</div>
+            <div className="text-emerald-400 font-bold">A Better South Africa</div>
           </div>
         </div>
       </aside>
 
       {/* 2. Main Content Area */}
-      <div className="flex-1 flex flex-col min-w-0 bg-slate-50">
+      <div className="flex-1 flex flex-col min-w-0 bg-slate-50 min-h-screen">
         
         {/* Top Header Bar */}
         <header className="bg-white border-b border-slate-200 px-4 sm:px-6 py-3 flex items-center justify-between gap-3 shrink-0 sticky top-0 z-20">
           <div className="flex items-center gap-3.5 min-w-0">
+            {/* Mobile Hamburger Toggle */}
+            <button
+              onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+              className="md:hidden p-1.5 -ml-1 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+              title="Toggle Menu"
+            >
+              {isMobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+            </button>
+
             <DsacOfficialLogo variant="light" />
             <div className="hidden sm:block h-7 w-px bg-slate-200" />
             <div className="truncate">
               <h1 className="text-base sm:text-lg font-black text-slate-900 leading-tight truncate">
-                DSAC REPO Dashboard
+                {currentPage.title}
               </h1>
               <p className="text-[11px] text-slate-500 font-medium truncate">
-                Oversight. Insight. Greater Impact.
+                {currentPage.subtitle}
               </p>
             </div>
           </div>
@@ -317,17 +461,94 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
               />
             </div>
 
-            {/* Notification Bell with Badge 3 */}
+            {/* Notification Bell with Badge */}
             <div className="relative">
               <button
                 onClick={() => setShowNotifications(!showNotifications)}
-                className="relative p-2 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors"
+                className="relative p-2 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                title="Statutory Alerts & Notifications"
               >
                 <Bell className="w-4 h-4" />
                 <span className="absolute top-1 right-1 w-4 h-4 bg-rose-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center">
                   3
                 </span>
               </button>
+
+              {showNotifications && (
+                <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-white rounded-xl shadow-2xl border border-slate-200 z-50 p-4 animate-fadeIn">
+                  <div className="flex items-center justify-between pb-2 mb-3 border-b border-slate-100">
+                    <div className="flex items-center gap-2">
+                      <Bell className="w-4 h-4 text-emerald-700" />
+                      <span className="font-bold text-xs text-slate-900">Statutory Early Alerts</span>
+                    </div>
+                    <span className="text-[10px] bg-rose-100 text-rose-700 font-bold px-1.5 py-0.5 rounded">
+                      3 Active
+                    </span>
+                  </div>
+
+                  <div className="space-y-2 text-xs">
+                    <div 
+                      onClick={() => {
+                        setShowNotifications(false);
+                        handleNavSelect('risks');
+                      }}
+                      className="p-2.5 rounded-lg bg-rose-50/70 border border-rose-200/80 hover:bg-rose-100/70 cursor-pointer transition-colors"
+                    >
+                      <div className="font-bold text-rose-900 flex items-center justify-between">
+                        <span>Boxing SA (BSA)</span>
+                        <span className="text-[9px] text-rose-600 font-normal">Today</span>
+                      </div>
+                      <p className="text-[11px] text-rose-800 mt-0.5">Critical PFMA variance: Governance report 18 days overdue.</p>
+                    </div>
+
+                    <div 
+                      onClick={() => {
+                        setShowNotifications(false);
+                        handleNavSelect('queries');
+                      }}
+                      className="p-2.5 rounded-lg bg-amber-50/70 border border-amber-200/80 hover:bg-amber-100/70 cursor-pointer transition-colors"
+                    >
+                      <div className="font-bold text-amber-900 flex items-center justify-between">
+                        <span>Parliamentary Question</span>
+                        <span className="text-[9px] text-amber-600 font-normal">Yesterday</span>
+                      </div>
+                      <p className="text-[11px] text-amber-800 mt-0.5">DSAC-PQ-2026/048 regarding SAHRA archaeological permits requires DG sign-off.</p>
+                    </div>
+
+                    <div 
+                      onClick={() => {
+                        setShowNotifications(false);
+                        handleNavSelect('tasks');
+                      }}
+                      className="p-2.5 rounded-lg bg-teal-50/70 border border-teal-200/80 hover:bg-teal-100/70 cursor-pointer transition-colors"
+                    >
+                      <div className="font-bold text-teal-900 flex items-center justify-between">
+                        <span>Compliance Action Required</span>
+                        <span className="text-[9px] text-teal-600 font-normal">2 days ago</span>
+                      </div>
+                      <p className="text-[11px] text-teal-800 mt-0.5">PACOFS corrective action directive awaiting Department verification.</p>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 pt-2 border-t border-slate-100 flex items-center justify-between">
+                    <button
+                      onClick={() => {
+                        setShowNotifications(false);
+                        handleNavSelect('tasks');
+                      }}
+                      className="text-xs text-emerald-800 font-bold hover:underline cursor-pointer"
+                    >
+                      View Action Centre & Directives →
+                    </button>
+                    <button
+                      onClick={() => setShowNotifications(false)}
+                      className="text-[11px] text-slate-400 hover:text-slate-600 cursor-pointer"
+                    >
+                      Close
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* User Profile & Sign Out */}
@@ -361,7 +582,7 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
 
         {/* VIEW 1: OVERVIEW DASHBOARD */}
         {activeSidebar === 'overview' && (
-          <div className="p-4 sm:p-6 space-y-5 overflow-y-auto">
+          <div className="p-4 sm:p-6 space-y-5 overflow-y-auto flex-1 w-full">
           
           {/* OVERVIEW DASHBOARD CONTENT (Always rendered) */}
           <div className="space-y-5">
@@ -371,7 +592,7 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2.5 sm:gap-3">
               {/* Card 1: 26 Public Entities */}
               <div 
-                onClick={() => openFeatureInSideView('entities', undefined, 'PUBLIC_ENTITY')}
+                onClick={() => handleNavSelect('entities')}
                 className="bg-teal-50/60 hover:bg-teal-50 border border-teal-200/70 hover:border-teal-400 rounded-xl p-3.5 flex flex-col justify-between transition-all duration-200 hover:shadow-xs cursor-pointer group"
               >
                 <div className="flex items-center justify-between">
@@ -388,14 +609,14 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
                   <div className="text-[11px] text-slate-500 font-medium">Statutory Institutions</div>
                 </div>
                 <div className="pt-2 border-t border-teal-100/80 flex items-center justify-between text-xs font-bold text-teal-800 group-hover:text-teal-900">
-                  <span>Side View</span>
+                  <span>View 26 Entities</span>
                   <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
                 </div>
               </div>
 
               {/* Card 2: 6 NPOs */}
               <div 
-                onClick={() => openFeatureInSideView('entities', undefined, 'NPO')}
+                onClick={() => handleNavSelect('entities')}
                 className="bg-sky-50/60 hover:bg-sky-50 border border-sky-200/70 hover:border-sky-400 rounded-xl p-3.5 flex flex-col justify-between transition-all duration-200 hover:shadow-xs cursor-pointer group"
               >
                 <div className="flex items-center justify-between">
@@ -412,14 +633,14 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
                   <div className="text-[11px] text-slate-500 font-medium">Cultural Non-Profits</div>
                 </div>
                 <div className="pt-2 border-t border-sky-100/80 flex items-center justify-between text-xs font-bold text-sky-800 group-hover:text-sky-900">
-                  <span>Side View</span>
+                  <span>View 6 NPOs</span>
                   <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
                 </div>
               </div>
 
               {/* Card 3: 32 Total Organisations */}
               <div 
-                onClick={() => openFeatureInSideView('entities', undefined, 'ALL')}
+                onClick={() => handleNavSelect('entities')}
                 className="bg-blue-50/60 hover:bg-blue-50 border border-blue-200/70 hover:border-blue-400 rounded-xl p-3.5 flex flex-col justify-between transition-all duration-200 hover:shadow-xs cursor-pointer group"
               >
                 <div className="flex items-center justify-between">
@@ -436,14 +657,14 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
                   <div className="text-[11px] text-slate-500 font-medium">26 PEs + 6 NPOs</div>
                 </div>
                 <div className="pt-2 border-t border-blue-100/80 flex items-center justify-between text-xs font-bold text-blue-800 group-hover:text-blue-900">
-                  <span>All 32 Side View</span>
+                  <span>Full Directory</span>
                   <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
                 </div>
               </div>
 
               {/* Card 4: Reports Submitted */}
               <div 
-                onClick={() => openFeatureInSideView('reports')}
+                onClick={() => handleNavSelect('reports')}
                 className="bg-emerald-50/60 hover:bg-emerald-50 border border-emerald-200/70 hover:border-emerald-400 rounded-xl p-3.5 flex flex-col justify-between transition-all duration-200 hover:shadow-xs cursor-pointer group"
               >
                 <div className="flex items-center justify-between">
@@ -460,14 +681,14 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
                   <div className="text-[11px] font-bold text-emerald-700">This Quarter ({reportsSubmittedPercent}%)</div>
                 </div>
                 <div className="pt-2 border-t border-emerald-100/80 flex items-center justify-between text-xs font-bold text-emerald-800 group-hover:text-emerald-900">
-                  <span>Side View</span>
+                  <span>View Reports</span>
                   <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
                 </div>
               </div>
 
               {/* Card 5: Reports Outstanding */}
               <div 
-                onClick={() => openFeatureInSideView('compliance')}
+                onClick={() => handleNavSelect('compliance')}
                 className="bg-rose-50/60 hover:bg-rose-50 border border-rose-200/70 hover:border-rose-400 rounded-xl p-3.5 flex flex-col justify-between transition-all duration-200 hover:shadow-xs col-span-1 sm:col-span-2 md:col-span-1 cursor-pointer group"
               >
                 <div className="flex items-center justify-between">
@@ -484,7 +705,7 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
                   <div className="text-[11px] font-bold text-rose-700">({reportsOutstandingPercent}%) Clearance Required</div>
                 </div>
                 <div className="pt-2 border-t border-rose-100/80 flex items-center justify-between text-xs font-bold text-rose-800 group-hover:text-rose-900">
-                  <span>Side View</span>
+                  <span>Track Compliance</span>
                   <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
                 </div>
               </div>
@@ -731,7 +952,7 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
 
               {/* Entities at High / Critical Risk (Beautiful Alert Card View) */}
               <div 
-                onClick={() => openFeatureInSideView('risks')}
+                onClick={() => handleNavSelect('risks')}
                 className="bg-rose-50/60 hover:bg-rose-50 border-2 border-rose-200/90 hover:border-rose-400 rounded-xl p-4 flex flex-col justify-between transition-all shadow-xs cursor-pointer group"
               >
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
@@ -770,7 +991,7 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
                     ))}
                   </div>
                   <div className="text-[10px] font-bold text-rose-700 flex items-center gap-1 group-hover:underline shrink-0">
-                    <span>Inspect Risk Register</span>
+                    <span>View Risk & Early Warnings</span>
                     <ArrowRight className="w-3 h-3 group-hover:translate-x-0.5 transition-transform" />
                   </div>
                 </div>
@@ -818,9 +1039,9 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
               {displayedEntityKpis.map((ent) => (
                 <div 
                   key={ent.id} 
-                  onClick={() => openFeatureInSideView('performance', ent.id)}
+                  onClick={() => handleNavSelect('performance')}
                   className="space-y-1 p-2 rounded-xl hover:bg-slate-50 transition-colors cursor-pointer group border border-transparent hover:border-slate-200/70"
-                  title={`Inspect ${ent.name} in Performance Side View`}
+                  title={`Inspect ${ent.name} in Performance View`}
                 >
                   <div className="flex items-center justify-between text-xs font-medium text-slate-700">
                     <div className="flex items-center gap-2 truncate mr-2">
@@ -899,7 +1120,7 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
                   <p className="text-[11px] text-slate-500">Across all 26 Public Entities and 6 NPOs</p>
                 </div>
                 <button 
-                  onClick={() => openFeatureInSideView('compliance')}
+                  onClick={() => handleNavSelect('compliance')}
                   className="text-xs text-emerald-700 hover:text-emerald-800 font-semibold cursor-pointer flex items-center gap-1"
                 >
                   <span>View All</span>
@@ -908,9 +1129,9 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
 
               {/* Circular Gauge */}
               <div 
-                onClick={() => openFeatureInSideView('compliance')}
+                onClick={() => handleNavSelect('compliance')}
                 className="flex items-center justify-center py-4 cursor-pointer group"
-                title="Inspect Compliance in Side View"
+                title="Inspect Compliance View"
               >
                 <div className="relative w-36 h-36 flex items-center justify-center group-hover:scale-105 transition-transform">
                   <svg viewBox="0 0 100 100" className="w-full h-full -rotate-90">
@@ -945,7 +1166,7 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
               {/* Legend with dynamic counts */}
               <div className="grid grid-cols-3 gap-2 text-xs border-t border-slate-100 pt-3">
                 <div 
-                  onClick={() => openFeatureInSideView('compliance')}
+                  onClick={() => handleNavSelect('compliance')}
                   className="flex flex-col items-center p-2 rounded-lg bg-emerald-50/60 border border-emerald-100 hover:bg-emerald-50 cursor-pointer text-center"
                 >
                   <span className="w-2 h-2 rounded-full bg-emerald-500 mb-1"></span>
@@ -955,7 +1176,7 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
                   </span>
                 </div>
                 <div 
-                  onClick={() => openFeatureInSideView('compliance')}
+                  onClick={() => handleNavSelect('compliance')}
                   className="flex flex-col items-center p-2 rounded-lg bg-amber-50/60 border border-amber-100 hover:bg-amber-50 cursor-pointer text-center"
                 >
                   <span className="w-2 h-2 rounded-full bg-amber-400 mb-1"></span>
@@ -965,7 +1186,7 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
                   </span>
                 </div>
                 <div 
-                  onClick={() => openFeatureInSideView('compliance')}
+                  onClick={() => handleNavSelect('compliance')}
                   className="flex flex-col items-center p-2 rounded-lg bg-rose-50/60 border border-rose-100 hover:bg-rose-50 cursor-pointer text-center"
                 >
                   <span className="w-2 h-2 rounded-full bg-rose-500 mb-1"></span>
@@ -985,7 +1206,7 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
                   <p className="text-[11px] text-slate-500">Section 38 PFMA Risk Classifications</p>
                 </div>
                 <button 
-                  onClick={() => openFeatureInSideView('risks')}
+                  onClick={() => handleNavSelect('risks')}
                   className="text-xs text-emerald-700 hover:text-emerald-800 font-semibold cursor-pointer flex items-center gap-1"
                 >
                   <span>View All</span>
@@ -995,9 +1216,9 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
               {/* Risk Items */}
               <div className="py-2 space-y-2">
                 <div 
-                  onClick={() => openFeatureInSideView('risks')}
+                  onClick={() => handleNavSelect('risks')}
                   className="flex items-center justify-between p-2.5 rounded-lg bg-emerald-50/60 border border-emerald-100 hover:bg-emerald-50 cursor-pointer group transition-colors"
-                  title="Open Low Risk in Side View"
+                  title="Open Low Risk in Risk View"
                 >
                   <div className="flex items-center gap-2.5">
                     <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
@@ -1012,9 +1233,9 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
                 </div>
 
                 <div 
-                  onClick={() => openFeatureInSideView('risks')}
+                  onClick={() => handleNavSelect('risks')}
                   className="flex items-center justify-between p-2.5 rounded-lg bg-amber-50/60 border border-amber-100 hover:bg-amber-50 cursor-pointer group transition-colors"
-                  title="Open Medium Risk in Side View"
+                  title="Open Medium Risk in Risk View"
                 >
                   <div className="flex items-center gap-2.5">
                     <span className="w-2.5 h-2.5 rounded-full bg-amber-400"></span>
@@ -1029,9 +1250,9 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
                 </div>
 
                 <div 
-                  onClick={() => openFeatureInSideView('risks')}
+                  onClick={() => handleNavSelect('risks')}
                   className="flex items-center justify-between p-2.5 rounded-lg bg-orange-50/60 border border-orange-100 hover:bg-orange-50 cursor-pointer group transition-colors"
-                  title="Open High Risk in Side View"
+                  title="Open High Risk in Risk View"
                 >
                   <div className="flex items-center gap-2.5">
                     <span className="w-2.5 h-2.5 rounded-full bg-orange-500"></span>
@@ -1046,9 +1267,9 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
                 </div>
 
                 <div 
-                  onClick={() => openFeatureInSideView('risks')}
+                  onClick={() => handleNavSelect('risks')}
                   className="flex items-center justify-between p-2.5 rounded-lg bg-rose-50/60 border border-rose-100 hover:bg-rose-50 cursor-pointer group transition-colors"
-                  title="Open Critical Risk in Side View"
+                  title="Open Critical Risk in Risk View"
                 >
                   <div className="flex items-center gap-2.5">
                     <span className="w-2.5 h-2.5 rounded-full bg-rose-600 animate-pulse"></span>
@@ -1086,7 +1307,7 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
                   </p>
                 </div>
                 <button 
-                  onClick={() => openFeatureInSideView('reports')}
+                  onClick={() => handleNavSelect('reports')}
                   className="text-xs text-emerald-700 hover:text-emerald-800 font-semibold cursor-pointer flex items-center gap-1"
                 >
                   <span>View All</span>
@@ -1096,7 +1317,7 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
               <div className="py-3 space-y-2.5">
                 {/* 1. Annual Budget Submission */}
                 <div 
-                  onClick={() => openFeatureInSideView('reports')}
+                  onClick={() => handleNavSelect('reports')}
                   className="flex items-center justify-between text-xs p-2 rounded-lg bg-emerald-50/50 border border-emerald-100 hover:bg-emerald-50 cursor-pointer transition-colors"
                 >
                   <div className="flex items-start gap-2.5">
@@ -1113,7 +1334,7 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
 
                 {/* 2. Annual Performance Reports */}
                 <div 
-                  onClick={() => openFeatureInSideView('reports')}
+                  onClick={() => handleNavSelect('reports')}
                   className="flex items-center justify-between text-xs p-2 rounded-lg bg-emerald-50/50 border border-emerald-100 hover:bg-emerald-50 cursor-pointer transition-colors"
                 >
                   <div className="flex items-start gap-2.5">
@@ -1130,7 +1351,7 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
 
                 {/* 3. Q3 Report */}
                 <div 
-                  onClick={() => openFeatureInSideView('reports')}
+                  onClick={() => handleNavSelect('reports')}
                   className="flex items-center justify-between text-xs p-2 rounded-lg hover:bg-slate-50 border border-slate-100 cursor-pointer transition-colors"
                 >
                   <div className="flex items-start gap-2.5">
@@ -1147,7 +1368,7 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
 
                 {/* 4. Q4 Report */}
                 <div 
-                  onClick={() => openFeatureInSideView('reports')}
+                  onClick={() => handleNavSelect('reports')}
                   className="flex items-center justify-between text-xs p-2 rounded-lg hover:bg-slate-50 border border-slate-100 cursor-pointer transition-colors"
                 >
                   <div className="flex items-start gap-2.5">
@@ -1164,7 +1385,7 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
 
                 {/* 5. Q1 Report */}
                 <div 
-                  onClick={() => openFeatureInSideView('reports')}
+                  onClick={() => handleNavSelect('reports')}
                   className="flex items-center justify-between text-xs p-2 rounded-lg hover:bg-slate-50 border border-slate-100 cursor-pointer transition-colors"
                 >
                   <div className="flex items-start gap-2.5">
@@ -1192,7 +1413,7 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
                   <p className="text-[10px] text-slate-500 mt-0.5">Real-time alerts for department oversight</p>
                 </div>
                 <button 
-                  onClick={() => openFeatureInSideView('risks')}
+                  onClick={() => handleNavSelect('notifications')}
                   className="text-xs text-emerald-700 hover:text-emerald-800 font-semibold cursor-pointer flex items-center gap-1"
                 >
                   <span>View All</span>
@@ -1202,9 +1423,9 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
               <div className="py-3 space-y-2.5">
                 {/* Alert 1: National Arts Council */}
                 <div 
-                  onClick={() => openFeatureInSideView('performance', 'ent-nac')}
+                  onClick={() => handleNavSelect('performance')}
                   className="flex items-start justify-between text-xs p-2 rounded-lg bg-rose-50/50 border border-rose-100 hover:bg-rose-50 cursor-pointer transition-colors"
-                  title="Inspect National Arts Council in Performance Side View"
+                  title="Inspect National Arts Council in Performance View"
                 >
                   <div className="flex items-start gap-2.5">
                     <div className="w-4 h-4 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center shrink-0 mt-0.5 font-bold text-[9px]">
@@ -1224,9 +1445,9 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
 
                 {/* Alert 2: Boxing South Africa */}
                 <div 
-                  onClick={() => openFeatureInSideView('risks', 'ent-bsa')}
+                  onClick={() => handleNavSelect('risks')}
                   className="flex items-start justify-between text-xs p-2 rounded-lg bg-rose-50/50 border border-rose-100 hover:bg-rose-50 cursor-pointer transition-colors"
-                  title="Inspect Boxing South Africa in Risk Side View"
+                  title="Inspect Boxing South Africa in Risk View"
                 >
                   <div className="flex items-start gap-2.5">
                     <div className="w-4 h-4 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center shrink-0 mt-0.5 font-bold text-[9px]">
@@ -1239,16 +1460,16 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
                       <div className="text-[11px] text-slate-600 mt-0.5">
                         Sanctioned tournament compliance at 40%; Ministerial intervention team convened.
                       </div>
-                      <div className="text-[10px] text-slate-400 mt-0.5">2 hours ago · Click to inspect Risk Side View</div>
+                      <div className="text-[10px] text-slate-400 mt-0.5">2 hours ago · Click to inspect Risk View</div>
                     </div>
                   </div>
                 </div>
 
                 {/* Alert 3: PACOFS */}
                 <div 
-                  onClick={() => openFeatureInSideView('risks', 'ent-pacofs')}
+                  onClick={() => handleNavSelect('risks')}
                   className="flex items-start justify-between text-xs p-2 rounded-lg bg-amber-50/50 border border-amber-100 hover:bg-amber-50 cursor-pointer transition-colors"
-                  title="Inspect PACOFS in Risk Side View"
+                  title="Inspect PACOFS in Risk View"
                 >
                   <div className="flex items-start gap-2.5">
                     <div className="w-4 h-4 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center shrink-0 mt-0.5 font-bold text-[9px]">
@@ -1261,16 +1482,16 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
                       <div className="text-[11px] text-slate-600 mt-0.5">
                         3 unresolved AGSA findings on theatre fixed asset register reconciliation outstanding &gt;90 days.
                       </div>
-                      <div className="text-[10px] text-slate-400 mt-0.5">5 hours ago · Click to inspect Risk Side View</div>
+                      <div className="text-[10px] text-slate-400 mt-0.5">5 hours ago · Click to inspect Risk View</div>
                     </div>
                   </div>
                 </div>
 
                 {/* Alert 4: Ubuntu Arts NPO */}
                 <div 
-                  onClick={() => openFeatureInSideView('support', 'ent-ubuntu-arts')}
+                  onClick={() => handleNavSelect('financials')}
                   className="flex items-start justify-between text-xs p-2 rounded-lg bg-amber-50/50 border border-amber-100 hover:bg-amber-50 cursor-pointer transition-colors"
-                  title="Inspect Ubuntu Arts in Support Side View"
+                  title="Inspect Ubuntu Arts in Financial Monitoring View"
                 >
                   <div className="flex items-start gap-2.5">
                     <div className="w-4 h-4 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center shrink-0 mt-0.5 font-bold text-[9px]">
@@ -1283,16 +1504,16 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
                       <div className="text-[11px] text-slate-600 mt-0.5">
                         Community arts touring tranche expenditure at 41% pending Bizana venue verification.
                       </div>
-                      <div className="text-[10px] text-slate-400 mt-0.5">1 day ago · Click to inspect Support Side View</div>
+                      <div className="text-[10px] text-slate-400 mt-0.5">1 day ago · Click to inspect Financial Monitoring</div>
                     </div>
                   </div>
                 </div>
 
                 {/* Alert 5: SAHRA */}
                 <div 
-                  onClick={() => openFeatureInSideView('performance', 'ent-sahra')}
+                  onClick={() => handleNavSelect('performance')}
                   className="flex items-start justify-between text-xs p-2 rounded-lg hover:bg-slate-50 border border-slate-100 cursor-pointer transition-colors"
-                  title="Inspect SAHRA in Performance Side View"
+                  title="Inspect SAHRA in Performance View"
                 >
                   <div className="flex items-start gap-2.5">
                     <div className="w-4 h-4 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center shrink-0 mt-0.5 font-bold text-[9px]">
@@ -1320,8 +1541,8 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
         )}
 
         {/* VIEW 2: ENTITIES & NPOS */}
-        {activeSidebar === 'entities' && (
-          <div className="p-4 sm:p-6 overflow-y-auto">
+        {(activeSidebar === 'entities' || activeSidebar === 'public-entities') && (
+          <div className="p-4 sm:p-6 overflow-y-auto flex-1 w-full">
             <DsacEntitiesView
               entities={entities}
               onSelectEntity={(entId) => {
@@ -1330,18 +1551,14 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
               onOpenWorkspace={(entId) => {
                 if (onNavigateToEntity) onNavigateToEntity(entId);
               }}
-              onNavigateToTab={(tab) => {
-                if (tab === 'reports') setActiveSidebar('reports');
-                else if (tab === 'compliance') setActiveSidebar('compliance');
-                else if (tab === 'performance') setActiveSidebar('performance');
-              }}
+              onNavigateToTab={(tab) => handleNavSelect(tab)}
             />
           </div>
         )}
 
-        {/* VIEW 3: PERFORMANCE */}
-        {activeSidebar === 'performance' && (
-          <div className="p-4 sm:p-6 overflow-y-auto">
+        {/* VIEW 3: PERFORMANCE, KPIS & TARGETS */}
+        {(activeSidebar === 'performance' || activeSidebar === 'kpis' || activeSidebar === 'targets') && (
+          <div className="p-4 sm:p-6 overflow-y-auto flex-1 w-full">
             <DsacPerformanceView
               entities={entities}
               onSelectEntity={onNavigateToEntity}
@@ -1352,7 +1569,7 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
 
         {/* VIEW 4: COMPLIANCE */}
         {activeSidebar === 'compliance' && (
-          <div className="p-4 sm:p-6 overflow-y-auto">
+          <div className="p-4 sm:p-6 overflow-y-auto flex-1 w-full">
             <DsacComplianceView
               entities={entities}
               onSelectEntity={onNavigateToEntity}
@@ -1361,21 +1578,31 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
           </div>
         )}
 
-        {/* VIEW 5: SUPPORT & FUNDING */}
+        {/* VIEW 5: FINANCIAL MONITORING & BUDGET UTILISATION */}
+        {activeSidebar === 'financials' && (
+          <div className="p-4 sm:p-6 overflow-y-auto flex-1 w-full">
+            <DsacFinancialDashboard
+              onSelectEntity={onNavigateToEntity}
+              onOpenWorkspace={onNavigateToEntity}
+            />
+          </div>
+        )}
+
+        {/* VIEW 5B: CAPACITY & SUPPORT SUBVENTIONS */}
         {activeSidebar === 'support' && (
-          <div className="p-4 sm:p-6 overflow-y-auto">
+          <div className="p-4 sm:p-6 overflow-y-auto flex-1 w-full">
             <DsacSupportView
               entities={entities}
               onSelectEntity={onNavigateToEntity}
               onOpenWorkspace={onNavigateToEntity}
-              onOpenSideView={(feature, entityId) => openFeatureInSideView(feature, entityId)}
+              onOpenSideView={(feature) => handleNavSelect(feature === 'support' ? 'financials' : feature)}
             />
           </div>
         )}
 
         {/* VIEW 6: REPORTS */}
         {activeSidebar === 'reports' && (
-          <div className="p-4 sm:p-6 overflow-y-auto">
+          <div className="p-4 sm:p-6 overflow-y-auto flex-1 w-full">
             <DsacReportsView
               entities={entities}
               onSelectEntity={onNavigateToEntity}
@@ -1384,9 +1611,9 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
           </div>
         )}
 
-        {/* VIEW 7: RISK & ALERTS */}
-        {activeSidebar === 'risks' && (
-          <div className="p-4 sm:p-6 overflow-y-auto">
+        {/* VIEW 7: RISK & EARLY WARNINGS */}
+        {(activeSidebar === 'risks' || activeSidebar === 'radar' || activeSidebar === 'early-warning') && (
+          <div className="p-4 sm:p-6 overflow-y-auto flex-1 w-full">
             <DsacRiskView
               entities={entities}
               onSelectEntity={onNavigateToEntity}
@@ -1395,28 +1622,72 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
           </div>
         )}
 
-        {/* VIEW 8: ANALYTICS */}
-        {activeSidebar === 'analytics' && (
-          <div className="p-4 sm:p-6 overflow-y-auto">
-            <DsacAnalyticsView
+        {/* VIEW 8: QUERIES & INQUIRIES */}
+        {activeSidebar === 'queries' && (
+          <div className="p-4 sm:p-6 overflow-y-auto flex-1 w-full">
+            <DsacQueriesView
               entities={entities}
               onSelectEntity={onNavigateToEntity}
               onOpenWorkspace={onNavigateToEntity}
-              onOpenSideView={(feature, entityId) => openFeatureInSideView(feature, entityId)}
             />
           </div>
         )}
 
-        {/* VIEW 9: APPROVALS */}
-        {activeSidebar === 'approvals' && (
-          <div className="p-4 sm:p-6 overflow-y-auto">
+        {/* VIEW 9: DOCUMENTS */}
+        {activeSidebar === 'documents' && (
+          <div className="p-4 sm:p-6 overflow-y-auto flex-1 w-full">
+            <DocumentRepositoryView />
+          </div>
+        )}
+
+        {/* VIEW 10: TASKS, APPROVALS & ACTION CENTRE */}
+        {(activeSidebar === 'tasks' || activeSidebar === 'approvals' || activeSidebar === 'action-centre' || activeSidebar === 'action_centre') && (
+          <div className="p-4 sm:p-6 overflow-y-auto flex-1 w-full">
             <TaskManagementView />
           </div>
         )}
 
-        {/* VIEW 10: SETTINGS */}
+        {/* VIEW 11: NOTIFICATIONS & EARLY ALERTS */}
+        {activeSidebar === 'notifications' && (
+          <div className="p-4 sm:p-6 overflow-y-auto flex-1 w-full">
+            <DsacNotificationsView
+              entities={entities}
+              onSelectEntity={onNavigateToEntity}
+              onOpenWorkspace={onNavigateToEntity}
+              onNavigateToSection={(sec) => handleNavSelect(sec)}
+            />
+          </div>
+        )}
+
+        {/* VIEW 12: ANALYTICS */}
+        {activeSidebar === 'analytics' && (
+          <div className="p-4 sm:p-6 overflow-y-auto flex-1 w-full">
+            <DsacAnalyticsView
+              entities={entities}
+              onSelectEntity={onNavigateToEntity}
+              onOpenWorkspace={onNavigateToEntity}
+              onOpenSideView={(feature) => handleNavSelect(feature === 'support' ? 'financials' : feature)}
+            />
+          </div>
+        )}
+
+        {/* VIEW 13: AUDIT LOGS */}
+        {(activeSidebar === 'audit' || activeSidebar === 'audit_logs' || activeSidebar === 'audit-logs') && (
+          <div className="p-4 sm:p-6 overflow-y-auto flex-1 w-full">
+            <AuditLogView />
+          </div>
+        )}
+
+        {/* VIEW 14: AI PERFORMANCE ANALYST */}
+        {activeSidebar === 'ai' && (
+          <div className="p-4 sm:p-6 overflow-y-auto flex-1 w-full">
+            <AIPerformanceAnalyst />
+          </div>
+        )}
+
+        {/* VIEW 15: SETTINGS */}
         {activeSidebar === 'settings' && (
-          <div className="p-4 sm:p-6 overflow-y-auto">
+          <div className="p-4 sm:p-6 overflow-y-auto flex-1 w-full">
             <DsacSettingsView />
           </div>
         )}

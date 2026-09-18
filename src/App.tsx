@@ -75,14 +75,25 @@ export default function App() {
       )}
 
       {/* 3. DSAC REPO Dashboard (Official Statutory Oversight Portal) */}
-      {(currentTab === 'dsac-repo' || currentTab === 'dashboard' || currentTab === 'entities' || currentTab === 'executive' || currentTab === 'radar' || currentTab === 'early-warning' || currentTab === 'documents' || currentTab === 'tasks' || currentTab === 'ai' || currentTab === 'audit') && (
+      {currentTab !== 'workspace' && currentTab !== 'entity-portal' && (
         <DsacRepoDashboard
           initialSection={
             currentTab === 'entities' ? 'entities' :
-            currentTab === 'executive' ? 'performance' :
-            currentTab === 'radar' || currentTab === 'early-warning' ? 'risks' :
-            currentTab === 'documents' ? 'reports' :
-            currentTab === 'tasks' ? 'approvals' :
+            currentTab === 'executive' || currentTab === 'performance' ? 'performance' :
+            currentTab === 'kpis' ? 'kpis' :
+            currentTab === 'targets' ? 'targets' :
+            currentTab === 'compliance' ? 'compliance' :
+            currentTab === 'financials' ? 'financials' :
+            currentTab === 'reports' ? 'reports' :
+            currentTab === 'queries' ? 'queries' :
+            currentTab === 'radar' || currentTab === 'early-warning' || currentTab === 'risks' ? 'risks' :
+            currentTab === 'documents' ? 'documents' :
+            currentTab === 'tasks' || currentTab === 'approvals' ? 'tasks' :
+            currentTab === 'notifications' ? 'notifications' :
+            currentTab === 'analytics' ? 'analytics' :
+            currentTab === 'audit' ? 'audit' :
+            currentTab === 'ai' ? 'ai' :
+            currentTab === 'settings' ? 'settings' :
             'overview'
           }
           onNavigateToEntity={(entityId) => {

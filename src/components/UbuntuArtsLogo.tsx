@@ -1,4 +1,5 @@
 import React from 'react';
+import ubuntuLogo from '../assets/images/ubuntu_arts_logo_1789660838385.jpg';
 
 interface UbuntuArtsLogoProps {
   className?: string;
@@ -16,10 +17,11 @@ export const UbuntuArtsLogo: React.FC<UbuntuArtsLogoProps> = ({
   return (
     <div className={`relative shrink-0 flex items-center justify-center ${className}`}>
       <img
-        src="/src/assets/images/ubuntu_arts_logo_1789660838385.jpg"
+        src={ubuntuLogo}
         alt="Ubuntu Arts NPO Logo"
         style={{ width: size, height: size }}
         className="rounded-lg object-contain shadow-xs border border-slate-200"
+        referrerPolicy="no-referrer"
         onError={(e) => {
           e.currentTarget.style.display = 'none';
           const fallback = e.currentTarget.nextElementSibling as HTMLElement;

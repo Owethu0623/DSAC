@@ -38,6 +38,26 @@ import {
   INITIAL_DEADLINES, 
   INITIAL_AUDIT_LOGS 
 } from '../data/initialData';
+import { 
+  ExpenseCategory, 
+  EntityBudgetProfile, 
+  QuarterlyFinancialSubmission, 
+  BudgetRequestStatus, 
+  QuarterlyFinancialStatus, 
+  EntityFinancialSummary, 
+  DepartmentFinancialKPIs,
+  FinancialQuarter 
+} from '../types/financial';
+import { 
+  INITIAL_EXPENSE_CATEGORIES, 
+  INITIAL_BUDGET_PROFILES, 
+  INITIAL_QUARTERLY_SUBMISSIONS 
+} from '../data/initialFinancialData';
+import { 
+  calculateEntityFinancialSummary, 
+  calculateDepartmentFinancialKPIs, 
+  formatZAR 
+} from './financialService';
 
 const STORAGE_KEYS = {
   CURRENT_USER: 'govtrack_current_user',
@@ -51,6 +71,9 @@ const STORAGE_KEYS = {
   RISKS: 'govtrack_risks',
   DEADLINES: 'govtrack_deadlines',
   AUDIT_LOGS: 'govtrack_audit_logs',
+  EXPENSE_CATEGORIES: 'govtrack_expense_categories',
+  BUDGET_PROFILES: 'govtrack_budget_profiles',
+  QUARTERLY_FINANCIAL_SUBMISSIONS: 'govtrack_quarterly_financial_submissions',
 };
 
 export const DEFAULT_DOCUMENT_REQUIREMENTS: DocumentRequirement[] = [
@@ -180,6 +203,9 @@ export class GovTrackStore {
   riskAlerts: RiskAlert[];
   deadlines: RegulatoryDeadline[];
   auditLogs: AuditLogEntry[];
+  expenseCategories: ExpenseCategory[];
+  budgetProfiles: EntityBudgetProfile[];
+  quarterlyFinancialSubmissions: QuarterlyFinancialSubmission[];
 
   private constructor() {
     let loadedUsers = loadFromStorage<User[]>(STORAGE_KEYS.REGISTERED_USERS, INITIAL_USERS);
@@ -283,6 +309,36 @@ export class GovTrackStore {
     this.riskAlerts = loadFromStorage<RiskAlert[]>(STORAGE_KEYS.RISKS, INITIAL_RISK_ALERTS);
     this.deadlines = loadFromStorage<RegulatoryDeadline[]>(STORAGE_KEYS.DEADLINES, INITIAL_DEADLINES);
     this.auditLogs = loadFromStorage<AuditLogEntry[]>(STORAGE_KEYS.AUDIT_LOGS, INITIAL_AUDIT_LOGS);
+
+    let loadedExpenseCategories = loadFromStorage<ExpenseCategory[]>(STORAGE_KEYS.EXPENSE_CATEGORIES, INITIAL_EXPENSE_CATEGORIES);
+    INITIAL_EXPENSE_CATEGORIES.forEach(initCat => {
+      if (!loadedExpenseCategories.some(c => c.id === initCat.id)) {
+        loadedExpenseCategories.push(initCat);
+      }
+    });
+    this.expenseCategories = loadedExpenseCategories;
+    saveToStorage(STORAGE_KEYS.EXPENSE_CATEGORIES, this.expenseCategories);
+
+    let loadedBudgetProfiles = loadFromStorage<EntityBudgetProfile[]>(STORAGE_KEYS.BUDGET_PROFILES, INITIAL_BUDGET_PROFILES);
+    INITIAL_BUDGET_PROFILES.forEach(initBp => {
+      if (!loadedBudgetProfiles.some(bp => bp.id === initBp.id)) {
+        loadedBudgetProfiles.push(initBp);
+      }
+    });
+    this.budgetProfiles = loadedBudgetProfiles;
+    saveToStorage(STORAGE_KEYS.BUDGET_PROFILES, this.budgetProfiles);
+
+    let loadedQuarterlySubmissions = loadFromStorage<QuarterlyFinancialSubmission[]>(
+      STORAGE_KEYS.QUARTERLY_FINANCIAL_SUBMISSIONS, 
+      INITIAL_QUARTERLY_SUBMISSIONS
+    );
+    INITIAL_QUARTERLY_SUBMISSIONS.forEach(initQs => {
+      if (!loadedQuarterlySubmissions.some(qs => qs.id === initQs.id)) {
+        loadedQuarterlySubmissions.push(initQs);
+      }
+    });
+    this.quarterlyFinancialSubmissions = loadedQuarterlySubmissions;
+    saveToStorage(STORAGE_KEYS.QUARTERLY_FINANCIAL_SUBMISSIONS, this.quarterlyFinancialSubmissions);
   }
 
   public static getInstance(): GovTrackStore {
@@ -314,6 +370,9 @@ export class GovTrackStore {
     saveToStorage(STORAGE_KEYS.RISKS, this.riskAlerts);
     saveToStorage(STORAGE_KEYS.DEADLINES, this.deadlines);
     saveToStorage(STORAGE_KEYS.AUDIT_LOGS, this.auditLogs);
+    saveToStorage(STORAGE_KEYS.EXPENSE_CATEGORIES, this.expenseCategories);
+    saveToStorage(STORAGE_KEYS.BUDGET_PROFILES, this.budgetProfiles);
+    saveToStorage(STORAGE_KEYS.QUARTERLY_FINANCIAL_SUBMISSIONS, this.quarterlyFinancialSubmissions);
     this.notify();
   }
 
@@ -326,6 +385,9 @@ export class GovTrackStore {
     this.tasks = JSON.parse(JSON.stringify(INITIAL_TASKS));
     this.riskAlerts = JSON.parse(JSON.stringify(INITIAL_RISK_ALERTS));
     this.deadlines = JSON.parse(JSON.stringify(INITIAL_DEADLINES));
+    this.expenseCategories = JSON.parse(JSON.stringify(INITIAL_EXPENSE_CATEGORIES));
+    this.budgetProfiles = JSON.parse(JSON.stringify(INITIAL_BUDGET_PROFILES));
+    this.quarterlyFinancialSubmissions = JSON.parse(JSON.stringify(INITIAL_QUARTERLY_SUBMISSIONS));
     this.addAuditLog(
       'SYSTEM_BASELINE_SYNC',
       'Departmental statutory baseline datasets synchronized with gazetted PFMA Vote 37 appropriations.'
@@ -1702,6 +1764,512 @@ export class GovTrackStore {
     );
     this.notify();
     return { success: true, entity, user: newUser };
+  }
+
+  // ==========================================
+  // BUDGET & FINANCIAL UTILISATION ENGINE
+  // ==========================================
+
+  getExpenseCategories(): ExpenseCategory[] {
+    return [...this.expenseCategories].sort((a, b) => a.standardSortOrder - b.standardSortOrder);
+  }
+
+  createExpenseCategory(name: string, code: string, description: string): ExpenseCategory {
+    const newCat: ExpenseCategory = {
+      id: `cat-custom-${Date.now()}`,
+      name: name.trim(),
+      code: code.trim().toUpperCase(),
+      description: description.trim(),
+      active: true,
+      standardSortOrder: this.expenseCategories.length + 1,
+    };
+    this.expenseCategories = [...this.expenseCategories, newCat];
+    this.addAuditLog(
+      'FINANCIAL_RECORD_UPDATED',
+      `Created new expenditure category: ${newCat.name} (${newCat.code})`,
+      'Departmental Financial Chart of Accounts'
+    );
+    this.persistAll();
+    return newCat;
+  }
+
+  toggleExpenseCategory(categoryId: string, active: boolean): void {
+    const cat = this.expenseCategories.find(c => c.id === categoryId);
+    if (!cat) return;
+    cat.active = active;
+    this.addAuditLog(
+      'FINANCIAL_RECORD_UPDATED',
+      `${active ? 'Activated' : 'Deactivated'} expense category: ${cat.name}`,
+      'Departmental Financial Chart of Accounts'
+    );
+    this.persistAll();
+  }
+
+  getBudgetProfiles(): EntityBudgetProfile[] {
+    return this.budgetProfiles;
+  }
+
+  getBudgetProfileForEntity(entityId: string, financialYear = '2026/27'): EntityBudgetProfile | undefined {
+    return this.budgetProfiles.find(
+      bp => bp.entityId === entityId && bp.financialYear === financialYear
+    );
+  }
+
+  submitBudgetRequest(data: {
+    entityId: string;
+    entityName: string;
+    financialYear: string;
+    requestedAmount: number;
+    justification: string;
+    lines: {
+      categoryId: string;
+      categoryName: string;
+      requestedAmount: number;
+      notes?: string;
+    }[];
+    supportingDocumentId?: string;
+    supportingDocumentName?: string;
+  }): EntityBudgetProfile {
+    const existingIndex = this.budgetProfiles.findIndex(
+      bp => bp.entityId === data.entityId && bp.financialYear === data.financialYear
+    );
+
+    const profileId = existingIndex !== -1 
+      ? this.budgetProfiles[existingIndex].id 
+      : `bp-${Date.now()}`;
+
+    const newLines = data.lines.map((l, i) => ({
+      id: `bl-${profileId}-${i + 1}`,
+      budgetId: profileId,
+      categoryId: l.categoryId,
+      categoryName: l.categoryName,
+      requestedAmount: l.requestedAmount,
+      annualBudget: 0,
+      notes: l.notes,
+    }));
+
+    const newProfile: EntityBudgetProfile = {
+      id: profileId,
+      entityId: data.entityId,
+      entityName: data.entityName,
+      financialYear: data.financialYear,
+      requestedAmount: data.requestedAmount,
+      approvedAmount: 0,
+      fundingGap: data.requestedAmount,
+      status: 'SUBMITTED',
+      requestDate: new Date().toISOString().split('T')[0],
+      justification: data.justification,
+      supportingDocumentId: data.supportingDocumentId,
+      supportingDocumentName: data.supportingDocumentName,
+      expectedSpendingTrajectory: {
+        q1Percent: 25,
+        q2Percent: 50,
+        q3Percent: 75,
+        q4Percent: 100,
+      },
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      lines: newLines,
+    };
+
+    if (existingIndex !== -1) {
+      this.budgetProfiles[existingIndex] = newProfile;
+    } else {
+      this.budgetProfiles = [newProfile, ...this.budgetProfiles];
+    }
+
+    this.addAuditLog(
+      'BUDGET_REQUEST_CREATED',
+      `Budget request of ${formatZAR(data.requestedAmount)} logged for ${data.entityName} (${data.financialYear}). Justification: ${data.justification.slice(0, 80)}...`,
+      data.entityName
+    );
+
+    this.persistAll();
+    return newProfile;
+  }
+
+  reviewBudgetRequest(
+    profileId: string,
+    approvedAmount: number,
+    status: BudgetRequestStatus,
+    comments?: string,
+    lineApprovals?: { categoryId: string; annualBudget: number }[]
+  ): void {
+    const profile = this.budgetProfiles.find(bp => bp.id === profileId);
+    if (!profile) return;
+
+    const reviewer = this.currentUser ? this.currentUser.name : 'DSAC National Reviewer';
+
+    profile.status = status;
+    profile.reviewedBy = this.currentUser?.id;
+    profile.reviewedByName = reviewer;
+    profile.reviewDate = new Date().toISOString().split('T')[0];
+    profile.comments = comments;
+    profile.updatedAt = new Date().toISOString();
+
+    if (status === 'APPROVED') {
+      profile.approvedAmount = approvedAmount;
+      profile.fundingGap = profile.requestedAmount - approvedAmount;
+      profile.approvalDate = new Date().toISOString().split('T')[0];
+
+      // Update line amounts if provided, or distribute proportionally
+      if (lineApprovals && lineApprovals.length > 0) {
+        profile.lines = profile.lines.map(line => {
+          const match = lineApprovals.find(la => la.categoryId === line.categoryId);
+          return {
+            ...line,
+            annualBudget: match ? match.annualBudget : line.annualBudget,
+          };
+        });
+      } else if (profile.lines.length > 0 && profile.requestedAmount > 0) {
+        const ratio = approvedAmount / profile.requestedAmount;
+        profile.lines = profile.lines.map(line => ({
+          ...line,
+          annualBudget: Math.round(line.requestedAmount * ratio),
+        }));
+      }
+
+      // Synchronize entity budgetAllocationZAR
+      const entity = this.entities.find(e => e.id === profile.entityId);
+      if (entity) {
+        entity.budgetAllocationZAR = approvedAmount;
+      }
+
+      this.addAuditLog(
+        'BUDGET_APPROVED',
+        `Approved Annual Budget of ${formatZAR(approvedAmount)} (Funding gap: ${formatZAR(profile.fundingGap)}) for ${profile.entityName} (${profile.financialYear}). Decision notes: ${comments || 'Approved by DSAC CFO'}`,
+        profile.entityName
+      );
+    } else {
+      this.addAuditLog(
+        'BUDGET_UPDATED',
+        `Budget Request ${status} for ${profile.entityName}. Reason: ${comments || 'Awaiting revisions'}`,
+        profile.entityName
+      );
+    }
+
+    this.persistAll();
+  }
+
+  getQuarterlyFinancialSubmissions(): QuarterlyFinancialSubmission[] {
+    return this.quarterlyFinancialSubmissions;
+  }
+
+  getQuarterlyFinancialSubmissionsForEntity(
+    entityId: string,
+    financialYear = '2026/27'
+  ): QuarterlyFinancialSubmission[] {
+    return this.quarterlyFinancialSubmissions.filter(
+      qs => qs.entityId === entityId && qs.financialYear === financialYear
+    );
+  }
+
+  submitQuarterlyFinancialReturn(data: {
+    entityId: string;
+    entityName: string;
+    financialYear: string;
+    quarter: FinancialQuarter;
+    totalQuarterlyActual: number;
+    lines: {
+      categoryId: string;
+      categoryName: string;
+      actualAmount: number;
+      plannedAmount: number;
+      budgetLineId?: string;
+    }[];
+    supportingDocumentIds?: string[];
+    accountingOfficerAffirmation: boolean;
+    accountingOfficerName?: string;
+  }): QuarterlyFinancialSubmission {
+    const existingIndex = this.quarterlyFinancialSubmissions.findIndex(
+      qs => qs.entityId === data.entityId &&
+            qs.financialYear === data.financialYear &&
+            qs.quarter === data.quarter
+    );
+
+    const submissionId = existingIndex !== -1 
+      ? this.quarterlyFinancialSubmissions[existingIndex].id 
+      : `qs-${Date.now()}`;
+
+    const newLines = data.lines.map((l, i) => ({
+      id: `qsl-${submissionId}-${i + 1}`,
+      quarterlySubmissionId: submissionId,
+      budgetLineId: l.budgetLineId,
+      categoryId: l.categoryId,
+      categoryName: l.categoryName,
+      actualAmount: l.actualAmount,
+      plannedAmount: l.plannedAmount,
+    }));
+
+    const newSubmission: QuarterlyFinancialSubmission = {
+      id: submissionId,
+      entityId: data.entityId,
+      entityName: data.entityName,
+      financialYear: data.financialYear,
+      quarter: data.quarter,
+      status: 'APPROVED', // Default to authoritative approval upon certified sign-off or SUBMITTED
+      submittedAt: new Date().toISOString(),
+      submittedByName: data.accountingOfficerName || this.currentUser?.name || 'Reporting Officer',
+      totalQuarterlyActual: data.totalQuarterlyActual,
+      supportingDocumentIds: data.supportingDocumentIds || [],
+      accountingOfficerAffirmation: data.accountingOfficerAffirmation,
+      accountingOfficerName: data.accountingOfficerName,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      lines: newLines,
+    };
+
+    if (existingIndex !== -1) {
+      this.quarterlyFinancialSubmissions[existingIndex] = newSubmission;
+    } else {
+      this.quarterlyFinancialSubmissions = [newSubmission, ...this.quarterlyFinancialSubmissions];
+    }
+
+    // Update entity reported expenditure
+    const entity = this.entities.find(e => e.id === data.entityId);
+    if (entity) {
+      const allSubmissions = this.quarterlyFinancialSubmissions.filter(
+        qs => qs.entityId === data.entityId && qs.financialYear === data.financialYear
+      );
+      entity.reportedExpenditureZAR = allSubmissions.reduce(
+        (acc, s) => acc + s.totalQuarterlyActual, 0
+      );
+    }
+
+    this.addAuditLog(
+      'QUARTERLY_EXPENDITURE_SUBMITTED',
+      `Submitted ${data.quarter} verified actual expenditure of ${formatZAR(data.totalQuarterlyActual)} for ${data.entityName}. Affirmation certified by ${data.accountingOfficerName || 'Accounting Officer'}.`,
+      data.entityName
+    );
+
+    // Re-evaluate risk rules for financial parameters
+    this.recalculateFinancialRisks(data.entityId, data.financialYear);
+
+    this.persistAll();
+    return newSubmission;
+  }
+
+  reviewQuarterlyFinancialReturn(
+    submissionId: string,
+    decision: 'APPROVE' | 'REQUEST_CORRECTION',
+    notes: string
+  ): void {
+    const submission = this.quarterlyFinancialSubmissions.find(s => s.id === submissionId);
+    if (!submission) return;
+
+    const reviewer = this.currentUser ? `${this.currentUser.name} (${this.currentUser.designation})` : 'DSAC Oversight Reviewer';
+
+    if (decision === 'APPROVE') {
+      submission.status = 'APPROVED';
+      submission.reviewedAt = new Date().toISOString();
+      submission.reviewedByName = reviewer;
+      submission.reviewNotes = notes;
+
+      this.addAuditLog(
+        'FINANCIAL_REPORT_APPROVED',
+        `Approved ${submission.quarter} financial actual return of ${formatZAR(submission.totalQuarterlyActual)} for ${submission.entityName}. Verification note: ${notes}`,
+        submission.entityName
+      );
+    } else {
+      submission.status = 'CORRECTION_REQUIRED';
+      submission.reviewedAt = new Date().toISOString();
+      submission.reviewedByName = reviewer;
+      submission.reviewNotes = notes;
+
+      // Automatically trigger a corrective task for financial rectification
+      const newTask: CorrectiveTask = {
+        id: `task-fin-${Date.now()}`,
+        entityId: submission.entityId,
+        entityName: submission.entityName,
+        title: `Remediate ${submission.quarter} Financial Return: ${notes.slice(0, 50)}...`,
+        description: `DSAC Financial Review finding: "${notes}". Re-verify expense vouchers and resubmit within 7 working days.`,
+        assignedToName: `${submission.submittedByName || 'Chief Financial Officer'}`,
+        createdByName: this.currentUser?.name || 'DSAC Finance Specialist',
+        createdByRole: this.currentUser?.role || 'DSAC_ADMIN',
+        priority: 'HIGH',
+        status: 'OPEN',
+        direction: 'DSAC_TO_ENTITY',
+        dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+        createdAt: new Date().toISOString(),
+      };
+      this.tasks = [newTask, ...this.tasks];
+
+      this.addAuditLog(
+        'FINANCIAL_REPORT_CORRECTION_REQUESTED',
+        `Requested corrections for ${submission.quarter} expenditure return for ${submission.entityName}. Finding: ${notes}`,
+        submission.entityName
+      );
+    }
+
+    this.recalculateFinancialRisks(submission.entityId, submission.financialYear);
+    this.persistAll();
+  }
+
+  getEntityFinancialSummary(
+    entityId: string,
+    financialYear = '2026/27',
+    selectedQuarter: FinancialQuarter | 'FULL_YEAR' = 'Q3'
+  ): EntityFinancialSummary {
+    const entityMeta = this.entities.find(e => e.id === entityId);
+    return calculateEntityFinancialSummary(
+      entityId,
+      financialYear,
+      selectedQuarter,
+      this.budgetProfiles,
+      this.quarterlyFinancialSubmissions,
+      this.expenseCategories,
+      entityMeta,
+      this.kpis
+    );
+  }
+
+  getDepartmentFinancialKPIs(
+    financialYear = '2026/27',
+    selectedQuarter: FinancialQuarter | 'FULL_YEAR' = 'Q3'
+  ): DepartmentFinancialKPIs {
+    return calculateDepartmentFinancialKPIs(
+      financialYear,
+      selectedQuarter,
+      this.budgetProfiles,
+      this.quarterlyFinancialSubmissions,
+      this.entities,
+      this.expenseCategories,
+      this.kpis
+    );
+  }
+
+  recalculateFinancialRisks(entityId: string, financialYear = '2026/27'): void {
+    const summary = this.getEntityFinancialSummary(entityId, financialYear, 'Q3');
+    const entity = this.entities.find(e => e.id === entityId);
+    if (!entity) return;
+
+    // Filter existing financial risk alerts for this entity
+    this.riskAlerts = this.riskAlerts.filter(
+      r => !(r.entityId === entityId && (
+        r.title.includes('Budget Overspend') ||
+        r.title.includes('Rapid Utilisation') ||
+        r.title.includes('Severe Under-Utilisation') ||
+        r.title.includes('Financial & Delivery Disconnect')
+      ))
+    );
+
+    // Rule 1: Overspending
+    if (summary.isOverspent) {
+      this.riskAlerts.unshift({
+        id: `risk-fin-over-${Date.now()}`,
+        entityId,
+        entityName: entity.name,
+        riskLevel: 'CRITICAL',
+        riskScore: 92,
+        title: `Budget Overspend Detected: ${formatZAR(summary.overspendAmount)} Over Allocation`,
+        reason: `Cumulative YTD expenditure reaches ${formatZAR(summary.ytdActual)} exceeding approved annual budget of ${formatZAR(summary.approvedAmount)} (${summary.utilisationPercent}% utilisation). Immediate PFMA Section 38 intervention required.`,
+        contributingFactors: [
+          `Approved Budget: ${formatZAR(summary.approvedAmount)}`,
+          `Actual Expenditure to date: ${formatZAR(summary.ytdActual)}`,
+          `Net Deficit / Overspend: ${formatZAR(summary.overspendAmount)}`,
+          'PFMA Section 38 compliance alert'
+        ],
+        evidenceData: {
+          actualAchieved: summary.ytdActual,
+          expectedTrajectory: summary.expectedYtd,
+          annualTarget: summary.approvedAmount,
+          financialUtilisationRate: summary.utilisationPercent,
+          historicalLateReportsCount: 0,
+          daysUntilDeadline: 14,
+        },
+        recommendedAction: 'Issue formal PFMA Section 38(1)(j) inquiry and require immediate financial reprioritisation recovery plan.',
+        createdAt: new Date().toISOString(),
+        acknowledged: false,
+      });
+      entity.riskLevel = 'CRITICAL';
+      entity.riskScore = Math.max(entity.riskScore, 88);
+    }
+    // Rule 2: Rapid Utilisation / High Variance
+    else if (summary.variancePercent > 18) {
+      this.riskAlerts.unshift({
+        id: `risk-fin-rapid-${Date.now()}`,
+        entityId,
+        entityName: entity.name,
+        riskLevel: 'HIGH',
+        riskScore: 74,
+        title: `Rapid Utilisation Rate: +${summary.variancePercent}% Above Trajectory`,
+        reason: `Entity expenditure pace is accelerating significantly faster than approved quarterly benchmark trajectory. Expected YTD was ${formatZAR(summary.expectedYtd)}, actual is ${formatZAR(summary.ytdActual)}.`,
+        contributingFactors: [
+          `Variance against trajectory: +${summary.variancePercent}%`,
+          `Actual spend: ${formatZAR(summary.ytdActual)} vs expected ${formatZAR(summary.expectedYtd)}`,
+          'Risk of exhaustion prior to Q4 closeout'
+        ],
+        evidenceData: {
+          actualAchieved: summary.ytdActual,
+          expectedTrajectory: summary.expectedYtd,
+          annualTarget: summary.approvedAmount,
+          financialUtilisationRate: summary.utilisationPercent,
+          historicalLateReportsCount: 0,
+          daysUntilDeadline: 21,
+        },
+        recommendedAction: 'Audit Q3/Q4 cash-flow run rate to ensure allocations will sustain operations through financial year-end.',
+        createdAt: new Date().toISOString(),
+        acknowledged: false,
+      });
+      if (entity.riskLevel === 'LOW') entity.riskLevel = 'MEDIUM';
+    }
+    // Rule 3: Severe Under-utilisation
+    else if (summary.financialStatus === 'UNDER_UTILISING') {
+      this.riskAlerts.unshift({
+        id: `risk-fin-under-${Date.now()}`,
+        entityId,
+        entityName: entity.name,
+        riskLevel: 'MEDIUM',
+        riskScore: 56,
+        title: `Under-Utilisation Warning: ${summary.utilisationPercent}% Absorbed`,
+        reason: `Low financial expenditure rate (${summary.variancePercent}% variance against trajectory). Potential procurement halts or programme delays in key sub-programmes.`,
+        contributingFactors: [
+          `Utilisation: ${summary.utilisationPercent}%`,
+          `Variance: ${summary.variancePercent}% against trajectory`,
+          'Capital procurement delays or unfilled vacancies'
+        ],
+        evidenceData: {
+          actualAchieved: summary.ytdActual,
+          expectedTrajectory: summary.expectedYtd,
+          annualTarget: summary.approvedAmount,
+          financialUtilisationRate: summary.utilisationPercent,
+          historicalLateReportsCount: 0,
+          daysUntilDeadline: 30,
+        },
+        recommendedAction: 'Request quarterly procurement acceleration plan and audit pipeline commitments.',
+        createdAt: new Date().toISOString(),
+        acknowledged: false,
+      });
+    }
+
+    // Rule 4: Performance vs Finance Disconnect (Section 23)
+    if (summary.performanceFinanceSignal?.status === 'REQUIRES_REVIEW') {
+      this.riskAlerts.unshift({
+        id: `risk-fin-perf-${Date.now()}`,
+        entityId,
+        entityName: entity.name,
+        riskLevel: 'HIGH',
+        riskScore: 78,
+        title: `Financial & Delivery Disconnect: High Spend vs Low Output`,
+        reason: summary.performanceFinanceSignal.commentary,
+        contributingFactors: [
+          `Financial utilisation: ${summary.utilisationPercent}%`,
+          `Target achievement rate: ${summary.targetAchievementRate || 0}%`,
+          'Asymmetry between resource drawdown and verifiable service delivery'
+        ],
+        evidenceData: {
+          actualAchieved: summary.targetAchievementRate || 0,
+          expectedTrajectory: 75,
+          annualTarget: 100,
+          financialUtilisationRate: summary.utilisationPercent,
+          historicalLateReportsCount: 0,
+          daysUntilDeadline: 14,
+        },
+        recommendedAction: 'Schedule joint governance review between DSAC Finance Directorate and Programme Performance Monitoring unit.',
+        createdAt: new Date().toISOString(),
+        acknowledged: false,
+      });
+    }
   }
 }
 
