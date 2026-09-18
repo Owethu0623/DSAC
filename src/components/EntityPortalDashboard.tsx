@@ -46,6 +46,7 @@ import {
 import { store } from '../services/store';
 import { UbuntuArtsLogo } from './UbuntuArtsLogo';
 import { downloadStatutoryDocument } from '../services/downloadHelper';
+import { DocumentVerificationDossier } from './DocumentVerificationDossier';
 
 interface EntityPortalDashboardProps {
   entityId?: string;
@@ -85,6 +86,7 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
   const [isDraggingSection, setIsDraggingSection] = useState(false);
 
   // Document Upload Form State
+  const [portalDocView, setPortalDocView] = useState<'verification' | 'repository'>('verification');
   const [uploadDocTitle, setUploadDocTitle] = useState('');
   const [uploadDocCategory, setUploadDocCategory] = useState<'PORTFOLIO_OF_EVIDENCE' | 'OPERATIONAL_PLAN' | 'FINANCIAL_REPORT' | 'ANNUAL_REPORT' | 'GOVERNANCE_CHARTER'>('PORTFOLIO_OF_EVIDENCE');
   const [uploadFileName, setUploadFileName] = useState('');
@@ -267,28 +269,62 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
     entityName: 'Ubuntu Arts NPO',
   };
 
-  const handleUploadDocument = (e: React.FormEvent) => {
+  const handleUploadDocument = async (e: React.FormEvent) => {
     e.preventDefault();
     const finalTitle = uploadDocTitle.trim() || uploadFileName.replace(/\.[^/.]+$/, "") || 'Section 38 Portfolio Evidence';
     const finalFileName = uploadFileName.trim() || `${finalTitle.replace(/[^a-zA-Z0-9_-]/g, '_')}.pdf`;
     const numBytes = Math.round((parseFloat(uploadFileSize) || 3.5) * 1024 * 1024);
 
-    store.createNewDocument(
-      entity.id,
-      finalTitle,
-      uploadDocCategory,
-      yearStats.fiscalTag,
-      finalFileName,
-      numBytes,
-      uploadSummary || 'Statutory evidence dossier submitted under PFMA Section 38 audit verification.'
-    );
+    // Map category to statutory requirement slot
+    const requirements = store.getDocumentRequirements(reportQuarter);
+    const targetReq = requirements.find(r => {
+      if (uploadDocCategory === 'PORTFOLIO_OF_EVIDENCE') return r.requiredDocumentType === 'POE';
+      if (uploadDocCategory === 'FINANCIAL_REPORT') return r.requiredDocumentType === 'FINANCIAL_STATEMENT' || r.requiredDocumentType === 'BANK_STATEMENT';
+      if (uploadDocCategory === 'OPERATIONAL_PLAN') return r.requiredDocumentType === 'ANNUAL_PERFORMANCE_PLAN' || r.requiredDocumentType === 'PERFORMANCE_REPORT';
+      if (uploadDocCategory === 'GOVERNANCE_CHARTER') return r.requiredDocumentType === 'GOVERNANCE_CHARTER';
+      return false;
+    }) || requirements[0];
 
-    setActionSuccess(`Statutory document "${finalFileName}" uploaded successfully and forwarded to DSAC Section 38 Oversight.`);
+    try {
+      const response = await store.submitDocumentForRequirement({
+        entityId: entity.id,
+        requirementId: targetReq?.id || store.documentRequirements[0]?.id,
+        quarter: reportQuarter,
+        financialYear: yearStats.fiscalTag,
+        file: {
+          name: finalFileName,
+          size: numBytes,
+          type: 'application/pdf',
+        },
+        changeSummary: uploadSummary || 'Statutory evidence dossier submitted under PFMA Section 38 audit verification.',
+      });
+
+      const outcome = response.result.status;
+      if (outcome === 'VERIFIED') {
+        setActionSuccess(`Document "${finalFileName}" successfully submitted and VERIFIED by automated classification engine.`);
+      } else if (outcome === 'REJECTED') {
+        setActionSuccess(`Document "${finalFileName}" submitted but REJECTED: ${response.result.reasons[0] || 'Content validation failed'}. Corrective task logged.`);
+      } else {
+        setActionSuccess(`Document "${finalFileName}" submitted and queued for DSAC Manual Review.`);
+      }
+    } catch {
+      store.createNewDocument(
+        entity.id,
+        finalTitle,
+        uploadDocCategory,
+        yearStats.fiscalTag,
+        finalFileName,
+        numBytes,
+        uploadSummary || 'Statutory evidence dossier submitted under PFMA Section 38 audit verification.'
+      );
+      setActionSuccess(`Statutory document "${finalFileName}" uploaded successfully and forwarded to DSAC Section 38 Oversight.`);
+    }
+
     setActiveModal(null);
     setUploadDocTitle('');
     setUploadFileName('');
     setUploadSummary('');
-    setTimeout(() => setActionSuccess(null), 3500);
+    setTimeout(() => setActionSuccess(null), 4000);
   };
 
   const handleReportSubmit = (e: React.FormEvent) => {
@@ -1609,6 +1645,41 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
           {/* ================= VIEW 8: DOCUMENTS & POE ================= */}
           {activeSidebar === 'documents' && (
             <div className="space-y-5">
+              {/* Sub-tab toggle */}
+              <div className="flex items-center gap-2 p-1.5 bg-slate-100 rounded-xl max-w-fit">
+                <button
+                  onClick={() => setPortalDocView('verification')}
+                  className={`px-4 py-2 text-xs font-bold rounded-lg transition-all flex items-center gap-2 ${
+                    portalDocView === 'verification'
+                      ? 'bg-white text-indigo-900 shadow-xs border border-slate-200'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <ShieldCheck className="w-4 h-4 text-indigo-600" />
+                  <span>Section 38 Statutory Verification Dossier</span>
+                </button>
+
+                <button
+                  onClick={() => setPortalDocView('repository')}
+                  className={`px-4 py-2 text-xs font-bold rounded-lg transition-all flex items-center gap-2 ${
+                    portalDocView === 'repository'
+                      ? 'bg-white text-indigo-900 shadow-xs border border-slate-200'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <FolderLock className="w-4 h-4 text-slate-600" />
+                  <span>All Uploaded Files &amp; Archive ({entityDocuments.length})</span>
+                </button>
+              </div>
+
+              {portalDocView === 'verification' ? (
+                <DocumentVerificationDossier
+                  entityId={entity.id}
+                  quarter={reportQuarter}
+                  financialYear={yearStats.fiscalTag}
+                  isDSACReviewer={false}
+                />
+              ) : (
               <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100">
                   <div>
@@ -1658,13 +1729,13 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
 
                         <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
                           <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                            doc.approvalStatus === 'APPROVED' ? 'bg-emerald-100 text-emerald-800' :
-                            doc.approvalStatus === 'REQUIRES_AMENDMENT' ? 'bg-rose-100 text-rose-800' :
+                            doc.verificationStatus === 'VERIFIED' || doc.approvalStatus === 'APPROVED' ? 'bg-emerald-100 text-emerald-800' :
+                            doc.verificationStatus === 'REJECTED' || doc.approvalStatus === 'REQUIRES_AMENDMENT' ? 'bg-rose-100 text-rose-800' :
                             'bg-amber-100 text-amber-800'
                           }`}>
-                            {doc.approvalStatus === 'APPROVED' ? 'Approved by DSAC' :
-                             doc.approvalStatus === 'REQUIRES_AMENDMENT' ? 'Revision Requested' :
-                             'Pending Review'}
+                            {doc.verificationStatus === 'VERIFIED' || doc.approvalStatus === 'APPROVED' ? 'Verified Evidence' :
+                             doc.verificationStatus === 'REJECTED' || doc.approvalStatus === 'REQUIRES_AMENDMENT' ? 'Rejected / Task Logged' :
+                             'Manual Review Pending'}
                           </span>
                           <span className="text-[10px] text-slate-400">
                             {doc.uploadedAt ? doc.uploadedAt.split('T')[0] : '14 Jul 2025'}
@@ -1691,6 +1762,7 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
                   )}
                 </div>
               </div>
+              )}
             </div>
           )}
 

@@ -11,8 +11,22 @@ import {
   UserRole,
   ReportItem,
   EntityType,
-  EntityCluster
+  EntityCluster,
+  DocumentRequirement,
+  ControlledDocumentType,
+  ControlledDocumentStatus,
+  DocumentVerificationResult,
+  DetailedDocumentVersion,
+  DocumentVerificationChecklist,
+  DocumentRequirementSlot
 } from '../types';
+import { 
+  calculateFileHash,
+  validateFileLevel,
+  extractDocumentContent,
+  analyzeDocumentContent,
+  DEMO_TEST_DOCUMENTS
+} from './documentVerificationEngine';
 import { 
   INITIAL_USERS, 
   INITIAL_ENTITIES, 
@@ -32,11 +46,100 @@ const STORAGE_KEYS = {
   KPIS: 'govtrack_kpis',
   REPORTS: 'govtrack_reports',
   DOCUMENTS: 'govtrack_documents',
+  DOCUMENT_REQUIREMENTS: 'govtrack_document_requirements',
   TASKS: 'govtrack_tasks',
   RISKS: 'govtrack_risks',
   DEADLINES: 'govtrack_deadlines',
   AUDIT_LOGS: 'govtrack_audit_logs',
 };
+
+export const DEFAULT_DOCUMENT_REQUIREMENTS: DocumentRequirement[] = [
+  {
+    id: 'req-q-perf-rep',
+    code: 'REQ-PERF-Q-REP',
+    title: 'Quarterly Performance Report',
+    description: 'Statutory quarterly performance report detailing KPI targets, actual achievements, and variance explanations.',
+    requiredDocumentType: 'PERFORMANCE_REPORT',
+    category: 'PERFORMANCE',
+    applicableQuarter: 'ALL',
+    mandatory: true,
+    minConfidenceThreshold: 0.80,
+    expectedCharacteristics: [
+      'Quarterly Performance Statutory Heading',
+      'Strategic KPI & Indicator Matrix',
+      'Actual vs Target Delivery Analysis',
+      'Accounting Officer Sign-Off'
+    ]
+  },
+  {
+    id: 'req-poe-bundle',
+    code: 'REQ-PERF-POE',
+    title: 'Portfolio of Evidence (PoE)',
+    description: 'Physical deliverable evidence including attendance registers, beneficiary lists, and site inspection logs.',
+    requiredDocumentType: 'POE',
+    category: 'PERFORMANCE',
+    applicableQuarter: 'ALL',
+    mandatory: true,
+    minConfidenceThreshold: 0.80,
+    expectedCharacteristics: [
+      'Portfolio of Evidence (PoE) Statutory Framing',
+      'Physical Beneficiary / Participant Attendance Log',
+      'Temporal & Geographic Verification Records',
+      'On-site Inspection / Photographic Deliverable Record'
+    ]
+  },
+  {
+    id: 'req-fin-bank',
+    code: 'REQ-FIN-BANK',
+    title: 'Statutory Bank Statement',
+    description: 'Certified quarterly bank statement from a recognised commercial bank demonstrating tranche drawdown and balance progression.',
+    requiredDocumentType: 'BANK_STATEMENT',
+    category: 'FINANCIAL',
+    applicableQuarter: 'ALL',
+    mandatory: true,
+    minConfidenceThreshold: 0.80,
+    expectedCharacteristics: [
+      'Recognised South African Financial Institution Identity',
+      'Statutory Statement Period Reference',
+      'Official Account & Branch Routing Details',
+      'Reconciled Opening/Closing Balance Ledger'
+    ]
+  },
+  {
+    id: 'req-fin-stmt',
+    code: 'REQ-FIN-STMT',
+    title: 'Quarterly Financial Statement',
+    description: 'Quarterly statement of financial position and financial performance compliant with GRAP/IFRS standards.',
+    requiredDocumentType: 'FINANCIAL_STATEMENT',
+    category: 'FINANCIAL',
+    applicableQuarter: 'ALL',
+    mandatory: true,
+    minConfidenceThreshold: 0.80,
+    expectedCharacteristics: [
+      'Statement of Financial Position (Balance Sheet)',
+      'Statement of Financial Performance',
+      'Cash Flow & Net Asset Reconciliation',
+      'GRAP/IFRS Accounting Framework Notes'
+    ]
+  },
+  {
+    id: 'req-fin-exp',
+    code: 'REQ-FIN-EXP',
+    title: 'Proof of Expenditure & Vouchers',
+    description: 'Itemized supplier tax invoices, proof of payments, and expenditure audit vouchers matching claimed spend.',
+    requiredDocumentType: 'PROOF_OF_EXPENDITURE',
+    category: 'FINANCIAL',
+    applicableQuarter: 'ALL',
+    mandatory: true,
+    minConfidenceThreshold: 0.80,
+    expectedCharacteristics: [
+      'Payment Execution & Remittance Confirmation',
+      'Authenticated Vendor / Contractor Reference',
+      'Monetary Transaction Value in ZAR',
+      'Expenditure Voucher & Audit Traceability'
+    ]
+  }
+];
 
 // Safe JSON parse from localStorage with fallback
 function loadFromStorage<T>(key: string, fallback: T): T {
@@ -72,6 +175,7 @@ export class GovTrackStore {
   kpis: KPIRecord[];
   reports: QuarterlyReport[];
   documents: EntityDocument[];
+  documentRequirements: DocumentRequirement[];
   tasks: CorrectiveTask[];
   riskAlerts: RiskAlert[];
   deadlines: RegulatoryDeadline[];
@@ -168,6 +272,13 @@ export class GovTrackStore {
       uploadedBy: d.uploadedBy || d.versions?.[0]?.uploadedBy || 'Lerato Phiri (Organisation Admin)',
     }));
     saveToStorage(STORAGE_KEYS.DOCUMENTS, this.documents);
+
+    this.documentRequirements = loadFromStorage<DocumentRequirement[]>(
+      STORAGE_KEYS.DOCUMENT_REQUIREMENTS,
+      DEFAULT_DOCUMENT_REQUIREMENTS
+    );
+    saveToStorage(STORAGE_KEYS.DOCUMENT_REQUIREMENTS, this.documentRequirements);
+
     this.tasks = loadFromStorage<CorrectiveTask[]>(STORAGE_KEYS.TASKS, INITIAL_TASKS);
     this.riskAlerts = loadFromStorage<RiskAlert[]>(STORAGE_KEYS.RISKS, INITIAL_RISK_ALERTS);
     this.deadlines = loadFromStorage<RegulatoryDeadline[]>(STORAGE_KEYS.DEADLINES, INITIAL_DEADLINES);
@@ -198,6 +309,7 @@ export class GovTrackStore {
     saveToStorage(STORAGE_KEYS.KPIS, this.kpis);
     saveToStorage(STORAGE_KEYS.REPORTS, this.reports);
     saveToStorage(STORAGE_KEYS.DOCUMENTS, this.documents);
+    saveToStorage(STORAGE_KEYS.DOCUMENT_REQUIREMENTS, this.documentRequirements);
     saveToStorage(STORAGE_KEYS.TASKS, this.tasks);
     saveToStorage(STORAGE_KEYS.RISKS, this.riskAlerts);
     saveToStorage(STORAGE_KEYS.DEADLINES, this.deadlines);
@@ -644,6 +756,427 @@ export class GovTrackStore {
     this.persistAll();
   }
 
+  // --- DOCUMENT VERIFICATION & SUBMISSION SYSTEM METHODS ---
+  getDocumentRequirements(quarter?: string): DocumentRequirement[] {
+    if (!quarter || quarter === 'ALL') {
+      return this.documentRequirements;
+    }
+    return this.documentRequirements.filter(
+      r => !r.applicableQuarter || r.applicableQuarter === 'ALL' || r.applicableQuarter === quarter
+    );
+  }
+
+  addDocumentRequirement(requirement: DocumentRequirement): void {
+    const exists = this.documentRequirements.some(r => r.id === requirement.id);
+    if (!exists) {
+      this.documentRequirements.push(requirement);
+      this.addAuditLog('DOCUMENT_REQUIRED', `Created new statutory requirement: ${requirement.title} (${requirement.code})`);
+      this.persistAll();
+    }
+  }
+
+  updateDocumentRequirement(requirement: DocumentRequirement): void {
+    const idx = this.documentRequirements.findIndex(r => r.id === requirement.id);
+    if (idx !== -1) {
+      this.documentRequirements[idx] = requirement;
+      this.addAuditLog('DOCUMENT_REQUIRED', `Updated statutory requirement parameters: ${requirement.title} (${requirement.code})`);
+      this.persistAll();
+    }
+  }
+
+  getEntityDocumentChecklist(
+    entityId: string, 
+    quarter: 'Q1' | 'Q2' | 'Q3' | 'Q4' = 'Q3', 
+    financialYear = '2025/2026'
+  ): DocumentVerificationChecklist {
+    const entity = this.entities.find(e => e.id === entityId);
+    const requirements = this.getDocumentRequirements(quarter);
+    const entityDocs = this.documents.filter(d => d.entityId === entityId);
+
+    const slots: DocumentRequirementSlot[] = requirements.map(req => {
+      // Find matching document for this requirement/type and period
+      const match = entityDocs.find(d => {
+        const matchesRequirement = d.requirementId === req.id;
+        const matchesType = d.controlledType === req.requiredDocumentType;
+        const matchesLegacyCategory = 
+          (req.requiredDocumentType === 'POE' && d.category === 'PORTFOLIO_OF_EVIDENCE') ||
+          (req.requiredDocumentType === 'BANK_STATEMENT' && d.category === 'TAX_AND_BANKING') ||
+          (req.requiredDocumentType === 'PERFORMANCE_REPORT' && d.category === 'QUARTERLY_REPORT') ||
+          (req.requiredDocumentType === 'FINANCIAL_STATEMENT' && d.category === 'FINANCIAL_REPORT') ||
+          (req.requiredDocumentType === 'PROOF_OF_EXPENDITURE' && d.category === 'FINANCIAL_REPORT');
+
+        const periodMatches = (!d.quarter || d.quarter === quarter) && (!d.financialYear || d.financialYear === financialYear);
+        return (matchesRequirement || matchesType || matchesLegacyCategory) && periodMatches;
+      });
+
+      let status: DocumentRequirementSlot['status'] = 'MISSING';
+      if (match) {
+        if (match.verificationStatus) {
+          status = match.verificationStatus as any;
+        } else if (match.approvalStatus === 'APPROVED') {
+          status = 'VERIFIED';
+        } else if (match.approvalStatus === 'REQUIRES_AMENDMENT') {
+          status = 'REJECTED';
+        } else {
+          status = 'MANUAL_REVIEW';
+        }
+      }
+
+      return {
+        requirement: req,
+        status,
+        activeDocument: match,
+        activeVersion: match?.detailedVersions && match.detailedVersions.length > 0 
+          ? match.detailedVersions[match.detailedVersions.length - 1] 
+          : undefined,
+        latestVerification: match?.activeVerification,
+        isSatisfied: status === 'VERIFIED',
+      };
+    });
+
+    const totalRequired = slots.filter(s => s.requirement.mandatory).length;
+    const verifiedCount = slots.filter(s => s.requirement.mandatory && s.status === 'VERIFIED').length;
+    const rejectedCount = slots.filter(s => s.status === 'REJECTED').length;
+    const pendingCount = slots.filter(s => s.status === 'MANUAL_REVIEW' || s.status === 'VALIDATING').length;
+    const missingCount = slots.filter(s => s.requirement.mandatory && s.status === 'MISSING').length;
+    const isFullyCompliant = verifiedCount === totalRequired && totalRequired > 0;
+    const compliancePercentage = totalRequired > 0 ? Math.round((verifiedCount / totalRequired) * 100) : 100;
+
+    return {
+      entityId,
+      entityName: entity?.name || 'Institutional Entity',
+      quarter,
+      financialYear,
+      slots,
+      totalRequired,
+      verifiedCount,
+      pendingCount,
+      rejectedCount,
+      missingCount,
+      isFullyCompliant,
+      compliancePercentage,
+    };
+  }
+
+  async submitDocumentForRequirement(params: {
+    entityId: string;
+    requirementId: string;
+    reportId?: string;
+    quarter?: 'Q1' | 'Q2' | 'Q3' | 'Q4';
+    financialYear?: string;
+    file: File | { name: string; size: number; type?: string; content?: string };
+    simulatedContent?: string;
+    uploaderName?: string;
+    uploaderRole?: UserRole;
+    changeSummary?: string;
+  }): Promise<{ document: EntityDocument; result: DocumentVerificationResult }> {
+    const entity = this.entities.find(e => e.id === params.entityId);
+    const requirement = this.documentRequirements.find(r => r.id === params.requirementId);
+    if (!requirement) {
+      throw new Error(`Document requirement ${params.requirementId} not found.`);
+    }
+
+    const uploader = params.uploaderName || (this.currentUser ? `${this.currentUser.name} (${this.currentUser.designation})` : 'Authorized Submitting Officer');
+    const quarter = params.quarter || 'Q3';
+    const financialYear = params.financialYear || '2025/2026';
+
+    // 1. Audit log: Upload initiated
+    this.addAuditLog(
+      'DOCUMENT_UPLOADED',
+      `Uploaded file "${params.file.name}" for requirement "${requirement.title}" (${requirement.code})`,
+      entity?.name
+    );
+    this.addAuditLog(
+      'DOCUMENT_VALIDATION_STARTED',
+      `Initiated automated content extraction and multi-indicator verification for "${params.file.name}". Required: ${requirement.requiredDocumentType}`,
+      entity?.name
+    );
+
+    // 2. Compute file hash
+    const fileHash = await calculateFileHash(params.file instanceof File ? params.file : (params.simulatedContent || params.file.name));
+
+    // 3. File-level validation
+    const fileValidation = validateFileLevel(params.file, fileHash);
+
+    // 4. Content extraction
+    const { text } = await extractDocumentContent(params.file, params.simulatedContent);
+
+    // 5. Multi-characteristic content classification
+    const result = await analyzeDocumentContent(
+      text,
+      requirement.requiredDocumentType,
+      entity ? entity.name : 'Institutional Entity',
+      `${quarter} ${financialYear}`,
+      fileValidation
+    );
+
+    // 6. Map verification status
+    const controlledStatus: ControlledDocumentStatus = result.status;
+    const legacyApproval: 'APPROVED' | 'PENDING_REVIEW' | 'REQUIRES_AMENDMENT' = 
+      result.status === 'VERIFIED' ? 'APPROVED' :
+      result.status === 'MANUAL_REVIEW' ? 'PENDING_REVIEW' : 'REQUIRES_AMENDMENT';
+
+    // Find if a document already exists for this requirement/entity/quarter
+    let doc = this.documents.find(d => 
+      d.entityId === params.entityId && 
+      (d.requirementId === requirement.id || d.controlledType === requirement.requiredDocumentType) &&
+      d.quarter === quarter
+    );
+
+    const versionRecord: DetailedDocumentVersion = {
+      versionNumber: doc ? doc.currentVersion + 1 : 1,
+      fileName: params.file.name,
+      fileSizeBytes: params.file.size,
+      fileHash,
+      uploadedAt: new Date().toISOString(),
+      uploadedBy: uploader,
+      uploadedByName: uploader,
+      verificationResult: result,
+      status: controlledStatus,
+      textContentSample: text.substring(0, 300),
+      rejectionReason: result.status === 'REJECTED' ? result.reasons.join(' ') : undefined,
+      changeSummary: params.changeSummary || (doc ? `Version ${doc.currentVersion + 1} resubmission` : 'Initial requirement submission'),
+    };
+
+    if (doc) {
+      // Increment version and maintain version history
+      doc.currentVersion += 1;
+      doc.versions.push({
+        versionNumber: doc.currentVersion,
+        uploadedAt: new Date().toISOString(),
+        uploadedBy: uploader,
+        fileName: params.file.name,
+        fileSizeBytes: params.file.size,
+        changeSummary: versionRecord.changeSummary || 'Replacement submission',
+      });
+      doc.detailedVersions = doc.detailedVersions || [];
+      doc.detailedVersions.push(versionRecord);
+      doc.activeVerification = result;
+      doc.verificationStatus = controlledStatus;
+      doc.approvalStatus = legacyApproval;
+      doc.fileName = params.file.name;
+      doc.fileSizeBytes = params.file.size;
+      doc.fileSize = `${(params.file.size / (1024 * 1024)).toFixed(1)} MB`;
+      doc.fileHash = fileHash;
+      doc.uploadedAt = new Date().toISOString();
+      doc.uploadedBy = uploader;
+      doc.controlledType = requirement.requiredDocumentType;
+      doc.verificationSummary = result.reasons[0] || 'Verification completed';
+    } else {
+      const categoryMapping: Record<ControlledDocumentType, EntityDocument['category']> = {
+        BANK_STATEMENT: 'TAX_AND_BANKING',
+        PERFORMANCE_REPORT: 'QUARTERLY_REPORT',
+        POE: 'PORTFOLIO_OF_EVIDENCE',
+        FINANCIAL_STATEMENT: 'FINANCIAL_REPORT',
+        PROOF_OF_EXPENDITURE: 'FINANCIAL_REPORT',
+        ANNUAL_REPORT: 'ANNUAL_REPORT',
+        QUARTERLY_REPORT: 'QUARTERLY_REPORT',
+        STRATEGIC_PLAN: 'STRATEGIC_PLAN',
+        ANNUAL_PERFORMANCE_PLAN: 'ANNUAL_PERFORMANCE_PLAN',
+        SUPPORTING_EVIDENCE: 'PORTFOLIO_OF_EVIDENCE',
+        GOVERNANCE_CHARTER: 'GOVERNANCE_CHARTER',
+        TAX_CLEARANCE: 'TAX_AND_BANKING',
+      };
+
+      doc = {
+        id: `doc-req-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        entityId: params.entityId,
+        entityName: entity ? entity.name : 'Institutional Entity',
+        title: `${requirement.title} (${quarter} ${financialYear})`,
+        category: categoryMapping[requirement.requiredDocumentType] || 'PORTFOLIO_OF_EVIDENCE',
+        controlledType: requirement.requiredDocumentType,
+        verificationStatus: controlledStatus,
+        requirementId: requirement.id,
+        reportId: params.reportId,
+        quarter,
+        financialYear,
+        currentVersion: 1,
+        approvalStatus: legacyApproval,
+        fileName: params.file.name,
+        fileSize: `${(params.file.size / (1024 * 1024)).toFixed(1)} MB`,
+        fileSizeBytes: params.file.size,
+        fileHash,
+        uploadedAt: new Date().toISOString(),
+        uploadedBy: uploader,
+        verificationSummary: result.reasons[0] || 'Automated verification check',
+        versions: [
+          {
+            versionNumber: 1,
+            uploadedAt: new Date().toISOString(),
+            uploadedBy: uploader,
+            fileName: params.file.name,
+            fileSizeBytes: params.file.size,
+            changeSummary: 'Initial requirement submission',
+          },
+        ],
+        detailedVersions: [versionRecord],
+        activeVerification: result,
+        comments: [],
+      };
+      this.documents = [doc, ...this.documents];
+    }
+
+    // Record verification audit action
+    const auditAction = 
+      result.status === 'VERIFIED' ? 'DOCUMENT_VERIFIED' :
+      result.status === 'MANUAL_REVIEW' ? 'DOCUMENT_SENT_FOR_MANUAL_REVIEW' : 'DOCUMENT_REJECTED';
+
+    this.addAuditLog(
+      auditAction,
+      `Verification result for "${params.file.name}" against ${requirement.code}: ${result.status}. Detected: ${result.detectedDocumentType} (${Math.round(result.confidence * 100)}% confidence). ${result.reasons.join(' | ')}`,
+      entity?.name
+    );
+
+    // If verified PoE, link to quarter report
+    if (doc.controlledType === 'POE') {
+      const report = this.reports.find(r => r.entityId === params.entityId && r.quarter === quarter);
+      if (report) {
+        report.portfolioOfEvidenceDocId = doc.id;
+      }
+    }
+
+    // If rejected, create an automated corrective task
+    if (result.status === 'REJECTED') {
+      this.createTask({
+        entityId: params.entityId,
+        entityName: entity ? entity.name : 'Institutional Entity',
+        title: `Re-submit Required Evidence: ${requirement.title} (${quarter})`,
+        description: `Automated verification rejected "${params.file.name}". Reason: ${result.reasons.join(' ')}. Please upload a valid ${requirement.requiredDocumentType}.`,
+        assignedToName: entity ? (entity.reportingOfficerName || entity.headOfEntity) : 'Entity Officer',
+        priority: 'HIGH',
+        status: 'OPEN',
+        dueDate: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString(),
+        direction: 'DSAC_TO_ENTITY',
+      });
+    }
+
+    // Recalculate entity risk
+    if (entity) {
+      this.recalculateEntityRisk(entity.id);
+    }
+
+    this.persistAll();
+    return { document: doc, result };
+  }
+
+  async replaceRejectedDocument(params: {
+    docId: string;
+    file: File | { name: string; size: number; type?: string; content?: string };
+    simulatedContent?: string;
+    changeSummary: string;
+  }): Promise<{ document: EntityDocument; result: DocumentVerificationResult }> {
+    const doc = this.documents.find(d => d.id === params.docId);
+    if (!doc) throw new Error(`Document ${params.docId} not found.`);
+
+    const requirement = this.documentRequirements.find(r => r.id === doc.requirementId) ||
+      this.documentRequirements.find(r => r.requiredDocumentType === doc.controlledType) ||
+      this.documentRequirements[0];
+
+    this.addAuditLog(
+      'DOCUMENT_REPLACED',
+      `Submitted replacement version for document "${doc.title}". New file: ${params.file.name}. Summary: ${params.changeSummary}`,
+      doc.entityName
+    );
+
+    return this.submitDocumentForRequirement({
+      entityId: doc.entityId,
+      requirementId: requirement.id,
+      reportId: doc.reportId,
+      quarter: doc.quarter || 'Q3',
+      financialYear: doc.financialYear || '2025/2026',
+      file: params.file,
+      simulatedContent: params.simulatedContent,
+      changeSummary: params.changeSummary,
+    });
+  }
+
+  manualReviewDocument(params: {
+    docId: string;
+    decision: 'VERIFIED' | 'REJECTED';
+    reviewerName: string;
+    reviewerRole: UserRole;
+    notes: string;
+  }): void {
+    const doc = this.documents.find(d => d.id === params.docId);
+    if (!doc) return;
+
+    doc.verificationStatus = params.decision;
+    doc.approvalStatus = params.decision === 'VERIFIED' ? 'APPROVED' : 'REQUIRES_AMENDMENT';
+    if (params.decision === 'VERIFIED') {
+      doc.approvedAt = new Date().toISOString();
+      doc.approvedBy = `${params.reviewerName} (${params.reviewerRole})`;
+    }
+
+    if (doc.activeVerification) {
+      doc.activeVerification.status = params.decision;
+      doc.activeVerification.manualReviewNotes = params.notes;
+      doc.activeVerification.manualReviewedBy = params.reviewerName;
+      doc.activeVerification.manualReviewedAt = new Date().toISOString();
+      doc.activeVerification.verifier = 'MANUAL_OFFICIAL';
+    }
+
+    doc.comments.push({
+      id: `cmt-${Date.now()}`,
+      authorName: params.reviewerName,
+      authorRole: params.reviewerRole,
+      authorEntity: 'DSAC National Reviewer',
+      timestamp: new Date().toISOString(),
+      message: `[MANUAL REVIEW DECISION: ${params.decision}] ${params.notes}`,
+    });
+
+    const action = params.decision === 'VERIFIED' ? 'DOCUMENT_APPROVED' : 'DOCUMENT_REJECTED';
+    this.addAuditLog(
+      action,
+      `Manual review conducted by ${params.reviewerName}: Document "${doc.title}" was ${params.decision}. Review Notes: ${params.notes}`,
+      doc.entityName
+    );
+
+    this.recalculateEntityRisk(doc.entityId);
+    this.persistAll();
+  }
+
+  requestDocumentReplacement(params: {
+    docId: string;
+    reviewerName: string;
+    reason: string;
+  }): void {
+    const doc = this.documents.find(d => d.id === params.docId);
+    if (!doc) return;
+
+    doc.verificationStatus = 'REJECTED';
+    doc.approvalStatus = 'REQUIRES_AMENDMENT';
+
+    doc.comments.push({
+      id: `cmt-${Date.now()}`,
+      authorName: params.reviewerName,
+      authorRole: 'DSAC_ADMIN',
+      authorEntity: 'DSAC National Oversight',
+      timestamp: new Date().toISOString(),
+      message: `[AMENDMENT DIRECTIVE] Replacement document required: ${params.reason}`,
+    });
+
+    this.createTask({
+      entityId: doc.entityId,
+      entityName: doc.entityName,
+      title: `Upload Replacement Dossier: ${doc.title}`,
+      description: `DSAC Reviewer ${params.reviewerName} requested document replacement. Reason: ${params.reason}`,
+      assignedToName: doc.uploadedBy || 'Entity Accounting Officer',
+      priority: 'HIGH',
+      status: 'OPEN',
+      dueDate: new Date(Date.now() + 4 * 24 * 60 * 60 * 1000).toISOString(),
+      direction: 'DSAC_TO_ENTITY',
+    });
+
+    this.addAuditLog(
+      'DOCUMENT_REJECTED',
+      `Formal amendment directive issued for "${doc.title}". Reviewer requested replacement. Reason: ${params.reason}`,
+      doc.entityName
+    );
+
+    this.recalculateEntityRisk(doc.entityId);
+    this.persistAll();
+  }
+
   submitQuarterlyReport(params: {
     entityId: string;
     quarter: 'Q1' | 'Q2' | 'Q3' | 'Q4';
@@ -815,6 +1348,10 @@ export class GovTrackStore {
     calculatedRisk += overdueCount * 25;
     // Correction required: 12 points per rejected report
     calculatedRisk += correctionCount * 12;
+    // Rejected document evidence penalty: 10 points per rejected statutory document
+    const entityDocs = this.documents.filter(d => d.entityId === entityId);
+    const rejectedDocCount = entityDocs.filter(d => d.verificationStatus === 'REJECTED' || d.approvalStatus === 'REQUIRES_AMENDMENT').length;
+    calculatedRisk += Math.min(20, rejectedDocCount * 10);
     // Audit outcome penalty
     if (entity.auditOutcome === 'DISCLAIMER') calculatedRisk += 45;
     else if (entity.auditOutcome === 'QUALIFIED') calculatedRisk += 30;
@@ -921,6 +1458,17 @@ export class GovTrackStore {
       });
     }
 
+    const entityDocs = this.documents.filter(d => d.entityId === entityId);
+    const rejectedDocCount = entityDocs.filter(d => d.verificationStatus === 'REJECTED' || d.approvalStatus === 'REQUIRES_AMENDMENT').length;
+    if (rejectedDocCount > 0) {
+      factors.push({
+        name: 'Statutory Document Verification Failure',
+        scoreContribution: Math.min(20, rejectedDocCount * 10),
+        description: `${rejectedDocCount} statutory document(s) failed automated content classification or were formally rejected by DSAC Reviewers.`,
+        severity: rejectedDocCount >= 2 ? 'HIGH' : 'MEDIUM',
+      });
+    }
+
     return {
       entityId: entity.id,
       entityName: entity.name,
@@ -968,9 +1516,19 @@ export class GovTrackStore {
     const averageCompliance = Math.round(this.entities.reduce((acc, e) => acc + e.overallComplianceScore, 0) / Math.max(1, totalEntities));
 
     const totalDocumentsCount = this.documents.length;
-    const verifiedDocumentsCount = this.documents.filter(d => d.approvalStatus === 'APPROVED').length;
-    const pendingDocumentsCount = this.documents.filter(d => d.approvalStatus === 'PENDING_REVIEW').length;
-    const amendmentRequiredDocumentsCount = this.documents.filter(d => d.approvalStatus === 'REQUIRES_AMENDMENT').length;
+    const verifiedDocumentsCount = this.documents.filter(d => d.verificationStatus === 'VERIFIED' || d.approvalStatus === 'APPROVED').length;
+    const pendingDocumentsCount = this.documents.filter(d => d.approvalStatus === 'PENDING_REVIEW' && d.verificationStatus !== 'REJECTED').length;
+    const amendmentRequiredDocumentsCount = this.documents.filter(d => d.verificationStatus === 'REJECTED' || d.approvalStatus === 'REQUIRES_AMENDMENT').length;
+    const rejectedDocumentsCount = amendmentRequiredDocumentsCount;
+    const manualReviewCount = this.documents.filter(d => d.verificationStatus === 'MANUAL_REVIEW').length;
+    const entitiesWithRejectedEvidenceCount = new Set(
+      this.documents
+        .filter(d => d.verificationStatus === 'REJECTED' || d.approvalStatus === 'REQUIRES_AMENDMENT')
+        .map(d => d.entityId)
+    ).size;
+    const documentComplianceRate = totalDocumentsCount > 0 
+      ? Math.round((verifiedDocumentsCount / totalDocumentsCount) * 1000) / 10 
+      : 100;
 
     // Reports calculations
     const totalReports = this.reports.length;
@@ -1023,6 +1581,10 @@ export class GovTrackStore {
       verifiedDocumentsCount,
       pendingDocumentsCount,
       amendmentRequiredDocumentsCount,
+      rejectedDocumentsCount,
+      manualReviewCount,
+      entitiesWithRejectedEvidenceCount,
+      documentComplianceRate,
       totalReports,
       reportsApprovedCount,
       allSubmittedReportsCount: reportsSubmittedCount,

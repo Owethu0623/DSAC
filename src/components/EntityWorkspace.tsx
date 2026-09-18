@@ -31,6 +31,7 @@ import {
   CorrectiveTask,
   ReportItem 
 } from '../types';
+import { DocumentVerificationDossier } from './DocumentVerificationDossier';
 
 interface EntityWorkspaceProps {
   entityId: string;
@@ -54,6 +55,7 @@ export const EntityWorkspace: React.FC<EntityWorkspaceProps> = ({
 
   // Tabs inside Workspace
   const [activeTab, setActiveTab] = useState<'kpis' | 'reports' | 'documents' | 'tasks'>('reports');
+  const [docSubTab, setDocSubTab] = useState<'verification' | 'repository'>('verification');
 
   // Report Review State (for DSAC Admin)
   const [reviewReportModal, setReviewReportModal] = useState<QuarterlyReport | null>(null);
@@ -781,9 +783,44 @@ export const EntityWorkspace: React.FC<EntityWorkspaceProps> = ({
         </div>
       )}
 
-      {/* TAB 3: DOCUMENT REPOSITORY & VERSIONING */}
+      {/* TAB 3: DOCUMENT REPOSITORY & VERIFICATION */}
       {activeTab === 'documents' && (
         <div className="space-y-6">
+          {/* Sub-navigation between Automated Verification Dossier and Multi-Version Archive */}
+          <div className="flex items-center gap-2 p-1.5 bg-slate-100 rounded-xl max-w-fit">
+            <button
+              onClick={() => setDocSubTab('verification')}
+              className={`px-4 py-2 text-xs font-bold rounded-lg transition-all flex items-center gap-2 ${
+                docSubTab === 'verification'
+                  ? 'bg-white text-indigo-900 shadow-xs border border-slate-200'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <FileCheck className="w-4 h-4 text-indigo-600" />
+              <span>Section 38 Statutory Verification Dossier</span>
+            </button>
+
+            <button
+              onClick={() => setDocSubTab('repository')}
+              className={`px-4 py-2 text-xs font-bold rounded-lg transition-all flex items-center gap-2 ${
+                docSubTab === 'repository'
+                  ? 'bg-white text-indigo-900 shadow-xs border border-slate-200'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <History className="w-4 h-4 text-slate-600" />
+              <span>Multi-Version Ledger Archive ({entityDocs.length})</span>
+            </button>
+          </div>
+
+          {docSubTab === 'verification' ? (
+            <DocumentVerificationDossier
+              entityId={entity.id}
+              quarter="Q3"
+              financialYear="2025/2026"
+              isDSACReviewer={isDSACReviewer}
+            />
+          ) : (
           <div className="bg-white rounded-xl p-6 border border-slate-200 shadow-sm">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-slate-100 gap-3">
               <div>
@@ -874,6 +911,7 @@ export const EntityWorkspace: React.FC<EntityWorkspaceProps> = ({
               ))}
             </div>
           </div>
+          )}
         </div>
       )}
 

@@ -11,6 +11,14 @@ export type EntityCluster =
   | 'Sport & Recreation'
   | 'Subsidized Cultural NPOs';
 
+export * from './types/documentVerification';
+import { 
+  ControlledDocumentType, 
+  ControlledDocumentStatus, 
+  DetailedDocumentVersion, 
+  DocumentVerificationResult 
+} from './types/documentVerification';
+
 export type ReportStatus = 
   | 'DRAFT'
   | 'SUBMITTED'
@@ -175,9 +183,17 @@ export interface EntityDocument {
   entityName: string;
   title: string;
   category: DocumentCategory;
+  controlledType?: ControlledDocumentType;
+  verificationStatus?: ControlledDocumentStatus;
+  requirementId?: string;
+  reportId?: string;
+  quarter?: 'Q1' | 'Q2' | 'Q3' | 'Q4';
   financialYear: string;
   currentVersion: number;
   versions: DocumentVersion[];
+  detailedVersions?: DetailedDocumentVersion[];
+  activeVerification?: DocumentVerificationResult;
+  fileHash?: string;
   approvalStatus: 'PENDING_REVIEW' | 'APPROVED' | 'REQUIRES_AMENDMENT';
   approvedAt?: string;
   approvedBy?: string;
@@ -270,7 +286,15 @@ export interface AuditLogEntry {
     | 'REPORT_REVISION_REQUESTED'
     | 'REPORT_VERIFIED'
     | 'REPORT_RESUBMITTED'
+    | 'DOCUMENT_REQUIRED'
     | 'DOCUMENT_UPLOADED'
+    | 'DOCUMENT_VALIDATION_STARTED'
+    | 'DOCUMENT_VERIFIED'
+    | 'DOCUMENT_REJECTED'
+    | 'DOCUMENT_SENT_FOR_MANUAL_REVIEW'
+    | 'DOCUMENT_APPROVED'
+    | 'DOCUMENT_REPLACED'
+    | 'DOCUMENT_ARCHIVED'
     | 'DOCUMENT_VERSION_INCREMENTED'
     | 'DOCUMENT_DELETED'
     | 'TASK_CREATED'
