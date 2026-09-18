@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Coins, 
   HelpCircle, 
@@ -19,7 +19,7 @@ import {
   Check,
   X
 } from 'lucide-react';
-import { PublicEntity } from '../../types';
+import { PublicEntity, SupportRequest } from '../../types';
 import { store } from '../../services/store';
 
 interface DsacSupportViewProps {
@@ -43,112 +43,37 @@ interface SupportRequestItem {
   expectedOutcome: string;
 }
 
-const INITIAL_SUPPORT_REQUESTS: SupportRequestItem[] = [
-  {
-    id: 'sup-001',
-    entityId: 'ent-ubuntu-arts',
-    entityName: 'Ubuntu Arts NPO',
-    category: 'Programme Support',
-    title: 'Youth Community Arts Festival & Rural Touring Production Subvention',
-    amountZAR: 450000,
-    submittedDate: '12 Sep 2026',
-    status: 'APPROVED',
-    priority: 'HIGH',
-    description: 'Supplemental touring subvention to extend the Eastern Cape rural theatre masterclasses to 14 underserved schools in Bizana and Flagstaff.',
-    expectedOutcome: 'Direct engagement of 450 rural youth and creation of 18 temporary arts practitioner contracts.'
-  },
-  {
-    id: 'sup-002',
-    entityId: 'ent-sahra',
-    entityName: 'South African Heritage Resources Agency (SAHRA)',
-    category: 'Technical Support',
-    title: 'SAHRIS National Heritage Geodatabase Cloud Infrastructure Upgrade',
-    amountZAR: 1200000,
-    submittedDate: '10 Sep 2026',
-    status: 'PENDING_REVIEW',
-    priority: 'HIGH',
-    description: 'High-availability server migration and GIS cloud processing modernization to prevent permitting backlogs during Section 34 & 38 development applications.',
-    expectedOutcome: 'Zero downtime during statutory heritage permit evaluations and integration with provincial heritage registries.'
-  },
-  {
-    id: 'sup-003',
-    entityId: 'ent-pacofs',
-    entityName: 'Performing Arts Centre of the Free State (PACOFS)',
-    category: 'Governance Support',
-    title: 'Internal Audit & PFMA Compliance Advisory Task Team Intervention',
-    amountZAR: 320000,
-    submittedDate: '05 Sep 2026',
-    status: 'PENDING_REVIEW',
-    priority: 'HIGH',
-    description: 'Deployment of DSAC Oversight Directorate governance experts to address AGSA qualification findings related to asset register reconciliation.',
-    expectedOutcome: 'Resolution of 14 audit findings ahead of 2025/26 statutory tabling.'
-  },
-  {
-    id: 'sup-004',
-    entityId: 'ent-nac',
-    entityName: 'National Arts Council of South Africa (NAC)',
-    category: 'Capacity Building',
-    title: 'Grant Management Portal Verification & Adjudication Workshop',
-    amountZAR: 280000,
-    submittedDate: '28 Aug 2026',
-    status: 'APPROVED',
-    priority: 'MEDIUM',
-    description: 'Capacity building training for newly appointed panellists and administrative staff on electronic grant auditing and POPI Act compliance.',
-    expectedOutcome: 'Accelerated turnaround time for artist funding disbursements.'
-  },
-  {
-    id: 'sup-005',
-    entityId: 'ent-bsa',
-    entityName: 'Boxing South Africa (BSA)',
-    category: 'Financial Support',
-    title: 'Emergency Medical & Sanctioning Compliance Tranche',
-    amountZAR: 650000,
-    submittedDate: '22 Aug 2026',
-    status: 'PENDING_REVIEW',
-    priority: 'HIGH',
-    description: 'Statutory medical surveillance and ringside safety compliance equipment for provincial tournament sanctioning.',
-    expectedOutcome: '100% medical compliance and safety clearance across all professional boxing events.'
-  },
-  {
-    id: 'sup-006',
-    entityId: 'ent-dmsa',
-    entityName: 'Ditsong Museums of South Africa (DMSA)',
-    category: 'Infrastructure Support',
-    title: 'National Museum of Natural History Climate-Control Rehabilitation',
-    amountZAR: 2400000,
-    submittedDate: '15 Aug 2026',
-    status: 'DISBURSED',
-    priority: 'HIGH',
-    description: 'HVAC repair and humidity stabilization in fossil and taxidermy archival vaults.',
-    expectedOutcome: 'Long-term preservation of irreplaceable national type-specimens.'
-  },
-  {
-    id: 'sup-007',
-    entityId: 'ent-market-theatre',
-    entityName: 'Market Theatre Foundation',
-    category: 'Programme Support',
-    title: 'Zweli Moya Emerging Playwrights Incubator',
-    amountZAR: 380000,
-    submittedDate: '01 Sep 2026',
-    status: 'APPROVED',
-    priority: 'NORMAL',
-    description: 'Incubation of 12 original South African plays with masterclasses by senior directors.',
-    expectedOutcome: 'Staging of 4 premier productions and employment for 36 actors and stage crew.'
-  },
-  {
-    id: 'sup-008',
-    entityId: 'ent-basa',
-    entityName: 'Business and Arts South Africa (BASA)',
-    category: 'Capacity Building',
-    title: 'Supporting Arts Mentorship Programme for NPOs',
-    amountZAR: 420000,
-    submittedDate: '18 Aug 2026',
-    status: 'DISBURSED',
-    priority: 'NORMAL',
-    description: 'Connecting corporate finance mentors with cultural NPO directors for sustainable revenue generation.',
-    expectedOutcome: 'Capacity upliftment for 28 grassroots cultural organizations.'
-  }
-];
+const mapStoreRequestToItem = (r: SupportRequest): SupportRequestItem => {
+  const categoryMap: Record<string, SupportRequestItem['category']> = {
+    BUDGET_REQUEST: 'Financial Support',
+    ADDITIONAL_FUNDING: 'Financial Support',
+    TECHNICAL_SUPPORT: 'Technical Support',
+    GOVERNANCE_ASSISTANCE: 'Governance Support',
+    PROGRAMME_SUPPORT: 'Programme Support',
+    CAPACITY_BUILDING: 'Capacity Building',
+  };
+  const category: SupportRequestItem['category'] = categoryMap[r.category] || (r.categoryLabel as SupportRequestItem['category']) || 'Technical Support';
+  
+  let status: SupportRequestItem['status'] = 'PENDING_REVIEW';
+  if (r.status === 'APPROVED') status = 'APPROVED';
+  else if (r.status === 'COMPLETED') status = 'DISBURSED';
+  else if (r.status === 'DECLINED') status = 'DECLINED';
+  else status = 'PENDING_REVIEW';
+
+  return {
+    id: r.id,
+    entityId: r.entityId,
+    entityName: r.entityName,
+    category,
+    title: r.title,
+    amountZAR: r.amountRequested || 0,
+    submittedDate: new Date(r.createdAt).toLocaleDateString('en-ZA', { day: '2-digit', month: 'short', year: 'numeric' }),
+    status,
+    priority: (r.amountRequested && r.amountRequested > 500000) ? 'HIGH' : 'NORMAL',
+    description: r.motivation,
+    expectedOutcome: r.expectedOutcome || 'Direct programmatic delivery and statutory compliance.',
+  };
+};
 
 export const DsacSupportView: React.FC<DsacSupportViewProps> = ({
   entities,
@@ -156,22 +81,33 @@ export const DsacSupportView: React.FC<DsacSupportViewProps> = ({
   onOpenWorkspace,
   onOpenSideView
 }) => {
-  const [requests, setRequests] = useState<SupportRequestItem[]>(INITIAL_SUPPORT_REQUESTS);
-  const [selectedRequestId, setSelectedRequestId] = useState<string>(INITIAL_SUPPORT_REQUESTS[0].id);
+  const getMappedRequests = () => store.getSupportRequests().map(mapStoreRequestToItem);
+  const [requests, setRequests] = useState<SupportRequestItem[]>(getMappedRequests);
+  const [selectedRequestId, setSelectedRequestId] = useState<string>(() => {
+    const list = store.getSupportRequests();
+    return list[0]?.id || 'req-sup-001';
+  });
   const [categoryFilter, setCategoryFilter] = useState<string>('ALL');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [searchTerm, setSearchTerm] = useState('');
   const [feedbackNotice, setFeedbackNotice] = useState<string | null>(null);
 
-  // Category summary counts
-  const categories = [
-    { name: 'Financial Support', count: 18, color: 'bg-blue-500' },
-    { name: 'Capacity Building', count: 12, color: 'bg-teal-500' },
-    { name: 'Technical Support', count: 10, color: 'bg-amber-400' },
-    { name: 'Governance Support', count: 6, color: 'bg-indigo-600' },
-    { name: 'Programme Support', count: 5, color: 'bg-rose-400' },
-    { name: 'Infrastructure Support', count: 3, color: 'bg-yellow-500' },
-  ];
+  useEffect(() => {
+    const unsub = store.subscribe(() => {
+      setRequests(getMappedRequests());
+    });
+    return unsub;
+  }, []);
+
+  // Dynamic Category summary counts
+  const categories = useMemo(() => [
+    { name: 'Financial Support', count: requests.filter(r => r.category === 'Financial Support').length, color: 'bg-blue-500' },
+    { name: 'Capacity Building', count: requests.filter(r => r.category === 'Capacity Building').length, color: 'bg-teal-500' },
+    { name: 'Technical Support', count: requests.filter(r => r.category === 'Technical Support').length, color: 'bg-amber-400' },
+    { name: 'Governance Support', count: requests.filter(r => r.category === 'Governance Support').length, color: 'bg-indigo-600' },
+    { name: 'Programme Support', count: requests.filter(r => r.category === 'Programme Support').length, color: 'bg-rose-400' },
+    { name: 'Infrastructure Support', count: requests.filter(r => r.category === 'Infrastructure Support').length, color: 'bg-yellow-500' },
+  ], [requests]);
 
   const filteredRequests = requests.filter(req => {
     const matchesSearch = 
@@ -185,19 +121,19 @@ export const DsacSupportView: React.FC<DsacSupportViewProps> = ({
   const selectedRequest = requests.find(r => r.id === selectedRequestId) || requests[0];
 
   const handleApprove = (id: string) => {
-    setRequests(prev => prev.map(r => r.id === id ? { ...r, status: 'APPROVED' } : r));
+    store.reviewSupportRequest(id, 'APPROVED', 'Approved by DSAC Public Entities Oversight Directorate.');
     setFeedbackNotice(`Support tranche approved for ${selectedRequest?.entityName}. Tranche released.`);
     setTimeout(() => setFeedbackNotice(null), 4000);
   };
 
   const handleDisburse = (id: string) => {
-    setRequests(prev => prev.map(r => r.id === id ? { ...r, status: 'DISBURSED' } : r));
+    store.reviewSupportRequest(id, 'COMPLETED', 'Disbursed via National Treasury BAS system.');
     setFeedbackNotice(`Statutory funds disbursed via National Treasury BAS system.`);
     setTimeout(() => setFeedbackNotice(null), 4000);
   };
 
   const handleDecline = (id: string) => {
-    setRequests(prev => prev.map(r => r.id === id ? { ...r, status: 'DECLINED' } : r));
+    store.reviewSupportRequest(id, 'DECLINED', 'Declined by DSAC Oversight Directorate.');
     setFeedbackNotice(`Support request marked as declined with feedback issued.`);
     setTimeout(() => setFeedbackNotice(null), 4000);
   };

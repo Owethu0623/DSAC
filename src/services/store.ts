@@ -18,7 +18,10 @@ import {
   DocumentVerificationResult,
   DetailedDocumentVersion,
   DocumentVerificationChecklist,
-  DocumentRequirementSlot
+  DocumentRequirementSlot,
+  SupportRequest,
+  SupportRequestCategory,
+  SupportRequestStatus
 } from '../types';
 import { 
   calculateFileHash,
@@ -84,7 +87,105 @@ const STORAGE_KEYS = {
   EXPENSE_CATEGORIES: 'govtrack_expense_categories',
   BUDGET_PROFILES: 'govtrack_budget_profiles',
   QUARTERLY_FINANCIAL_SUBMISSIONS: 'govtrack_quarterly_financial_submissions',
+  SUPPORT_REQUESTS: 'govtrack_support_requests',
 };
+
+export const INITIAL_SUPPORT_REQUESTS: SupportRequest[] = [
+  {
+    id: 'req-sup-001',
+    entityId: 'ent-ubuntu-arts',
+    entityName: 'Ubuntu Arts NPO',
+    title: 'Youth Community Arts Festival & Rural Touring Production Subvention',
+    category: 'PROGRAMME_SUPPORT',
+    categoryLabel: 'Programme Support',
+    amountRequested: 450000,
+    motivation: 'Supplemental touring subvention to extend Eastern Cape rural theatre masterclasses to 14 underserved schools in Bizana and Flagstaff.',
+    linkedProgramme: 'Youth Creative Arts Expansion',
+    expectedOutcome: 'Direct engagement of 450 rural youth and creation of 18 temporary arts practitioner contracts.',
+    supportingDocumentation: 'Tour_Budget_And_Itinerary_Signed.pdf',
+    status: 'APPROVED',
+    createdAt: '2026-09-12T09:30:00.000Z',
+    submittedBy: 'Lerato Phiri (Accounting Officer)',
+    reviewedBy: 'usr-dsac-01',
+    reviewedByName: 'Thandi Mokoena (DSAC Oversight Director)',
+    reviewNotes: 'Approved under Mzansi Golden Economy provincial outreach programme.',
+    updatedAt: '2026-09-13T14:20:00.000Z',
+  },
+  {
+    id: 'req-sup-002',
+    entityId: 'ent-sahra',
+    entityName: 'South African Heritage Resources Agency (SAHRA)',
+    title: 'SAHRIS National Heritage Geodatabase Cloud Infrastructure Upgrade',
+    category: 'TECHNICAL_SUPPORT',
+    categoryLabel: 'Technical Support',
+    amountRequested: 1200000,
+    motivation: 'High-availability server migration and GIS cloud processing modernization to prevent permitting backlogs during Section 34 & 38 development applications.',
+    linkedProgramme: 'Heritage Protection & National Inventory Management',
+    expectedOutcome: 'Zero downtime during statutory heritage permit evaluations and integration with provincial heritage registries.',
+    supportingDocumentation: 'ICT_Steering_Committee_Approval_SAHRA.pdf',
+    status: 'UNDER_REVIEW',
+    createdAt: '2026-09-10T11:00:00.000Z',
+    submittedBy: 'Dr. Mxolisi Dlamini (CEO)',
+    updatedAt: '2026-09-10T11:00:00.000Z',
+  },
+  {
+    id: 'req-sup-003',
+    entityId: 'ent-pacofs',
+    entityName: 'Performing Arts Centre of the Free State (PACOFS)',
+    title: 'Internal Audit & PFMA Compliance Advisory Task Team Intervention',
+    category: 'GOVERNANCE_ASSISTANCE',
+    categoryLabel: 'Governance Assistance',
+    amountRequested: 320000,
+    motivation: 'Deployment of DSAC Oversight Directorate governance experts to address AGSA qualification findings related to asset register reconciliation.',
+    linkedProgramme: 'Governance Restoration & Clean Audit Pathway',
+    expectedOutcome: 'Resolution of 14 audit findings ahead of statutory tabling.',
+    supportingDocumentation: 'Audit_Steering_Action_Plan_PACOFS.pdf',
+    status: 'UNDER_REVIEW',
+    createdAt: '2026-09-05T08:45:00.000Z',
+    submittedBy: 'Kagiso Semenya (Chief Executive)',
+    updatedAt: '2026-09-05T08:45:00.000Z',
+  },
+  {
+    id: 'req-sup-004',
+    entityId: 'ent-nac',
+    entityName: 'National Arts Council of South Africa (NAC)',
+    title: 'Grant Management Portal Verification & Adjudication Workshop',
+    category: 'CAPACITY_BUILDING',
+    categoryLabel: 'Capacity Building',
+    amountRequested: 280000,
+    motivation: 'Capacity building training for newly appointed panellists and administrative staff on electronic grant auditing and POPI Act compliance.',
+    linkedProgramme: 'Grant Administration & Arts Development',
+    expectedOutcome: 'Accelerated turnaround time for artist funding disbursements.',
+    supportingDocumentation: 'Council_Resolution_Panellist_Training.pdf',
+    status: 'APPROVED',
+    createdAt: '2026-08-28T14:15:00.000Z',
+    submittedBy: 'Julie Diphofa (Interim CEO)',
+    reviewedBy: 'usr-dsac-01',
+    reviewedByName: 'Thandi Mokoena (DSAC Oversight Director)',
+    reviewNotes: 'Authorized with mandate to include regional provincial representatives.',
+    updatedAt: '2026-08-30T10:00:00.000Z',
+  },
+  {
+    id: 'req-sup-005',
+    entityId: 'ent-boxing-sa',
+    entityName: 'Boxing South Africa (BSA)',
+    title: 'Emergency Ring Official Safety & Medical Certification Funding',
+    category: 'ADDITIONAL_FUNDING',
+    categoryLabel: 'Additional Funding',
+    amountRequested: 420000,
+    motivation: 'Urgent medical screening and neurological diagnostic equipment subsidy for licensed boxers in high-density tournament regions.',
+    linkedProgramme: 'Athlete Health & Safety Standards',
+    expectedOutcome: 'Mandatory ringside neurological clearances across all 9 provinces.',
+    supportingDocumentation: 'Medical_Advisory_Commission_Report.pdf',
+    status: 'MORE_INFORMATION_REQUIRED',
+    createdAt: '2026-09-01T16:00:00.000Z',
+    submittedBy: 'Sipho Sithole (Administrator)',
+    reviewedBy: 'usr-dsac-01',
+    reviewedByName: 'Thandi Mokoena (DSAC Oversight Director)',
+    reviewNotes: 'Please provide itemized equipment quotations and provincial breakdown before final approval.',
+    updatedAt: '2026-09-03T11:20:00.000Z',
+  }
+];
 
 export const DEFAULT_DOCUMENT_REQUIREMENTS: DocumentRequirement[] = [
   {
@@ -216,6 +317,7 @@ export class GovTrackStore {
   expenseCategories: ExpenseCategory[];
   budgetProfiles: EntityBudgetProfile[];
   quarterlyFinancialSubmissions: QuarterlyFinancialSubmission[];
+  supportRequests: SupportRequest[];
 
   private constructor() {
     let loadedUsers = loadFromStorage<User[]>(STORAGE_KEYS.REGISTERED_USERS, INITIAL_USERS);
@@ -356,6 +458,18 @@ export class GovTrackStore {
     });
     this.quarterlyFinancialSubmissions = loadedQuarterlySubmissions;
     saveToStorage(STORAGE_KEYS.QUARTERLY_FINANCIAL_SUBMISSIONS, this.quarterlyFinancialSubmissions);
+
+    let loadedSupportRequests = loadFromStorage<SupportRequest[]>(
+      STORAGE_KEYS.SUPPORT_REQUESTS,
+      INITIAL_SUPPORT_REQUESTS
+    );
+    INITIAL_SUPPORT_REQUESTS.forEach(initReq => {
+      if (!loadedSupportRequests.some(r => r.id === initReq.id)) {
+        loadedSupportRequests.push(initReq);
+      }
+    });
+    this.supportRequests = loadedSupportRequests;
+    saveToStorage(STORAGE_KEYS.SUPPORT_REQUESTS, this.supportRequests);
   }
 
   public static getInstance(): GovTrackStore {
@@ -390,6 +504,7 @@ export class GovTrackStore {
     saveToStorage(STORAGE_KEYS.EXPENSE_CATEGORIES, this.expenseCategories);
     saveToStorage(STORAGE_KEYS.BUDGET_PROFILES, this.budgetProfiles);
     saveToStorage(STORAGE_KEYS.QUARTERLY_FINANCIAL_SUBMISSIONS, this.quarterlyFinancialSubmissions);
+    saveToStorage(STORAGE_KEYS.SUPPORT_REQUESTS, this.supportRequests);
     this.notify();
   }
 
@@ -405,6 +520,7 @@ export class GovTrackStore {
     this.expenseCategories = JSON.parse(JSON.stringify(INITIAL_EXPENSE_CATEGORIES));
     this.budgetProfiles = JSON.parse(JSON.stringify(INITIAL_BUDGET_PROFILES));
     this.quarterlyFinancialSubmissions = JSON.parse(JSON.stringify(INITIAL_QUARTERLY_SUBMISSIONS));
+    this.supportRequests = JSON.parse(JSON.stringify(INITIAL_SUPPORT_REQUESTS));
     this.addAuditLog(
       'SYSTEM_BASELINE_SYNC',
       'Departmental statutory baseline datasets synchronized with gazetted PFMA Vote 37 appropriations.'
@@ -751,12 +867,32 @@ export class GovTrackStore {
   }
 
   // --- KPI PROGRESS UPDATE ---
-  updateKPIValue(kpiId: string, actualValue: number, reason?: string): void {
+  updateKPIValue(
+    kpiId: string, 
+    actualValue: number, 
+    reason?: string,
+    quarter?: 'Q1' | 'Q2' | 'Q3' | 'Q4',
+    correctiveAction?: string
+  ): void {
     const kpi = this.kpis.find(k => k.id === kpiId);
     if (!kpi) return;
 
-    kpi.currentValue = actualValue;
-    kpi.percentageAchieved = Math.min(100, Math.round((actualValue / kpi.annualTarget) * 1000) / 10);
+    if (quarter === 'Q1') {
+      kpi.q1Actual = actualValue;
+    } else if (quarter === 'Q2') {
+      kpi.q2Actual = actualValue;
+    } else if (quarter === 'Q3') {
+      kpi.q3Actual = actualValue;
+    } else if (quarter === 'Q4') {
+      kpi.q4Actual = actualValue;
+    }
+
+    // Cumulative actual: sum of recorded quarter actuals, or fallback to actualValue
+    const quarterSum = (kpi.q1Actual || 0) + (kpi.q2Actual || 0) + (kpi.q3Actual || 0) + (kpi.q4Actual || 0);
+    kpi.currentValue = quarterSum > 0 ? quarterSum : actualValue;
+    kpi.percentageAchieved = kpi.annualTarget > 0 
+      ? Math.min(100, Math.round((kpi.currentValue / kpi.annualTarget) * 1000) / 10)
+      : 100;
     
     // Status evaluation
     if (kpi.currentValue >= kpi.annualTarget) {
@@ -769,9 +905,135 @@ export class GovTrackStore {
       kpi.status = 'MISSED';
     }
 
+    // Synchronize to quarterly reports if report item exists
+    this.reports.forEach(r => {
+      if (r.entityId === kpi.entityId && (!quarter || r.quarter === quarter)) {
+        const item = r.items.find(it => it.kpiId === kpi.id);
+        if (item) {
+          item.actualAchieved = actualValue;
+          item.status = kpi.status;
+          item.variancePercentage = item.targetToDate > 0 
+            ? Math.round(((actualValue - item.targetToDate) / item.targetToDate) * 100)
+            : 0;
+          if (reason) item.varianceReason = reason;
+          if (correctiveAction) item.correctiveAction = correctiveAction;
+        }
+      }
+    });
+
     this.recalculateEntityRisk(kpi.entityId);
-    this.addAuditLog('REPORT_CREATED', `Updated KPI "${kpi.name}" actual to ${actualValue} ${kpi.unitOfMeasure} (${kpi.percentageAchieved}% of annual target). ${reason ? `Reason: ${reason}` : ''}`, kpi.entityName);
+    this.addAuditLog('REPORT_CREATED', `Updated KPI "${kpi.name}" (${quarter || 'Actual'}) to ${actualValue} ${kpi.unitOfMeasure} (${kpi.percentageAchieved}% achieved). ${reason ? `Reason: ${reason}` : ''}`, kpi.entityName);
     this.persistAll();
+  }
+
+  // --- SUPPORT REQUESTS MANAGEMENT (Section 19) ---
+  getSupportRequests(entityId?: string): SupportRequest[] {
+    if (!entityId) return [...this.supportRequests];
+    return this.supportRequests.filter(r => r.entityId === entityId);
+  }
+
+  submitSupportRequest(data: {
+    entityId: string;
+    entityName: string;
+    title: string;
+    category: SupportRequestCategory;
+    amountRequested?: number;
+    motivation: string;
+    linkedProgramme?: string;
+    expectedOutcome: string;
+    supportingDocumentation?: string;
+  }): SupportRequest {
+    const categoryLabels: Record<SupportRequestCategory, string> = {
+      BUDGET_REQUEST: 'Budget Request',
+      ADDITIONAL_FUNDING: 'Additional Funding',
+      TECHNICAL_SUPPORT: 'Technical Support',
+      GOVERNANCE_ASSISTANCE: 'Governance Assistance',
+      PROGRAMME_SUPPORT: 'Programme Support',
+      CAPACITY_BUILDING: 'Capacity Building',
+    };
+
+    const newRequest: SupportRequest = {
+      id: `req-sup-${Date.now()}`,
+      entityId: data.entityId,
+      entityName: data.entityName,
+      title: data.title,
+      category: data.category,
+      categoryLabel: categoryLabels[data.category] || data.category,
+      amountRequested: data.amountRequested,
+      motivation: data.motivation,
+      linkedProgramme: data.linkedProgramme,
+      expectedOutcome: data.expectedOutcome,
+      supportingDocumentation: data.supportingDocumentation,
+      status: 'SUBMITTED',
+      createdAt: new Date().toISOString(),
+      submittedBy: this.currentUser ? `${this.currentUser.name} (${this.currentUser.designation})` : 'Institutional Officer',
+      updatedAt: new Date().toISOString(),
+    };
+
+    this.supportRequests = [newRequest, ...this.supportRequests];
+
+    this.addAuditLog(
+      'SUPPORT_REQUEST_CREATED',
+      `Submitted ${newRequest.categoryLabel} of ${newRequest.amountRequested ? formatZAR(newRequest.amountRequested) : 'assistance'} for ${newRequest.entityName}: "${newRequest.title}"`,
+      newRequest.entityName
+    );
+
+    this.persistAll();
+    return newRequest;
+  }
+
+  reviewSupportRequest(
+    requestId: string,
+    status: SupportRequestStatus,
+    notes?: string
+  ): void {
+    const req = this.supportRequests.find(r => r.id === requestId);
+    if (!req) return;
+
+    req.status = status;
+    req.reviewedBy = this.currentUser?.id;
+    req.reviewedByName = this.currentUser ? `${this.currentUser.name} (${this.currentUser.designation})` : 'DSAC Oversight Reviewer';
+    req.reviewNotes = notes;
+    req.updatedAt = new Date().toISOString();
+
+    this.addAuditLog(
+      'SUPPORT_REQUEST_REVIEWED',
+      `Updated support request "${req.title}" status to ${status}. Notes: ${notes || 'Updated by DSAC Oversight Directorate.'}`,
+      req.entityName
+    );
+
+    this.persistAll();
+  }
+
+  captureQuarterlyExpenditure(data: {
+    entityId: string;
+    entityName: string;
+    quarter: FinancialQuarter;
+    financialYear?: string;
+    lines: { categoryId: string; categoryName: string; quarterlyActual: number; annualBudget?: number }[];
+    accountingOfficerAffirmation?: boolean;
+    accountingOfficerName?: string;
+  }): QuarterlyFinancialSubmission {
+    const finYear = data.financialYear || '2025/26';
+    const totalActual = data.lines.reduce((sum, l) => sum + (l.quarterlyActual || 0), 0);
+
+    const submission = this.submitQuarterlyFinancialReturn({
+      entityId: data.entityId,
+      entityName: data.entityName,
+      financialYear: finYear,
+      quarter: data.quarter,
+      totalQuarterlyActual: totalActual,
+      accountingOfficerAffirmation: data.accountingOfficerAffirmation ?? true,
+      accountingOfficerName: data.accountingOfficerName || this.currentUser?.name,
+      lines: data.lines.map(l => ({
+        categoryId: l.categoryId,
+        categoryName: l.categoryName,
+        actualAmount: l.quarterlyActual,
+        plannedAmount: Math.round((l.annualBudget || 0) * 0.25),
+      })),
+    });
+
+    return submission;
   }
 
   // --- DOCUMENT VERSIONING ---

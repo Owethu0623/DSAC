@@ -320,7 +320,50 @@ export interface AuditLogEntry {
     | 'EXPENDITURE_UPDATED'
     | 'FINANCIAL_REPORT_APPROVED'
     | 'FINANCIAL_REPORT_CORRECTION_REQUESTED'
-    | 'FINANCIAL_RECORD_UPDATED';
+    | 'FINANCIAL_RECORD_UPDATED'
+    | 'TRANCHE_WITHHELD'
+    | 'TRANCHE_RELEASED'
+    | 'EXTENSION_REQUESTED'
+    | 'STATUTORY_NOTICE_ISSUED'
+    | 'SUPPORT_REQUEST_CREATED'
+    | 'SUPPORT_REQUEST_REVIEWED';
   details: string;
   ipAddress?: string;
+}
+
+export type SupportRequestCategory = 
+  | 'BUDGET_REQUEST' 
+  | 'ADDITIONAL_FUNDING' 
+  | 'TECHNICAL_SUPPORT' 
+  | 'GOVERNANCE_ASSISTANCE' 
+  | 'PROGRAMME_SUPPORT' 
+  | 'CAPACITY_BUILDING';
+
+export type SupportRequestStatus = 
+  | 'SUBMITTED' 
+  | 'UNDER_REVIEW' 
+  | 'APPROVED' 
+  | 'DECLINED' 
+  | 'MORE_INFORMATION_REQUIRED' 
+  | 'COMPLETED';
+
+export interface SupportRequest {
+  id: string;
+  entityId: string;
+  entityName: string;
+  title: string;
+  category: SupportRequestCategory;
+  categoryLabel?: string;
+  amountRequested?: number;
+  motivation: string;
+  linkedProgramme?: string;
+  expectedOutcome: string;
+  supportingDocumentation?: string;
+  status: SupportRequestStatus;
+  createdAt: string;
+  submittedBy: string;
+  reviewedBy?: string;
+  reviewedByName?: string;
+  reviewNotes?: string;
+  updatedAt: string;
 }

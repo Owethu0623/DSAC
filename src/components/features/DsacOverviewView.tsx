@@ -61,7 +61,6 @@ export const DsacOverviewView: React.FC<DsacOverviewViewProps> = ({
   const [selectedCluster, setSelectedCluster] = useState<string>('ALL');
   const [selectedHealthFilter, setSelectedHealthFilter] = useState<'ALL' | 'ON_TRACK' | 'REVIEW' | 'RISK'>('ALL');
   const [showWorkflowGuide, setShowWorkflowGuide] = useState(false);
-  const [showOrientationBanner, setShowOrientationBanner] = useState(true);
   const [selectedYear, setSelectedYear] = useState('2025/2026 (Current)');
 
   // Filtered entities based on cluster and health status
@@ -128,28 +127,6 @@ export const DsacOverviewView: React.FC<DsacOverviewViewProps> = ({
               <option>2025/2026 (Current)</option>
               <option>2024/2025 (Audited)</option>
             </select>
-
-            {/* System Guide (How it works for beginners) */}
-            {onOpenGuide && (
-              <button
-                onClick={onOpenGuide}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-emerald-50 text-emerald-900 border border-emerald-300 hover:bg-emerald-100 transition-all cursor-pointer shadow-xs"
-                title="Open Beginner's Guide & System Map"
-              >
-                <Compass className="w-3.5 h-3.5 text-emerald-700" />
-                <span>System Guide</span>
-              </button>
-            )}
-
-            {/* Presentation Mode Demo Button */}
-            <button
-              onClick={onOpenDemo}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-amber-50 text-amber-900 border border-amber-300 hover:bg-amber-100 transition-all cursor-pointer shadow-xs"
-              title="Launch Guided Presentation Demo Scenario"
-            >
-              <Sparkles className="w-3.5 h-3.5 text-amber-600" />
-              <span>Presentation Mode</span>
-            </button>
 
             {/* Toggleable Oversight Lifecycle */}
             <button
@@ -229,42 +206,6 @@ export const DsacOverviewView: React.FC<DsacOverviewViewProps> = ({
           </div>
         )}
       </div>
-
-      {/* Beginner-friendly quick orientation banner */}
-      {showOrientationBanner && (
-        <div className="bg-gradient-to-r from-[#033628] via-[#044332] to-[#0a5240] text-white rounded-2xl p-4 sm:p-5 shadow-xs border border-emerald-600/40 flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div className="space-y-1">
-            <div className="inline-flex items-center gap-2 px-2.5 py-0.5 rounded-full bg-emerald-500/30 text-emerald-200 text-[10px] font-bold uppercase tracking-wider">
-              <Compass className="w-3 h-3 text-emerald-300" />
-              <span>First Time Here? Quick Orientation</span>
-            </div>
-            <h2 className="text-base font-black text-white">
-              Welcome to the DSAC Public Entities Oversight System
-            </h2>
-            <p className="text-xs text-emerald-100/80 max-w-2xl leading-relaxed">
-              This dashboard monitors all 32 South African arts, heritage, and sports entities. Look at the 4 cards below for total portfolio health, check the priority watchlist for organizations needing support, or click the left sidebar to drill down into any institution.
-            </p>
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            {onOpenGuide && (
-              <button
-                onClick={onOpenGuide}
-                className="px-3.5 py-2 rounded-xl text-xs font-bold bg-white text-emerald-950 hover:bg-emerald-50 transition-colors cursor-pointer shadow-xs flex items-center gap-1.5"
-              >
-                <BookOpen className="w-3.5 h-3.5 text-emerald-800" />
-                <span>Open 2-Min Guide</span>
-              </button>
-            )}
-            <button
-              onClick={() => setShowOrientationBanner(false)}
-              className="px-3 py-2 rounded-xl text-xs text-emerald-200 hover:text-white hover:bg-emerald-800/60 transition-colors cursor-pointer"
-              title="Dismiss this tip"
-            >
-              Got it
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* 2. ROW 1: THE 4 PRIMARY EXECUTIVE METRICS (FIRST THING USER SEES) */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

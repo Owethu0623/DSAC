@@ -55,6 +55,13 @@ import { downloadStatutoryDocument } from '../services/downloadHelper';
 import { DocumentVerificationDossier } from './DocumentVerificationDossier';
 import { EntityFinancialView } from './features/EntityFinancialView';
 import { EntityVisualAnalytics } from './features/EntityVisualAnalytics';
+import { KpiProgressCard } from './shared/KpiProgressCard';
+import { CaptureKpiActualModal } from './shared/CaptureKpiActualModal';
+import { SupportRequestModal } from './shared/SupportRequestModal';
+import { CaptureExpenditureModal } from './shared/CaptureExpenditureModal';
+import { FinancialSummaryCard } from './shared/FinancialSummaryCard';
+import { KPIRecord } from '../types';
+import { formatZAR } from '../services/financialService';
 
 interface EntityPortalDashboardProps {
   entityId?: string;
@@ -69,7 +76,7 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
   onNavigateToSection,
   onLogout,
 }) => {
-  const [, setTick] = useState(0);
+  const [tick, setTick] = useState(0);
   useEffect(() => {
     return store.subscribe(() => setTick(t => t + 1));
   }, []);
@@ -83,6 +90,9 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
   // Modals
   const [activeModal, setActiveModal] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
+  const [selectedKpiForCapture, setSelectedKpiForCapture] = useState<KPIRecord | null>(null);
+  const [showExpenditureModal, setShowExpenditureModal] = useState<boolean>(false);
+  const [showSupportModal, setShowSupportModal] = useState<boolean>(false);
 
   // Resolve current entity from store
   const [selectedEntityId, setSelectedEntityId] = useState<string>(() => {
@@ -225,11 +235,6 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
   const [reportPoeDocId, setReportPoeDocId] = useState('');
   const [reportDeclaration, setReportDeclaration] = useState('I hereby affirm that the programmatic targets and expenditure reported reflect verified records in accordance with PFMA Section 38.');
 
-  // Form states for interactive sub-views
-  const [supportType, setSupportType] = useState('Financial Support');
-  const [supportAmount, setSupportAmount] = useState('150000');
-  const [supportMotivation, setSupportMotivation] = useState('Funding for provincial community arts roadshow workshops');
-
   const [newMessage, setNewMessage] = useState('');
   const [messagesList, setMessagesList] = useState([
     {
@@ -263,18 +268,6 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
     treasurer: 'Thabo Maseko (CA SA)',
     bankName: 'Standard Bank South Africa',
     accountEnding: '**** 4921',
-  });
-
-  // KPI actuals state for interactive updating
-  const [kpiActuals, setKpiActuals] = useState({
-    programmes: 12,
-    youth: 850,
-    practitioners: 95,
-    schools: 28,
-    exhibitions: 8,
-    trainings: 14,
-    femaleLed: 68,
-    accessibility: 88,
   });
 
   // Dynamic Year & Quarter Based Stats strictly synchronized with Department Dashboard
@@ -313,7 +306,7 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
       auditOutcome: isAudited ? 'Clean Audit (Unqualified)' : (entity.auditOutcome || 'Clean Audit'),
       badge: isAudited ? 'Audited & Closed' : 'Active Financial Year',
     };
-  }, [selectedYear, selectedQuarter, entity]);
+  }, [selectedYear, selectedQuarter, entity, tick]);
 
   const currentUser = store.currentUser || {
     name: 'Lerato Phiri',
@@ -398,28 +391,6 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
     setTimeout(() => setActionSuccess(null), 3500);
   };
 
-  const handleSaveKpiActuals = () => {
-    if (entity) {
-      entity.jobStats = {
-        ...entity.jobStats,
-        youthJobsCreated: kpiActuals.youth,
-        youthEmployed: kpiActuals.youth,
-        creativeSectorPractitionersSupported: kpiActuals.practitioners,
-      };
-      const totalRatio = (
-        (kpiActuals.programmes / 15) +
-        (kpiActuals.youth / 1000) +
-        (kpiActuals.practitioners / 120) +
-        (kpiActuals.schools / 40)
-      ) / 4;
-      entity.overallComplianceScore = Math.min(100, Math.round(75 + totalRatio * 25));
-      store.recalculateEntityRisk(entity.id);
-      store.persistAll();
-    }
-    setActionSuccess('Quarterly KPI actuals updated, risk recalculated, and synchronized with DSAC.');
-    setTimeout(() => setActionSuccess(null), 2500);
-  };
-
   const handleClaimTranche = (trancheName: string, amount: number) => {
     store.createTask({
       entityId: entity.id,
@@ -461,15 +432,6 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
     { id: 'calendar', label: 'Calendar', icon: Calendar, badge: 2 },
     { id: 'help', label: 'Help & Support', icon: HelpCircle },
   ];
-
-  const handleSupportSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setActionSuccess('Support Request submitted successfully to DSAC Oversight Directorate.');
-    setTimeout(() => {
-      setActionSuccess(null);
-      setActiveModal(null);
-    }, 1500);
-  };
 
   const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault();
@@ -1469,84 +1431,36 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
                   <div>
                     <h3 className="text-base font-black text-slate-900 flex items-center gap-2">
                       <Target className="w-5 h-5 text-teal-600" />
-                      <span>Targets &amp; Key Performance Indicators (2025/26)</span>
+                      <span>Targets &amp; Key Performance Indicators ({yearStats.fiscalTag})</span>
                     </h3>
                     <p className="text-xs text-slate-500 mt-0.5">
-                      Input quarterly actuals and compute performance achievement rates.
+                      National Treasury APP performance indicators. Capture quarterly actuals to update achievement rates.
                     </p>
                   </div>
-                  <button
-                    onClick={handleSaveKpiActuals}
-                    className="px-4 py-1.5 bg-teal-700 hover:bg-teal-800 text-white font-bold text-xs rounded-lg shadow-xs transition-colors"
-                  >
-                    Save &amp; Submit Actuals
-                  </button>
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs font-bold px-3 py-1 bg-teal-50 text-teal-800 border border-teal-200 rounded-full">
+                      {yearStats.kpiAchievedCount} of {yearStats.kpiTotalCount} Targets Achieved ({yearStats.kpiPercent}%)
+                    </span>
+                  </div>
                 </div>
 
-                <div className="space-y-4 mt-4 text-xs">
-                  <div className="p-4 bg-slate-50 rounded-xl border border-slate-200">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="font-bold text-slate-900">1. Community arts programmes implemented</span>
-                      <span className="text-xs font-bold text-teal-700">Target: 15 programmes</span>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <input
-                        type="number"
-                        value={kpiActuals.programmes}
-                        onChange={(e) => setKpiActuals({ ...kpiActuals, programmes: parseInt(e.target.value) || 0 })}
-                        className="w-28 p-2 bg-white border border-slate-300 rounded-lg text-xs font-bold"
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                  {entityKPIs.length > 0 ? (
+                    entityKPIs.map((kpi) => (
+                      <KpiProgressCard
+                        key={kpi.id}
+                        kpi={kpi}
+                        onUpdateActual={(k) => setSelectedKpiForCapture(k)}
+                        showQuarterBreakdown={true}
                       />
-                      <span className="text-slate-500">Achieved to date ({Math.round((kpiActuals.programmes / 15) * 100)}%)</span>
+                    ))
+                  ) : (
+                    <div className="col-span-2 py-8 text-center text-slate-400 bg-slate-50 rounded-xl border border-slate-200">
+                      <Target className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                      <p className="font-semibold text-slate-600">No KPIs registered for this entity.</p>
+                      <p className="text-xs text-slate-400 mt-1">Institutional targets will appear once approved under Vote 37.</p>
                     </div>
-                  </div>
-
-                  <div className="p-4 bg-slate-50 rounded-xl border border-slate-200">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="font-bold text-slate-900">2. Youth participants trained in creative arts</span>
-                      <span className="text-xs font-bold text-teal-700">Target: 1 000 participants</span>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <input
-                        type="number"
-                        value={kpiActuals.youth}
-                        onChange={(e) => setKpiActuals({ ...kpiActuals, youth: parseInt(e.target.value) || 0 })}
-                        className="w-28 p-2 bg-white border border-slate-300 rounded-lg text-xs font-bold"
-                      />
-                      <span className="text-slate-500">Achieved to date ({Math.round((kpiActuals.youth / 1000) * 100)}%)</span>
-                    </div>
-                  </div>
-
-                  <div className="p-4 bg-slate-50 rounded-xl border border-slate-200">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="font-bold text-slate-900">3. Creative sector practitioners supported</span>
-                      <span className="text-xs font-bold text-teal-700">Target: 120 practitioners</span>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <input
-                        type="number"
-                        value={kpiActuals.practitioners}
-                        onChange={(e) => setKpiActuals({ ...kpiActuals, practitioners: parseInt(e.target.value) || 0 })}
-                        className="w-28 p-2 bg-white border border-slate-300 rounded-lg text-xs font-bold"
-                      />
-                      <span className="text-slate-500">Achieved to date ({Math.round((kpiActuals.practitioners / 120) * 100)}%)</span>
-                    </div>
-                  </div>
-
-                  <div className="p-4 bg-slate-50 rounded-xl border border-slate-200">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="font-bold text-slate-900">4. Arts education workshops in community schools</span>
-                      <span className="text-xs font-bold text-teal-700">Target: 40 workshops</span>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <input
-                        type="number"
-                        value={kpiActuals.schools}
-                        onChange={(e) => setKpiActuals({ ...kpiActuals, schools: parseInt(e.target.value) || 0 })}
-                        className="w-28 p-2 bg-white border border-slate-300 rounded-lg text-xs font-bold"
-                      />
-                      <span className="text-slate-500">Achieved to date ({Math.round((kpiActuals.schools / 40) * 100)}%)</span>
-                    </div>
-                  </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -1554,11 +1468,22 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
 
           {/* ================= VIEW 5: BUDGET & FINANCIAL UTILIZATION ================= */}
           {activeSidebar === 'budget' && (
-            <EntityFinancialView
-              entityId={entity.id}
-              financialYear={selectedYear.includes('2024') ? '2024/25' : selectedYear.includes('2025') ? '2025/26' : '2026/27'}
-              readOnly={false}
-            />
+            <div className="space-y-4">
+              <div className="flex justify-end">
+                <button
+                  onClick={() => setShowExpenditureModal(true)}
+                  className="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs rounded-xl shadow-xs flex items-center gap-2 transition-all cursor-pointer"
+                >
+                  <Coins className="w-4 h-4" />
+                  <span>Capture Quarterly Expenditure Return</span>
+                </button>
+              </div>
+              <EntityFinancialView
+                entityId={entity.id}
+                financialYear={selectedYear.includes('2024') ? '2024/25' : selectedYear.includes('2025') ? '2025/26' : '2026/27'}
+                readOnly={false}
+              />
+            </div>
           )}
 
           {/* ================= VIEW 6: SUPPORT REQUESTS ================= */}
@@ -1576,44 +1501,85 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
                     </p>
                   </div>
                   <button
-                    onClick={() => setActiveModal('support')}
-                    className="px-4 py-1.5 bg-indigo-700 hover:bg-indigo-800 text-white font-bold text-xs rounded-lg shadow-xs flex items-center gap-1.5"
+                    onClick={() => setShowSupportModal(true)}
+                    className="px-4 py-2 bg-indigo-700 hover:bg-indigo-800 text-white font-bold text-xs rounded-lg shadow-xs flex items-center gap-1.5 transition-colors cursor-pointer"
                   >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>Create New Request</span>
+                    <Plus className="w-4 h-4" />
+                    <span>Create New Support Request</span>
                   </button>
                 </div>
 
                 <div className="space-y-3 mt-4 text-xs">
-                  <div className="p-4 bg-amber-50/70 border border-amber-200 rounded-xl flex items-center justify-between">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-black text-slate-900">Provincial Arts Showcase Support</span>
-                        <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[10px] font-bold">
-                          Under Review
-                        </span>
-                      </div>
-                      <div className="text-slate-600 mt-1">
-                        Financial grant request of R 150 000 for rural community outreach workshops in Limpopo &amp; Mpumalanga.
-                      </div>
-                      <div className="text-[10px] text-slate-400 mt-1">Submitted: 10 Sep 2025 • Reference: REQ-2025-084</div>
-                    </div>
-                  </div>
+                  {store.getSupportRequests(entity.id).length > 0 ? (
+                    store.getSupportRequests(entity.id).map((req) => {
+                      const statusStyles: Record<string, string> = {
+                        APPROVED: 'bg-emerald-100 text-emerald-800 border-emerald-300',
+                        UNDER_REVIEW: 'bg-amber-100 text-amber-800 border-amber-300',
+                        SUBMITTED: 'bg-blue-100 text-blue-800 border-blue-300',
+                        REJECTED: 'bg-rose-100 text-rose-800 border-rose-300',
+                        DECLINED: 'bg-rose-100 text-rose-800 border-rose-300',
+                        MORE_INFORMATION_REQUIRED: 'bg-orange-100 text-orange-800 border-orange-300',
+                        COMPLETED: 'bg-teal-100 text-teal-800 border-teal-300',
+                      };
+                      const currentStatusClass = statusStyles[req.status] || 'bg-slate-100 text-slate-700 border-slate-300';
 
-                  <div className="p-4 bg-emerald-50/70 border border-emerald-200 rounded-xl flex items-center justify-between">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-black text-slate-900">M&amp;E Technical Advisory &amp; PoE Verification</span>
-                        <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold">
-                          Approved &amp; Scheduled
-                        </span>
-                      </div>
-                      <div className="text-slate-600 mt-1">
-                        Technical support from DSAC M&amp;E specialist to audit attendance registers and compliance tools.
-                      </div>
-                      <div className="text-[10px] text-slate-400 mt-1">Approved by: Thandi Mokoena • Date: 28 Aug 2025</div>
+                      return (
+                        <div
+                          key={req.id}
+                          className="p-4 bg-slate-50/70 border border-slate-200 rounded-xl space-y-2 hover:bg-slate-50 transition-colors"
+                        >
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-black text-slate-900 text-sm">{req.title}</span>
+                              <span className="px-2 py-0.5 rounded-md bg-indigo-100 text-indigo-800 text-[10px] font-bold">
+                                {req.categoryLabel || req.category}
+                              </span>
+                              <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${currentStatusClass}`}>
+                                {req.status.replace('_', ' ')}
+                              </span>
+                            </div>
+                            {req.amountRequested && (
+                              <span className="font-bold text-emerald-700 text-xs font-mono">
+                                {formatZAR(req.amountRequested)}
+                              </span>
+                            )}
+                          </div>
+
+                          <p className="text-slate-700 leading-relaxed">{req.motivation}</p>
+
+                          {req.expectedOutcome && (
+                            <div className="p-2.5 bg-white rounded-lg border border-slate-200 text-slate-600">
+                              <span className="font-bold text-slate-800">Expected Outcome: </span>
+                              {req.expectedOutcome}
+                            </div>
+                          )}
+
+                          {req.reviewNotes && (
+                            <div className="p-2.5 bg-amber-50 rounded-lg border border-amber-200 text-amber-900">
+                              <span className="font-bold">DSAC Oversight Notes: </span>
+                              {req.reviewNotes}
+                              {req.reviewedByName && (
+                                <span className="text-[10px] text-amber-700 block mt-0.5">
+                                  Reviewed by {req.reviewedByName}
+                                </span>
+                              )}
+                            </div>
+                          )}
+
+                          <div className="flex items-center justify-between text-[10px] text-slate-400 pt-1 border-t border-slate-200/60">
+                            <span>Submitted: {new Date(req.createdAt).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' })} • Ref: {req.id}</span>
+                            {req.linkedProgramme && <span>Programme: {req.linkedProgramme}</span>}
+                          </div>
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div className="py-8 text-center text-slate-400 bg-slate-50 rounded-xl border border-slate-200">
+                      <HandCoins className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                      <p className="font-semibold text-slate-600">No support requests submitted yet.</p>
+                      <p className="text-xs text-slate-400 mt-1">Submit assistance requests for funding, technical advisory, or governance support.</p>
                     </div>
-                  </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -2498,66 +2464,48 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
         </div>
       )}
 
-      {/* Modal 3: Request Support */}
-      {activeModal === 'support' && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-200 p-5 space-y-4 text-xs">
-            <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-              <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2">
-                <HandCoins className="w-4 h-4 text-emerald-600" />
-                <span>Submit Institutional Support Request</span>
-              </h3>
-              <button onClick={() => setActiveModal(null)} className="text-slate-400 hover:text-slate-600">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
+      {/* Shared Support Request Modal */}
+      {(showSupportModal || activeModal === 'support') && (
+        <SupportRequestModal
+          entityId={entity.id}
+          entityName={entity.name}
+          onClose={() => {
+            setShowSupportModal(false);
+            setActiveModal(null);
+          }}
+          onSuccess={() => {
+            setShowSupportModal(false);
+            setActiveModal(null);
+            setActionSuccess('Support Request submitted and dispatched to DSAC Oversight Register.');
+          }}
+        />
+      )}
 
-            <form onSubmit={handleSupportSubmit} className="space-y-3">
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">Support Category</label>
-                <select
-                  value={supportType}
-                  onChange={(e) => setSupportType(e.target.value)}
-                  className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg"
-                >
-                  <option>Financial Support (Top-up grant)</option>
-                  <option>Technical Advisory &amp; M&amp;E Assistance</option>
-                  <option>Governance &amp; Audit Compliance Help</option>
-                  <option>Equipment &amp; Venue Support</option>
-                </select>
-              </div>
+      {/* Shared Capture KPI Actual Modal */}
+      {selectedKpiForCapture && (
+        <CaptureKpiActualModal
+          kpi={selectedKpiForCapture}
+          onClose={() => setSelectedKpiForCapture(null)}
+          onSuccess={() => {
+            setActionSuccess(`KPI "${selectedKpiForCapture.name}" actual updated and synchronized with DSAC.`);
+            setSelectedKpiForCapture(null);
+          }}
+        />
+      )}
 
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">Estimated Value / Amount (ZAR)</label>
-                <input
-                  type="number"
-                  value={supportAmount}
-                  onChange={(e) => setSupportAmount(e.target.value)}
-                  className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg"
-                />
-              </div>
-
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">Motivation / Justification</label>
-                <textarea
-                  rows={3}
-                  value={supportMotivation}
-                  onChange={(e) => setSupportMotivation(e.target.value)}
-                  className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs"
-                />
-              </div>
-
-              <div className="flex justify-end gap-2 pt-2">
-                <button type="button" onClick={() => setActiveModal(null)} className="px-3 py-1.5 border rounded-lg text-slate-600">
-                  Cancel
-                </button>
-                <button type="submit" className="px-4 py-1.5 bg-emerald-700 text-white rounded-lg font-semibold">
-                  Transmit Request
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+      {/* Shared Capture Expenditure Modal */}
+      {showExpenditureModal && (
+        <CaptureExpenditureModal
+          entityId={entity.id}
+          entityName={entity.name}
+          annualBudget={yearStats.budgetAllocated}
+          financialYear={yearStats.fiscalTag}
+          onClose={() => setShowExpenditureModal(false)}
+          onSuccess={() => {
+            setShowExpenditureModal(false);
+            setActionSuccess('Quarterly expenditure return certified and transmitted to DSAC.');
+          }}
+        />
       )}
 
     </div>

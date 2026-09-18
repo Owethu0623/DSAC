@@ -112,7 +112,7 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
   }, [initialSection]);
 
   // Real-time store subscription
-  const [, setTick] = useState(0);
+  const [tick, setTick] = useState(0);
   useEffect(() => {
     return store.subscribe(() => setTick(t => t + 1));
   }, []);
@@ -189,11 +189,11 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
   // Department Aggregations from Central Authoritative Calculation Engine
   const deptFinancialAgg = useMemo(() => {
     return store.getDepartmentFinancialAggregation(selectedYear, 'Q3');
-  }, [selectedYear]);
+  }, [selectedYear, tick]);
 
   const deptPerfAgg = useMemo(() => {
     return store.getDepartmentPerformanceAggregation(selectedYear, 'Q3', kpiFilter);
-  }, [selectedYear, kpiFilter]);
+  }, [selectedYear, kpiFilter, tick]);
 
   // Aggregate calculations across all 26 Public Entities and 6 NPOs from authoritative aggregation
   const totalApprovedBudget = deptFinancialAgg.totalApprovedBudget;
@@ -367,29 +367,6 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
             </button>
           </div>
 
-          {/* Quick Beginner Guide Callout Box inside Sidebar */}
-          <div className="px-3 pt-3">
-            <button
-              onClick={() => setIsGuideModalOpen(true)}
-              className="w-full p-2.5 rounded-xl bg-emerald-900/70 hover:bg-emerald-800 border border-emerald-500/40 text-left transition-all cursor-pointer group shadow-2xs"
-            >
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="w-6 h-6 rounded-lg bg-emerald-500/30 text-emerald-200 flex items-center justify-center">
-                    <Compass className="w-3.5 h-3.5 text-emerald-300" />
-                  </div>
-                  <span className="text-xs font-bold text-white group-hover:text-emerald-100 transition-colors">
-                    New to this system?
-                  </span>
-                </div>
-                <ChevronRight className="w-3.5 h-3.5 text-emerald-300 group-hover:translate-x-0.5 transition-transform" />
-              </div>
-              <p className="text-[10px] text-emerald-300/80 mt-1 pl-8 leading-tight">
-                Click for a 2-minute plain-English guide &amp; glossary
-              </p>
-            </button>
-          </div>
-
           {/* Navigation Groups */}
           <nav className="flex-1 overflow-y-auto p-3 space-y-4 custom-scrollbar">
             {navGroups.map((group, gIdx) => (
@@ -493,26 +470,6 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
           </div>
 
           <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-            {/* System Guide Trigger (How it Works for beginners) */}
-            <button
-              onClick={() => setIsGuideModalOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-300 shadow-2xs transition-all cursor-pointer hover:scale-102"
-              title="System Guide - Learn what this system does and how to use every section"
-            >
-              <Compass className="w-3.5 h-3.5 text-emerald-700" />
-              <span className="hidden sm:inline">System Guide</span>
-            </button>
-
-            {/* Presentation Demo Mode Trigger */}
-            <button
-              onClick={() => setIsDemoModeOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 shadow-2xs transition-all cursor-pointer hover:scale-102"
-              title="Launch Guided Presentation Demo Scenario (Report → Monitor → Identify → Act)"
-            >
-              <Sparkles className="w-3.5 h-3.5 text-amber-600" />
-              <span className="hidden sm:inline">Presentation Mode</span>
-            </button>
-
             {/* Search */}
             <div className="relative hidden md:block w-48 lg:w-56">
               <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />

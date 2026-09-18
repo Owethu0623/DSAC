@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Coins,
   Search,
@@ -53,7 +53,14 @@ export const DsacFinancialDashboard: React.FC<DsacFinancialDashboardProps> = ({
   onOpenWorkspace,
   initialTab = 'portfolio'
 }) => {
-  const [, setTick] = useState(0);
+  const [tick, setTick] = useState(0);
+
+  useEffect(() => {
+    const unsub = store.subscribe(() => {
+      setTick(t => t + 1);
+    });
+    return unsub;
+  }, []);
 
   // Filters & State
   const [selectedYear, setSelectedYear] = useState<string>('2026/27');
@@ -123,12 +130,12 @@ export const DsacFinancialDashboard: React.FC<DsacFinancialDashboardProps> = ({
   // Department Aggregated KPIs
   const departmentKPIs: DepartmentFinancialKPIs = useMemo(() => {
     return store.getDepartmentFinancialKPIs(selectedYear, selectedQuarter);
-  }, [selectedYear, selectedQuarter]);
+  }, [selectedYear, selectedQuarter, tick]);
 
   // All entity summaries
   const allSummaries: EntityFinancialSummary[] = useMemo(() => {
     return store.entities.map(e => store.getEntityFinancialSummary(e.id, selectedYear, selectedQuarter));
-  }, [selectedYear, selectedQuarter]);
+  }, [selectedYear, selectedQuarter, tick]);
 
   // Filtered summaries
   const filteredSummaries = useMemo(() => {
@@ -144,12 +151,12 @@ export const DsacFinancialDashboard: React.FC<DsacFinancialDashboardProps> = ({
   // Submissions pending review
   const pendingSubmissions = useMemo(() => {
     return store.quarterlyFinancialSubmissions.filter(s => s.financialYear === selectedYear && s.status === 'SUBMITTED');
-  }, [selectedYear]);
+  }, [selectedYear, tick]);
 
   // Budget profiles pending approval
   const pendingBudgetProfiles = useMemo(() => {
     return store.budgetProfiles.filter(p => p.financialYear === selectedYear && p.status === 'SUBMITTED');
-  }, [selectedYear]);
+  }, [selectedYear, tick]);
 
   // Export CSV
   const handleExportAllCSV = () => {

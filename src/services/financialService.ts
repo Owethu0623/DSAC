@@ -159,75 +159,39 @@ export function calculateEntityFinancialSummary(
   const q3Sub = entitySubmissions.find(s => s.quarter === 'Q3');
   const q4Sub = entitySubmissions.find(s => s.quarter === 'Q4');
 
-  let q1Actual = q1Sub?.totalQuarterlyActual || 0;
-  let q2Actual = q2Sub?.totalQuarterlyActual || 0;
-  let q3Actual = q3Sub?.totalQuarterlyActual || 0;
-  let q4Actual = q4Sub?.totalQuarterlyActual || 0;
-
-  let q1Submitted = !!q1Sub;
-  let q2Submitted = !!q2Sub;
-  let q3Submitted = !!q3Sub;
-  let q4Submitted = !!q4Sub;
-
-  // Fallback if quarterly submissions are not explicitly seeded for this year
-  if (entitySubmissions.length === 0) {
-    if (entityId === 'ent-ubuntu-arts') {
-      if (financialYear.includes('2024')) {
-        // Audited AFS: R 4.72M spent of R 4.8M approved (98.3% utilisation)
-        q1Actual = 1200000;
-        q2Actual = 1200000;
-        q3Actual = 1150000;
-        q4Actual = 1170000;
-        q1Submitted = true;
-        q2Submitted = true;
-        q3Submitted = true;
-        q4Submitted = true;
-      } else if (financialYear.includes('2023')) {
-        // Audited AFS: R 4.48M spent of R 4.5M approved (99.6% utilisation)
-        q1Actual = 1120000;
-        q2Actual = 1120000;
-        q3Actual = 1120000;
-        q4Actual = 1120000;
-        q1Submitted = true;
-        q2Submitted = true;
-        q3Submitted = true;
-        q4Submitted = true;
-      } else if (financialYear.includes('2025')) {
-        // Active 2025/26: R 3.2M spent of R 5.0M approved (64.0% utilisation)
-        q1Actual = 1050000;
-        q2Actual = 1050000;
-        q3Actual = 1100000;
-        q4Actual = 0;
-        q1Submitted = true;
-        q2Submitted = true;
-        q3Submitted = true;
-        q4Submitted = false;
-      }
-    } else {
-      if (financialYear.includes('2024') || financialYear.includes('2023')) {
-        const fullYearSpend = Math.round(approvedAmount * 0.98);
-        const qSpend = Math.round(fullYearSpend / 4);
-        q1Actual = qSpend;
-        q2Actual = qSpend;
-        q3Actual = qSpend;
-        q4Actual = fullYearSpend - (qSpend * 3);
-        q1Submitted = true;
-        q2Submitted = true;
-        q3Submitted = true;
-        q4Submitted = true;
-      } else if (financialYear.includes('2025')) {
-        const activeYtd = entityMeta?.transferredAmountZAR || entityMeta?.reportedExpenditureZAR || Math.round(approvedAmount * 0.75);
-        q1Actual = Math.round(activeYtd * 0.32);
-        q2Actual = Math.round(activeYtd * 0.34);
-        q3Actual = activeYtd - q1Actual - q2Actual;
-        q4Actual = 0;
-        q1Submitted = true;
-        q2Submitted = true;
-        q3Submitted = true;
-        q4Submitted = false;
-      }
+  // Baseline fallback calculations per quarter
+  let baseQ1 = 0, baseQ2 = 0, baseQ3 = 0, baseQ4 = 0;
+  if (entityId === 'ent-ubuntu-arts') {
+    if (financialYear.includes('2024')) {
+      baseQ1 = 1200000; baseQ2 = 1200000; baseQ3 = 1150000; baseQ4 = 1170000;
+    } else if (financialYear.includes('2023')) {
+      baseQ1 = 1120000; baseQ2 = 1120000; baseQ3 = 1120000; baseQ4 = 1120000;
+    } else if (financialYear.includes('2025')) {
+      baseQ1 = 1050000; baseQ2 = 1050000; baseQ3 = 1100000; baseQ4 = 0;
+    }
+  } else {
+    if (financialYear.includes('2024') || financialYear.includes('2023')) {
+      const fullYearSpend = Math.round(approvedAmount * 0.98);
+      const qSpend = Math.round(fullYearSpend / 4);
+      baseQ1 = qSpend; baseQ2 = qSpend; baseQ3 = qSpend; baseQ4 = fullYearSpend - (qSpend * 3);
+    } else if (financialYear.includes('2025')) {
+      const activeYtd = entityMeta?.transferredAmountZAR || entityMeta?.reportedExpenditureZAR || Math.round(approvedAmount * 0.75);
+      baseQ1 = Math.round(activeYtd * 0.32);
+      baseQ2 = Math.round(activeYtd * 0.34);
+      baseQ3 = Math.max(0, activeYtd - baseQ1 - baseQ2);
+      baseQ4 = 0;
     }
   }
+
+  const q1Actual = q1Sub ? q1Sub.totalQuarterlyActual : baseQ1;
+  const q2Actual = q2Sub ? q2Sub.totalQuarterlyActual : baseQ2;
+  const q3Actual = q3Sub ? q3Sub.totalQuarterlyActual : baseQ3;
+  const q4Actual = q4Sub ? q4Sub.totalQuarterlyActual : baseQ4;
+
+  const q1Submitted = !!q1Sub || baseQ1 > 0;
+  const q2Submitted = !!q2Sub || baseQ2 > 0;
+  const q3Submitted = !!q3Sub || (baseQ3 > 0 && !financialYear.includes('2026'));
+  const q4Submitted = !!q4Sub || (baseQ4 > 0 && !financialYear.includes('2025') && !financialYear.includes('2026'));
 
   // Cumulative YTD calculations strictly up to selected quarter
   let ytdActual = 0;

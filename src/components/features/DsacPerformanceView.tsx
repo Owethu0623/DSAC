@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Target, 
   TrendingUp, 
@@ -38,6 +38,14 @@ export const DsacPerformanceView: React.FC<DsacPerformanceViewProps> = ({
   const [quarterTab, setQuarterTab] = useState<FinancialQuarter>('Q3');
   const [selectedEntityId, setSelectedEntityId] = useState<string>(entities[0]?.id || 'ent-sahra');
   const [actionNotice, setActionNotice] = useState<string | null>(null);
+  const [tick, setTick] = useState(0);
+
+  useEffect(() => {
+    const unsub = store.subscribe(() => {
+      setTick(t => t + 1);
+    });
+    return unsub;
+  }, []);
 
   const selectedEntity = entities.find(e => e.id === selectedEntityId) || entities[0];
 
@@ -46,7 +54,7 @@ export const DsacPerformanceView: React.FC<DsacPerformanceViewProps> = ({
   // =========================================================================
   const deptPerfAgg = useMemo(() => {
     return store.getDepartmentPerformanceAggregation(selectedYear, quarterTab, typeFilter);
-  }, [selectedYear, quarterTab, typeFilter]);
+  }, [selectedYear, quarterTab, typeFilter, tick]);
 
   // Filter entities in the left pane based on search term
   const filteredEntityBreakdown = useMemo(() => {
