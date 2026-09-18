@@ -5,9 +5,11 @@ import {
   CategoryQuarterlyPerformance, 
   EntityFinancialSummary, 
   DepartmentFinancialKPIs,
-  FinancialQuarter 
+  FinancialQuarter,
+  FinancialTransaction
 } from '../types/financial';
 import { PublicEntity, KPIRecord } from '../types';
+import { filterTransactions, sumTransactions } from './financialTransactionService';
 
 export const QUARTER_ORDER: FinancialQuarter[] = ['Q1', 'Q2', 'Q3', 'Q4'];
 
@@ -63,8 +65,16 @@ export function getFinancialStatusBadge(status: string): { label: string; color:
 
 /**
  * Format currency in South African Rands (ZAR)
+ * Presentation formatting only; full precision is preserved in calculation models
  */
-export function formatZAR(val: number, options?: { compact?: boolean }): string {
+export function formatZAR(
+  val: number,
+  options?: {
+    compact?: boolean;
+    minimumFractionDigits?: number;
+    maximumFractionDigits?: number;
+  }
+): string {
   if (val === undefined || val === null || isNaN(val)) return 'R 0';
   
   if (options?.compact) {
@@ -82,16 +92,48 @@ export function formatZAR(val: number, options?: { compact?: boolean }): string 
     return `${sign}R${abs.toLocaleString('en-ZA')}`;
   }
 
+  const hasFractions = val % 1 !== 0;
+  const maxDigits = options?.maximumFractionDigits !== undefined
+    ? options.maximumFractionDigits
+    : (hasFractions ? 3 : 0);
+  const minDigits = options?.minimumFractionDigits !== undefined
+    ? options.minimumFractionDigits
+    : (hasFractions ? 2 : 0);
+
   return new Intl.NumberFormat('en-ZA', {
     style: 'currency',
     currency: 'ZAR',
-    maximumFractionDigits: 0,
+    minimumFractionDigits: minDigits,
+    maximumFractionDigits: maxDigits,
   }).format(val).replace('ZAR', 'R');
+}
+
+/**
+ * Authoritative Compact ZAR Currency Formatter matching National Treasury reporting standards
+ * (e.g., R 2.13B, R 1.60B, R 596.4M, R 1.00B)
+ */
+export function formatCompactZAR(val: number): string {
+  if (val === undefined || val === null || isNaN(val)) return 'R 0';
+  const abs = Math.abs(val);
+  const sign = val < 0 ? '-' : '';
+  if (abs >= 1_000_000_000) {
+    const num = abs / 1_000_000_000;
+    return `${sign}R ${num.toFixed(2)}B`;
+  }
+  if (abs >= 1_000_000) {
+    const num = abs / 1_000_000;
+    return `${sign}R ${num % 1 === 0 ? num.toFixed(0) : num.toFixed(1)}M`;
+  }
+  if (abs >= 1_000) {
+    return `${sign}R ${(abs / 1_000).toFixed(0)}k`;
+  }
+  return `${sign}R ${abs.toLocaleString('en-ZA')}`;
 }
 
 /**
  * Single Authoritative Financial Calculation Layer
  * Calculates the exact financial position for an entity across quarters and categories
+ * Strictly adheres to Section 5: NO INTERNAL ROUNDING. Preserves full floating-point precision.
  */
 export function calculateEntityFinancialSummary(
   entityId: string,
@@ -101,7 +143,8 @@ export function calculateEntityFinancialSummary(
   quarterlySubmissions: QuarterlyFinancialSubmission[],
   categories: ExpenseCategory[],
   entityMeta?: PublicEntity,
-  kpiRecords?: KPIRecord[]
+  kpiRecords?: KPIRecord[],
+  transactions?: FinancialTransaction[]
 ): EntityFinancialSummary {
   // Normalize year (e.g. 'FY 2024/25' or '2024/2025' -> '2024/25')
   const normYear = financialYear.includes('2023') ? '2023/24' :
@@ -118,22 +161,23 @@ export function calculateEntityFinancialSummary(
   let approvedAmount = profile?.approvedAmount || entityMeta?.budgetAllocationZAR || 0;
 
   // Align multi-year baseline figures if profile not explicitly created
+  // NO ROUNDING: preserve exact mathematical multipliers
   if (!profile) {
     if (normYear === '2024/25') {
       if (entityId === 'ent-ubuntu-arts') {
         requestedAmount = 5000000;
         approvedAmount = 4800000;
       } else {
-        requestedAmount = Math.round((entityMeta?.budgetAllocationZAR || 10000000) * 0.95);
-        approvedAmount = Math.round((entityMeta?.budgetAllocationZAR || 10000000) * 0.95);
+        requestedAmount = (entityMeta?.budgetAllocationZAR || 10000000) * 0.95;
+        approvedAmount = (entityMeta?.budgetAllocationZAR || 10000000) * 0.95;
       }
     } else if (normYear === '2023/24') {
       if (entityId === 'ent-ubuntu-arts') {
         requestedAmount = 4700000;
         approvedAmount = 4500000;
       } else {
-        requestedAmount = Math.round((entityMeta?.budgetAllocationZAR || 10000000) * 0.90);
-        approvedAmount = Math.round((entityMeta?.budgetAllocationZAR || 10000000) * 0.90);
+        requestedAmount = (entityMeta?.budgetAllocationZAR || 10000000) * 0.90;
+        approvedAmount = (entityMeta?.budgetAllocationZAR || 10000000) * 0.90;
       }
     } else if (normYear === '2025/26' || normYear === '2026/27') {
       requestedAmount = entityMeta?.budgetAllocationZAR || 10000000;
@@ -154,7 +198,7 @@ export function calculateEntityFinancialSummary(
   const q3Sub = entitySubmissions.find(s => s.quarter === 'Q3');
   const q4Sub = entitySubmissions.find(s => s.quarter === 'Q4');
 
-  // Baseline fallback calculations per quarter
+  // Baseline fallback calculations per quarter (unrounded)
   let baseQ1 = 0, baseQ2 = 0, baseQ3 = 0, baseQ4 = 0;
   if (financialYear.includes('2024') || financialYear.includes('2023')) {
     if (entityId === 'ent-ubuntu-arts') {
@@ -164,15 +208,15 @@ export function calculateEntityFinancialSummary(
         baseQ1 = 1120000; baseQ2 = 1120000; baseQ3 = 1120000; baseQ4 = 1120000;
       }
     } else {
-      const fullYearSpend = Math.round(approvedAmount * 0.98);
-      const qSpend = Math.round(fullYearSpend / 4);
+      const fullYearSpend = approvedAmount * 0.98;
+      const qSpend = fullYearSpend / 4;
       baseQ1 = qSpend; baseQ2 = qSpend; baseQ3 = qSpend; baseQ4 = fullYearSpend - (qSpend * 3);
     }
   } else {
     // Current financial year cycle (2025/26 / 2026/27): corresponds to Vote 40 dashboard figures
-    const activeYtd = entityMeta?.reportedExpenditureZAR ?? Math.round((entityMeta?.transferredAmountZAR || approvedAmount * 0.75) * 0.6264);
-    baseQ1 = Math.round(activeYtd * 0.32);
-    baseQ2 = Math.round(activeYtd * 0.34);
+    const activeYtd = entityMeta?.reportedExpenditureZAR ?? ((entityMeta?.transferredAmountZAR || approvedAmount * 0.75) * 0.6264);
+    baseQ1 = activeYtd * 0.32;
+    baseQ2 = activeYtd * 0.34;
     baseQ3 = Math.max(0, activeYtd - baseQ1 - baseQ2);
     baseQ4 = 0;
   }
@@ -202,17 +246,76 @@ export function calculateEntityFinancialSummary(
 
   const fullYearActual = q1Actual + q2Actual + q3Actual + q4Actual;
 
-  // Remaining budget & utilisation
-  // Remaining Budget = Approved Budget - YTD Actual Expenditure
-  const remainingBudget = approvedAmount - ytdActual;
-  const isOverspent = ytdActual > approvedAmount && approvedAmount > 0;
-  const overspendAmount = isOverspent ? ytdActual - approvedAmount : 0;
+  // Transaction-level integration & fallback derivation
+  // Filter transactions matching entity, year, and quarter (adhering to Section 1-5, 8-11)
+  const matchingTransactions = transactions 
+    ? filterTransactions(transactions, { entityId, financialYear, quarter: selectedQuarter })
+    : [];
 
-  // Utilisation % = (YTD Actual / Approved Annual Budget) * 100
-  // NOT capped at 100% so overspend is visible (e.g. 105%)
-  const utilisationPercent = approvedAmount > 0 
-    ? Math.round((ytdActual / approvedAmount) * 1000) / 10 
+  const allocTxs = matchingTransactions.filter(t => t.type === 'ALLOCATION');
+  const disbTxs = matchingTransactions.filter(t => t.type === 'DISBURSEMENT');
+  const transTxs = matchingTransactions.filter(t => t.type === 'TRANSFER');
+  const comTxs = matchingTransactions.filter(t => t.type === 'COMMITMENT');
+  const expTxs = matchingTransactions.filter(t => t.type === 'EXPENDITURE');
+
+  // Authoritative Core Financial Totals (NO ROUNDING)
+  const budgetAllocated = allocTxs.length > 0 ? sumTransactions(allocTxs) : approvedAmount;
+
+  const totalDisbursedToDate = disbTxs.length > 0 
+    ? sumTransactions(disbTxs)
+    : (
+        normYear === '2024/25' || normYear === '2023/24'
+          ? budgetAllocated
+          : (entityMeta?.trancheStatus === 'WITHHELD' ? budgetAllocated * 0.50 : (entityMeta?.transferredAmountZAR || budgetAllocated * 0.75))
+      );
+
+  const totalTransferredToDate = transTxs.length > 0
+    ? sumTransactions(transTxs)
+    : (
+        normYear === '2024/25' || normYear === '2023/24'
+          ? budgetAllocated
+          : (entityMeta?.transferredAmountZAR || budgetAllocated * 0.75)
+      );
+
+  const totalCommittedToDate = comTxs.length > 0
+    ? sumTransactions(comTxs)
+    : (
+        normYear === '2024/25' || normYear === '2023/24' ? 0 : budgetAllocated * 0.15
+      );
+
+  // If transaction-level expenditures exist, use them as authoritative; otherwise use ytdActual
+  const totalSpentToDate = expTxs.length > 0 ? sumTransactions(expTxs) : ytdActual;
+  
+  // Keep ytdActual strictly synchronized
+  ytdActual = totalSpentToDate;
+
+  // Remaining Budget = Budget Allocated - Total Spent To Date
+  const remainingBudget = budgetAllocated - totalSpentToDate;
+  const isOverspent = totalSpentToDate > budgetAllocated && budgetAllocated > 0;
+  const overspendAmount = isOverspent ? totalSpentToDate - budgetAllocated : 0;
+
+  // Unspent Disbursed Balance = Transferred - Spent
+  const unspentDisbursedBalance = totalTransferredToDate - totalSpentToDate;
+
+  // Undisbursed Allocation = Allocated - Transferred
+  const undisbursedAllocation = budgetAllocated - totalTransferredToDate;
+
+  // Utilisation % = (Total Spent To Date / Budget Allocated) * 100
+  // NO ROUNDING: preserve exact precision
+  const utilisationPercent = budgetAllocated > 0 
+    ? (totalSpentToDate / budgetAllocated) * 100 
     : 0;
+
+  // Rate calculations
+  const disbursementRate = budgetAllocated > 0 ? (totalDisbursedToDate / budgetAllocated) * 100 : 0;
+  const transferRate = budgetAllocated > 0 ? (totalTransferredToDate / budgetAllocated) * 100 : 0;
+  const absorptionRate = totalTransferredToDate > 0 ? (totalSpentToDate / totalTransferredToDate) * 100 : 0;
+
+  // Section 10 Variances
+  const disbursementVariance = budgetAllocated - totalDisbursedToDate;
+  const transferVariance = totalDisbursedToDate - totalTransferredToDate;
+  const commitmentVsSpendingDifference = totalCommittedToDate - totalSpentToDate;
+  const budgetVsSpendingDifference = budgetAllocated - totalSpentToDate;
 
   // Trajectory benchmark
   const trajectory = profile?.expectedSpendingTrajectory || {
@@ -228,12 +331,12 @@ export function calculateEntityFinancialSummary(
   else if (selectedQuarter === 'Q3') expectedPercent = trajectory.q3Percent;
   else expectedPercent = trajectory.q4Percent;
 
-  const expectedYtd = (approvedAmount * expectedPercent) / 100;
+  const expectedYtd = (budgetAllocated * expectedPercent) / 100;
   // Variance = Actual - Planned (Expected)
-  const variance = ytdActual - expectedYtd;
+  const variance = totalSpentToDate - expectedYtd;
   const absoluteVariance = Math.abs(variance);
   const variancePercent = expectedYtd > 0 
-    ? Math.round((variance / expectedYtd) * 1000) / 10 
+    ? (variance / expectedYtd) * 100 
     : 0;
 
   // Determine financial status & explanation
@@ -242,10 +345,10 @@ export function calculateEntityFinancialSummary(
 
   if (isOverspent) {
     financialStatus = 'OVERSPENDING';
-    statusExplanation = `Actual cumulative expenditure exceeds approved annual budget by ${formatZAR(overspendAmount)} (${utilisationPercent}% utilisation).`;
+    statusExplanation = `Actual cumulative expenditure exceeds approved annual budget by ${formatZAR(overspendAmount)} (${utilisationPercent.toFixed(1)}% utilisation).`;
   } else if (financialYear.includes('2024') || financialYear.includes('2023')) {
     financialStatus = 'ON_TRACK';
-    statusExplanation = `Audited AFS closed with ${utilisationPercent}% budget utilisation under PFMA Section 38 oversight.`;
+    statusExplanation = `Audited AFS closed with ${utilisationPercent.toFixed(1)}% budget utilisation under PFMA Section 38 oversight.`;
   } else if (
     (selectedQuarter === 'Q2' && !q2Submitted) ||
     (selectedQuarter === 'Q3' && !q3Submitted) ||
@@ -255,13 +358,13 @@ export function calculateEntityFinancialSummary(
     statusExplanation = `Statutory expenditure return for ${selectedQuarter} has not been lodged by the Accounting Officer.`;
   } else if (variancePercent > 15) {
     financialStatus = 'REQUIRES_REVIEW';
-    statusExplanation = `Expenditure pace (+${variancePercent}%) is accelerating materially faster than approved quarterly trajectory.`;
+    statusExplanation = `Expenditure pace (+${variancePercent.toFixed(1)}%) is accelerating materially faster than approved quarterly trajectory.`;
   } else if (variancePercent < -25) {
     financialStatus = 'UNDER_UTILISING';
-    statusExplanation = `Low financial absorption rate (${variancePercent}% below trajectory). Potential procurement bottlenecks or programme execution lag.`;
+    statusExplanation = `Low financial absorption rate (${variancePercent.toFixed(1)}% below trajectory). Potential procurement bottlenecks or programme execution lag.`;
   }
 
-  // Category breakdown calculation
+  // Category breakdown calculation (unrounded)
   const categoryBreakdown: CategoryQuarterlyPerformance[] = categories.map(cat => {
     // Budget line for this category
     const budgetLine = profile?.lines.find(l => l.categoryId === cat.id);
@@ -290,7 +393,7 @@ export function calculateEntityFinancialSummary(
     const cIsOverspent = cYtd > catAnnualBudget && catAnnualBudget > 0;
     const cOverspendAmount = cIsOverspent ? cYtd - catAnnualBudget : 0;
     const cUtilisation = catAnnualBudget > 0 
-      ? Math.round((cYtd / catAnnualBudget) * 1000) / 10 
+      ? (cYtd / catAnnualBudget) * 100 
       : 0;
     const cVariance = cYtd - cPlannedYtd;
 
@@ -320,27 +423,24 @@ export function calculateEntityFinancialSummary(
   if (kpiRecords && kpiRecords.length > 0) {
     const entityKpis = kpiRecords.filter(k => k.entityId === entityId);
     if (entityKpis.length > 0) {
-      const avgAchieved = Math.round(
-        entityKpis.reduce((acc, k) => acc + (k.percentageAchieved || 0), 0) / entityKpis.length
-      );
+      const avgAchieved = entityKpis.reduce((acc, k) => acc + (k.percentageAchieved || 0), 0) / entityKpis.length;
       targetAchievementRate = avgAchieved;
 
       // Section 23: Connect financial information to performance
-      // If budget utilisation is high (e.g. >70%) but target achievement is low (e.g. <50%)
       if (utilisationPercent >= 70 && avgAchieved <= 50) {
         performanceFinanceSignal = {
           status: 'REQUIRES_REVIEW',
-          commentary: `Budget utilisation (${utilisationPercent}%) is substantially ahead of reported target achievement (${avgAchieved}%). Review expenditure and performance evidence for this reporting period.`
+          commentary: `Budget utilisation (${utilisationPercent.toFixed(1)}%) is substantially ahead of reported target achievement (${avgAchieved.toFixed(1)}%). Review expenditure and performance evidence for this reporting period.`
         };
       } else if (Math.abs(utilisationPercent - avgAchieved) <= 20) {
         performanceFinanceSignal = {
           status: 'ALIGNED',
-          commentary: `Financial absorption (${utilisationPercent}%) corresponds proportionally with operational delivery achievement (${avgAchieved}%).`
+          commentary: `Financial absorption (${utilisationPercent.toFixed(1)}%) corresponds proportionally with operational delivery achievement (${avgAchieved.toFixed(1)}%).`
         };
       } else {
         performanceFinanceSignal = {
           status: 'REQUIRES_REVIEW',
-          commentary: `Financial utilisation is at ${utilisationPercent}% while operational delivery reflects ${avgAchieved}%. Monitor milestone progression.`
+          commentary: `Financial utilisation is at ${utilisationPercent.toFixed(1)}% while operational delivery reflects ${avgAchieved.toFixed(1)}%. Monitor milestone progression.`
         };
       }
     }
@@ -370,7 +470,7 @@ export function calculateEntityFinancialSummary(
       submissionStatus = q4Sub?.status;
     }
 
-    const qPlanned = (approvedAmount * 0.25);
+    const qPlanned = (budgetAllocated * 0.25);
     
     let cumulativeYtd = 0;
     if (q === 'Q1') cumulativeYtd = q1Actual;
@@ -378,8 +478,8 @@ export function calculateEntityFinancialSummary(
     else if (q === 'Q3') cumulativeYtd = q1Actual + q2Actual + q3Actual;
     else cumulativeYtd = q1Actual + q2Actual + q3Actual + q4Actual;
 
-    const remaining = approvedAmount - cumulativeYtd;
-    const utilisation = approvedAmount > 0 ? Math.round((cumulativeYtd / approvedAmount) * 1000) / 10 : 0;
+    const remaining = budgetAllocated - cumulativeYtd;
+    const utilisation = budgetAllocated > 0 ? (cumulativeYtd / budgetAllocated) * 100 : 0;
 
     return {
       quarter: q,
@@ -402,7 +502,7 @@ export function calculateEntityFinancialSummary(
     financialYear,
     budgetProfileId: profile?.id,
     requestedAmount,
-    approvedAmount,
+    approvedAmount: budgetAllocated,
     fundingGap,
     budgetStatus,
     q1Actual,
@@ -414,7 +514,7 @@ export function calculateEntityFinancialSummary(
     q3Submitted,
     q4Submitted,
     selectedQuarter,
-    ytdActual,
+    ytdActual: totalSpentToDate,
     fullYearActual,
     expectedYtd,
     remainingBudget,
@@ -431,11 +531,29 @@ export function calculateEntityFinancialSummary(
     performanceFinanceSignal,
     quarterlyTimeline,
     categories: categoryBreakdown.filter(c => c.annualBudget > 0 || c.ytdActual > 0),
+    // Authoritative Financial Fields adhering to Section 8-11
+    budgetAllocated,
+    totalDisbursedToDate,
+    totalTransferredToDate,
+    totalCommittedToDate,
+    totalSpentToDate,
+    unspentDisbursedBalance,
+    undisbursedAllocation,
+    disbursementRate,
+    transferRate,
+    absorptionRate,
+    disbursementVariance,
+    transferVariance,
+    commitmentVsSpendingDifference,
+    budgetVsSpendingDifference,
+    transactions: matchingTransactions,
   };
 }
 
 /**
  * Department-level aggregate KPI computation
+ * Strictly adheres to Section 6, 12, 21: NO INDEPENDENT TOTALS, NO ROUNDING.
+ * All numbers are exact mathematical aggregations of entity summaries.
  */
 export function calculateDepartmentFinancialKPIs(
   financialYear: string,
@@ -444,7 +562,8 @@ export function calculateDepartmentFinancialKPIs(
   quarterlySubmissions: QuarterlyFinancialSubmission[],
   entities: PublicEntity[],
   categories: ExpenseCategory[],
-  kpis?: KPIRecord[]
+  kpis?: KPIRecord[],
+  transactions?: FinancialTransaction[]
 ): DepartmentFinancialKPIs {
   const summaries = entities.map(entity => 
     calculateEntityFinancialSummary(
@@ -455,17 +574,47 @@ export function calculateDepartmentFinancialKPIs(
       quarterlySubmissions,
       categories,
       entity,
-      kpis
+      kpis,
+      transactions
     )
   );
 
   const totalRequested = summaries.reduce((acc, s) => acc + s.requestedAmount, 0);
   const totalApproved = summaries.reduce((acc, s) => acc + s.approvedAmount, 0);
-  const totalActualExpenditure = summaries.reduce((acc, s) => acc + s.ytdActual, 0);
-  const totalRemaining = totalApproved - totalActualExpenditure;
-  const overallUtilisationPercent = totalApproved > 0 
-    ? Math.round((totalActualExpenditure / totalApproved) * 1000) / 10 
+  const totalBudgetAllocated = summaries.reduce((acc, s) => acc + s.budgetAllocated, 0);
+  const totalDisbursedToDate = summaries.reduce((acc, s) => acc + s.totalDisbursedToDate, 0);
+  const totalTransferredToDate = summaries.reduce((acc, s) => acc + s.totalTransferredToDate, 0);
+  const totalCommittedToDate = summaries.reduce((acc, s) => acc + s.totalCommittedToDate, 0);
+  const totalSpentToDate = summaries.reduce((acc, s) => acc + s.totalSpentToDate, 0);
+  const totalActualExpenditure = totalSpentToDate;
+  const totalActualYTD = totalSpentToDate;
+  const totalRemaining = totalBudgetAllocated - totalSpentToDate;
+  const totalRemainingBudget = totalRemaining;
+  const unspentDisbursedBalance = summaries.reduce((acc, s) => acc + s.unspentDisbursedBalance, 0);
+  const undisbursedAllocation = summaries.reduce((acc, s) => acc + s.undisbursedAllocation, 0);
+
+  // Exact unrounded rates
+  const overallUtilisationPercent = totalBudgetAllocated > 0 
+    ? (totalSpentToDate / totalBudgetAllocated) * 100 
     : 0;
+
+  const disbursementRate = totalBudgetAllocated > 0
+    ? (totalDisbursedToDate / totalBudgetAllocated) * 100
+    : 0;
+
+  const transferRate = totalBudgetAllocated > 0
+    ? (totalTransferredToDate / totalBudgetAllocated) * 100
+    : 0;
+
+  const expenditureRate = totalTransferredToDate > 0
+    ? (totalSpentToDate / totalTransferredToDate) * 100
+    : 0;
+
+  // Variances adhering to Section 12
+  const disbursementVariance = totalBudgetAllocated - totalDisbursedToDate;
+  const transferVariance = totalDisbursedToDate - totalTransferredToDate;
+  const commitmentVsSpendingDifference = totalCommittedToDate - totalSpentToDate;
+  const budgetVsSpendingDifference = totalBudgetAllocated - totalSpentToDate;
 
   const entitiesOverspendingCount = summaries.filter(s => s.isOverspent).length;
   const entitiesUnderUtilisingCount = summaries.filter(s => s.financialStatus === 'UNDER_UTILISING').length;
@@ -491,7 +640,7 @@ export function calculateDepartmentFinancialKPIs(
     totalRequested,
     totalApproved,
     totalActualExpenditure,
-    totalActualYTD: totalActualExpenditure,
+    totalActualYTD,
     totalRemaining,
     overallUtilisationPercent,
     departmentUtilisationPercent: overallUtilisationPercent,
@@ -505,6 +654,22 @@ export function calculateDepartmentFinancialKPIs(
     budgetRequestsPendingCount: pendingRequests,
     pendingSubmissionsCount,
     totalFundingGap,
+    // Section 12 Department Metrics
+    totalBudgetAllocated,
+    totalDisbursedToDate,
+    totalTransferredToDate,
+    totalCommittedToDate,
+    totalSpentToDate,
+    totalRemainingBudget,
+    unspentDisbursedBalance,
+    undisbursedAllocation,
+    disbursementRate,
+    transferRate,
+    expenditureRate,
+    disbursementVariance,
+    transferVariance,
+    commitmentVsSpendingDifference,
+    budgetVsSpendingDifference,
   };
 }
 

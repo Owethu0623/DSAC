@@ -379,7 +379,7 @@ export const DsacFinancialDashboard: React.FC<DsacFinancialDashboardProps> = ({
               <span className="text-[10px] font-bold text-indigo-600">Target: {departmentKPIs.targetTrajectoryPercent}%</span>
             </div>
             <div className="text-base font-black text-indigo-950 mt-1">
-              {departmentKPIs.departmentUtilisationPercent}%
+              {departmentKPIs.departmentUtilisationPercent.toFixed(1)}%
             </div>
             <div className="w-full bg-indigo-200/60 h-1.5 rounded-full mt-1.5 overflow-hidden">
               <div 
@@ -615,7 +615,7 @@ export const DsacFinancialDashboard: React.FC<DsacFinancialDashboardProps> = ({
 
                         <td className="p-3 text-right">
                           <div className="flex items-center justify-end gap-1.5">
-                            <span className="font-bold text-slate-900">{summary.utilisationPercent}%</span>
+                            <span className="font-bold text-slate-900">{summary.utilisationPercent.toFixed(1)}%</span>
                           </div>
                           <div className="w-16 bg-slate-200 h-1 rounded-full ml-auto mt-1 overflow-hidden">
                             <div 
@@ -659,8 +659,8 @@ export const DsacFinancialDashboard: React.FC<DsacFinancialDashboardProps> = ({
                       {formatZAR(filteredSummaries.reduce((sum, s) => sum + (s.quarterlyTimeline.find(t => t.quarter === 'Q3')?.actualExpenditure || 0), 0))}
                     </td>
                     <td className="p-3 text-right text-blue-900">{formatZAR(departmentKPIs.totalActualYTD)}</td>
-                    <td className="p-3 text-right">{formatZAR(departmentKPIs.totalRemaining)}</td>
-                    <td className="p-3 text-right">{departmentKPIs.departmentUtilisationPercent}%</td>
+                    <td className="p-3 text-right">{departmentKPIs.totalRemaining ? formatZAR(departmentKPIs.totalRemaining) : formatZAR(0)}</td>
+                    <td className="p-3 text-right">{departmentKPIs.departmentUtilisationPercent.toFixed(1)}%</td>
                     <td className="p-3 text-center" colSpan={2}>
                       <span className="text-[10px] text-slate-500 font-bold">
                         {filteredSummaries.length} Records

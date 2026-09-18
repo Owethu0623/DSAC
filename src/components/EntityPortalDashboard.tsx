@@ -285,7 +285,7 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
       fiscalTag: normYear,
       quarterLabel: selectedQuarter === 'FULL_YEAR' ? 'Full Year' : selectedQuarter,
       budgetAllocated: fin.approvedAmount,
-      transferred: isAudited ? fin.approvedAmount : (entity.transferredAmountZAR || fin.approvedAmount),
+      transferred: isAudited ? fin.approvedAmount : (entity.transferredAmountZAR || 0),
       expenditure: fin.ytdActual,
       utilPercent: fin.utilisationPercent,
       remaining: Math.max(0, fin.remainingBudget),
@@ -841,7 +841,7 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
                       <Coins className="w-4 h-4" />
                     </div>
                     <div>
-                      <div className="text-xl font-black text-slate-900 leading-none">{yearStats.utilPercent}%</div>
+                      <div className="text-xl font-black text-slate-900 leading-none">{yearStats.utilPercent.toFixed(1)}%</div>
                       <div className="text-[10px] text-slate-500 font-medium">R {(yearStats.expenditure / 1_000_000).toFixed(1)}M / R {(yearStats.budgetAllocated / 1_000_000).toFixed(1)}M</div>
                     </div>
                   </div>
@@ -1005,7 +1005,7 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
                       <span className="font-bold text-slate-900 text-sm">
                         R {(yearStats.expenditure / 1_000_000).toFixed(1)}M / R {(yearStats.budgetAllocated / 1_000_000).toFixed(1)}M
                       </span>
-                      <span className="font-bold text-emerald-700 text-xs">{yearStats.utilPercent}%</span>
+                      <span className="font-bold text-emerald-700 text-xs">{yearStats.utilPercent.toFixed(1)}%</span>
                     </div>
                     <div className="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden">
                       <div className="bg-emerald-500 h-full rounded-full" style={{ width: `${Math.min(yearStats.utilPercent, 100)}%` }}></div>

@@ -363,7 +363,7 @@ export const EntityFinancialView: React.FC<EntityFinancialViewProps> = ({
               <span className="text-[10px] font-bold text-indigo-600">Benchmark: {summary.targetTrajectoryPercent}%</span>
             </div>
             <div className="text-base font-black text-indigo-950 mt-1">
-              {summary.utilisationPercent}%
+              {summary.utilisationPercent.toFixed(1)}%
             </div>
             <div className="w-full bg-indigo-200/60 h-1.5 rounded-full mt-1.5 overflow-hidden">
               <div 
@@ -385,7 +385,7 @@ export const EntityFinancialView: React.FC<EntityFinancialViewProps> = ({
           }`}>
             <span className="text-[10px] font-semibold uppercase tracking-wider block">Trajectory Variance</span>
             <div className="text-base font-black mt-1">
-              {summary.variancePercent > 0 ? `+${summary.variancePercent}%` : `${summary.variancePercent}%`}
+              {summary.variancePercent > 0 ? `+${summary.variancePercent.toFixed(1)}%` : `${summary.variancePercent.toFixed(1)}%`}
             </div>
             <div className="text-[10px] mt-0.5 font-medium">
               {summary.variancePercent > 0 ? 'Ahead of Benchmark' : 'Lagging Benchmark'}

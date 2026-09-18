@@ -31,6 +31,7 @@ import {
 } from 'lucide-react';
 import { PublicEntity, KPIRecord } from '../../types';
 import { store } from '../../services/store';
+import { formatCompactZAR } from '../../services/calculationEngine';
 import { generateEntityFeatureDossier } from '../../services/entityFeatureGenerator';
 
 export type DsacFeatureId = 'compliance' | 'performance' | 'support' | 'reports' | 'entities' | 'risks';
@@ -71,8 +72,21 @@ export const DsacFeatureSideView: React.FC<DsacFeatureSideViewProps> = ({
   const [actionSuccessMessage, setActionSuccessMessage] = useState<string | null>(null);
   const [reviewNote, setReviewNote] = useState<string>('');
   const [selectedReportQuarter, setSelectedReportQuarter] = useState<'Q1' | 'Q2' | 'Q3' | 'DECEMBER_BUDGET'>('Q2');
+  const [tick, setTick] = useState<number>(0);
+
+  React.useEffect(() => {
+    const unsub = store.subscribe(() => {
+      setTick(t => t + 1);
+    });
+    return () => unsub();
+  }, []);
 
   const entities = store.entities;
+
+  // Dynamic department financial aggregation from authoritative calculation engine
+  const deptFinancialAgg = useMemo(() => {
+    return store.getDepartmentFinancialAggregation('2025/26', 'Q3');
+  }, [tick, entities]);
 
   // Selected entity object
   const currentEntity = useMemo(() => {
@@ -868,9 +882,11 @@ export const DsacFeatureSideView: React.FC<DsacFeatureSideViewProps> = ({
                   </div>
 
                   <div className="flex items-baseline gap-2">
-                    <span className="text-2xl font-black text-emerald-400">R 1.00B</span>
+                    <span className="text-2xl font-black text-emerald-400">
+                      {formatCompactZAR(deptFinancialAgg.totalReportedExpenditure)}
+                    </span>
                     <span className="text-xs font-semibold text-slate-200">
-                      Total Spent to Date <span className="text-emerald-400 font-bold">(63%)</span>
+                      Total Spent to Date <span className="text-emerald-400 font-bold">({Math.round(deptFinancialAgg.expenditureRate)}%)</span>
                     </span>
                   </div>
 
@@ -878,7 +894,7 @@ export const DsacFeatureSideView: React.FC<DsacFeatureSideViewProps> = ({
                   <div className="space-y-2 pt-1 text-xs">
                     <div>
                       <div className="flex justify-between text-[10px] font-bold text-slate-300 mb-0.5">
-                        <span>R 1.60B Disbursed Total</span>
+                        <span>{formatCompactZAR(deptFinancialAgg.totalTransferredToDate)} Disbursed Total</span>
                         <span className="font-mono text-white">100%</span>
                       </div>
                       <div className="w-full bg-slate-700 rounded-full h-1.5 overflow-hidden">
@@ -888,21 +904,21 @@ export const DsacFeatureSideView: React.FC<DsacFeatureSideViewProps> = ({
 
                     <div>
                       <div className="flex justify-between text-[10px] font-bold text-slate-300 mb-0.5">
-                        <span className="text-emerald-300">R 1.00B Total Spent to Date</span>
-                        <span className="font-mono text-emerald-300">63%</span>
+                        <span className="text-emerald-300">{formatCompactZAR(deptFinancialAgg.totalReportedExpenditure)} Total Spent to Date</span>
+                        <span className="font-mono text-emerald-300">{Math.round(deptFinancialAgg.expenditureRate)}%</span>
                       </div>
                       <div className="w-full bg-slate-700 rounded-full h-1.5 overflow-hidden">
-                        <div className="bg-emerald-400 h-full rounded-full" style={{ width: '63%' }}></div>
+                        <div className="bg-emerald-400 h-full rounded-full" style={{ width: `${Math.min(100, Math.round(deptFinancialAgg.expenditureRate))}%` }}></div>
                       </div>
                     </div>
 
                     <div>
                       <div className="flex justify-between text-[10px] font-bold text-slate-300 mb-0.5">
-                        <span className="text-sky-300">R 596.4M Unspent Balance</span>
-                        <span className="font-mono text-sky-300">37%</span>
+                        <span className="text-sky-300">{formatCompactZAR(deptFinancialAgg.unspentDisbursedBalance)} Unspent Balance</span>
+                        <span className="font-mono text-sky-300">{Math.max(0, 100 - Math.round(deptFinancialAgg.expenditureRate))}%</span>
                       </div>
                       <div className="w-full bg-slate-700 rounded-full h-1.5 overflow-hidden">
-                        <div className="bg-sky-400 h-full rounded-full" style={{ width: '37%' }}></div>
+                        <div className="bg-sky-400 h-full rounded-full" style={{ width: `${Math.max(0, 100 - Math.round(deptFinancialAgg.expenditureRate))}%` }}></div>
                       </div>
                     </div>
                   </div>
@@ -918,15 +934,15 @@ export const DsacFeatureSideView: React.FC<DsacFeatureSideViewProps> = ({
                   {/* Total Approved Budget Card */}
                   <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-lg space-y-1">
                     <div className="text-[10px] font-bold text-slate-500 uppercase">Total Approved Budget</div>
-                    <div className="text-base font-black text-slate-900">R 2.13B</div>
+                    <div className="text-base font-black text-slate-900">{formatCompactZAR(deptFinancialAgg.totalApprovedBudget)}</div>
                     <div className="text-[10px] text-slate-600 font-medium">All 26 PEs &amp; 6 Subsidized NPOs</div>
                     <div className="pt-1 border-t border-slate-200/80 flex items-center justify-between text-[10px] text-slate-600 font-mono">
-                      <span>26 PEs (96%)</span>
-                      <span>6 NPOs (4%)</span>
+                      <span>26 PEs ({Math.round(deptFinancialAgg.pePercentage)}%)</span>
+                      <span>6 NPOs ({Math.max(1, 100 - Math.round(deptFinancialAgg.pePercentage))}%)</span>
                     </div>
                     <div className="flex items-center justify-between text-[9px] text-slate-500 font-mono">
-                      <span>PEs: R 2.04B</span>
-                      <span>NPOs: R 83.8M</span>
+                      <span>PEs: {formatCompactZAR(deptFinancialAgg.peBudget)}</span>
+                      <span>NPOs: {formatCompactZAR(deptFinancialAgg.npoBudget)}</span>
                     </div>
                   </div>
 
@@ -934,7 +950,8 @@ export const DsacFeatureSideView: React.FC<DsacFeatureSideViewProps> = ({
                   <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-lg space-y-1">
                     <div className="text-[10px] font-bold text-slate-500 uppercase">Total Disbursed</div>
                     <div className="text-base font-black text-slate-900">
-                      R 1.60B <span className="text-xs font-bold text-indigo-600">(75.0%)</span>
+                      {formatCompactZAR(deptFinancialAgg.totalTransferredToDate)}{' '}
+                      <span className="text-xs font-bold text-indigo-600">({deptFinancialAgg.transferRate.toFixed(1)}%)</span>
                     </div>
                     <div className="text-[10px] text-slate-600 font-medium">Transfer to Date (Overall)</div>
                     <div className="text-[9px] text-slate-500">Combined Disbursed Tranches</div>
@@ -943,8 +960,8 @@ export const DsacFeatureSideView: React.FC<DsacFeatureSideViewProps> = ({
                       <span className="text-indigo-700 font-mono">3 of 4 Released</span>
                     </div>
                     <div className="flex items-center justify-between text-[9px] text-slate-500 font-mono">
-                      <span>Q1-Q3 Paid (R 1.60B)</span>
-                      <span>Q4 Bal (R 529.5M)</span>
+                      <span>Q1-Q3 Paid ({formatCompactZAR(deptFinancialAgg.totalTransferredToDate)})</span>
+                      <span>Q4 Bal ({formatCompactZAR(deptFinancialAgg.undisbursedAllocation)})</span>
                     </div>
                   </div>
                 </div>
@@ -961,7 +978,9 @@ export const DsacFeatureSideView: React.FC<DsacFeatureSideViewProps> = ({
                       <span className="font-bold text-slate-800 font-mono">R {(currentEntity.budgetAllocationZAR / 1_000_000).toFixed(1)}M</span>
                     </div>
                     <div>
-                      <span className="text-slate-500 block">Disbursed to Date (75%):</span>
+                      <span className="text-slate-500 block">
+                        Disbursed to Date ({currentEntity.budgetAllocationZAR > 0 ? Math.round((currentEntity.transferredAmountZAR / currentEntity.budgetAllocationZAR) * 100) : 75}%):
+                      </span>
                       <span className="font-bold text-emerald-800 font-mono">R {(currentEntity.transferredAmountZAR / 1_000_000).toFixed(1)}M</span>
                     </div>
                     <div>

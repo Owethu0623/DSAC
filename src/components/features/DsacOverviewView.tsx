@@ -121,13 +121,13 @@ export const DsacOverviewView: React.FC<DsacOverviewViewProps> = ({
 
   // Dynamic financial aggregation recalculated automatically from all entities and NPOs
   const dynamicAgg = useMemo(() => {
-    return store.getDepartmentFinancialAggregation(normYear, 'Q3');
+    return store.getDepartmentFinancialAggregation(normYear, normYear === '2025/26' ? 'Q3' : 'FULL_YEAR');
   }, [normYear, tick, propTotalApproved, propTotalTransferred, propTotalExpended]);
 
   // The 4 Core Figures updated automatically
   const totalApprovedBudget = dynamicAgg.totalApprovedBudget || propTotalApproved || 0;
   const totalAmountDisbursedToDate = dynamicAgg.totalTransferredToDate || propTotalTransferred || 0;
-  const totalAmountUtilisedToDate = 1_000_000_000;
+  const totalAmountUtilisedToDate = dynamicAgg.totalReportedExpenditure || 0;
   
   const overallUtilisationPercentage = totalApprovedBudget > 0
     ? ((totalAmountUtilisedToDate / totalApprovedBudget) * 100).toFixed(1)
@@ -155,15 +155,26 @@ export const DsacOverviewView: React.FC<DsacOverviewViewProps> = ({
 
   // Authoritative financial overview aggregation synchronized with the selected financial period
   const finSummary = useMemo(() => {
+    const periodAgg = store.getDepartmentFinancialAggregation(
+      selectedFinancialPeriod,
+      selectedFinancialPeriod === '2025/26' ? 'Q3' : 'FULL_YEAR'
+    );
+
+    const approved = periodAgg.totalApprovedBudget;
+    const transferred = periodAgg.totalTransferredToDate;
+    const spent = periodAgg.totalReportedExpenditure;
+    const unspentDisbursed = Math.max(0, transferred - spent);
+    const burnRate = transferred > 0 ? (spent / transferred) * 100 : 0;
+    const unspentPct = Math.max(0, 100 - burnRate);
+    const balance = Math.max(0, approved - transferred);
+    const disbursedPct = approved > 0 ? (transferred / approved) * 100 : 0;
+    const balancePct = Math.max(0, 100 - disbursedPct);
+    const pe = periodAgg.peBudget;
+    const npo = periodAgg.npoBudget;
+    const pePct = periodAgg.pePercentage;
+    const npoPct = Math.max(0, 100 - pePct);
+
     if (selectedFinancialPeriod === '2024/25') {
-      const approved = 2_014_000_000;
-      const transferred = 2_014_000_000;
-      const spent = 1_973_720_000;
-      const unspentDisbursed = Math.max(0, transferred - spent);
-      const burnRate = transferred > 0 ? Math.round((spent / transferred) * 100) : 98;
-      const unspentPct = Math.max(0, 100 - burnRate);
-      const pe = 1_938_000_000;
-      const npo = 76_000_000;
       return {
         periodLabel: '2024/25 FINANCIAL YEAR',
         dropdownLabel: '2024/25 Financial Year',
@@ -173,15 +184,15 @@ export const DsacOverviewView: React.FC<DsacOverviewViewProps> = ({
         unspentDisbursed,
         burnRate,
         unspentPct,
-        balance: 0,
+        balance,
         disbursedPct: 100,
         balancePct: 0,
         peApproved: pe,
         npoApproved: npo,
-        pePct: 96,
-        npoPct: 4,
+        pePct,
+        npoPct,
         tranchesReleased: 4,
-        tranchePaidText: 'Q1-Q4 Paid (R 2.01B)',
+        tranchePaidText: `Q1-Q4 Paid (${formatCompactZAR(transferred)})`,
         trancheBalText: 'Audited Clearance (R 0)',
         pieData: [
           { name: 'Total Spent to Date', value: spent, color: '#059669', desc: 'Verified entity operational expenditure' },
@@ -189,14 +200,6 @@ export const DsacOverviewView: React.FC<DsacOverviewViewProps> = ({
         ]
       };
     } else if (selectedFinancialPeriod === '2023/24') {
-      const approved = 1_908_000_000;
-      const transferred = 1_908_000_000;
-      const spent = 1_879_380_000;
-      const unspentDisbursed = Math.max(0, transferred - spent);
-      const burnRate = transferred > 0 ? Math.round((spent / transferred) * 100) : 98;
-      const unspentPct = Math.max(0, 100 - burnRate);
-      const pe = 1_836_000_000;
-      const npo = 72_000_000;
       return {
         periodLabel: '2023/24 FINANCIAL YEAR',
         dropdownLabel: '2023/24 Financial Year',
@@ -206,15 +209,15 @@ export const DsacOverviewView: React.FC<DsacOverviewViewProps> = ({
         unspentDisbursed,
         burnRate,
         unspentPct,
-        balance: 0,
+        balance,
         disbursedPct: 100,
         balancePct: 0,
         peApproved: pe,
         npoApproved: npo,
-        pePct: 96,
-        npoPct: 4,
+        pePct,
+        npoPct,
         tranchesReleased: 4,
-        tranchePaidText: 'Q1-Q4 Paid (R 1.91B)',
+        tranchePaidText: `Q1-Q4 Paid (${formatCompactZAR(transferred)})`,
         trancheBalText: 'Audited Clearance (R 0)',
         pieData: [
           { name: 'Total Spent to Date', value: spent, color: '#059669', desc: 'Verified entity operational expenditure' },
@@ -223,19 +226,6 @@ export const DsacOverviewView: React.FC<DsacOverviewViewProps> = ({
       };
     } else {
       // 2025/26 (Current)
-      const approved = dynamicAgg.totalApprovedBudget || 2_120_000_000;
-      const transferred = dynamicAgg.totalTransferredToDate || 1_590_000_000;
-      const spent = 1_000_000_000;
-      const unspentDisbursed = Math.max(0, transferred - spent);
-      const burnRate = transferred > 0 ? Math.round((spent / transferred) * 100) : 63;
-      const unspentPct = Math.max(0, 100 - burnRate);
-      const balance = Math.max(0, approved - transferred);
-      const disbursedPct = approved > 0 ? Math.round((transferred / approved) * 100) : 75;
-      const balancePct = Math.max(0, 100 - disbursedPct);
-      const pe = dynamicAgg.peBudget || 2_046_200_000;
-      const npo = dynamicAgg.npoBudget || 73_800_000;
-      const pePct = approved > 0 ? Math.round((pe / approved) * 100) : 97;
-      const npoPct = Math.max(1, 100 - pePct);
       return {
         periodLabel: 'THIS FINANCIAL YEAR',
         dropdownLabel: 'This Financial Year',
@@ -261,7 +251,7 @@ export const DsacOverviewView: React.FC<DsacOverviewViewProps> = ({
         ]
       };
     }
-  }, [selectedFinancialPeriod, dynamicAgg]);
+  }, [selectedFinancialPeriod, tick, entities]);
 
   // Sector breakdown data for Pie Chart mode
   const sectorFinancialData = useMemo(() => {
@@ -653,7 +643,7 @@ export const DsacOverviewView: React.FC<DsacOverviewViewProps> = ({
                   Total Spent to Date
                 </span>
                 <span className="mt-1 px-2.5 py-0.5 rounded-full text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200">
-                  ({finSummary.burnRate}%)
+                  ({finSummary.burnRate.toFixed(1)}%)
                 </span>
               </div>
             </div>
@@ -681,7 +671,7 @@ export const DsacOverviewView: React.FC<DsacOverviewViewProps> = ({
                     <span className="w-2 h-2 rounded-full bg-emerald-600 shrink-0" />
                     {formatCompactZAR(finSummary.spent)} Total Spent to Date
                   </span>
-                  <span className="font-bold text-emerald-700 font-mono">{finSummary.burnRate}%</span>
+                  <span className="font-bold text-emerald-700 font-mono">{finSummary.burnRate.toFixed(1)}%</span>
                 </div>
                 <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
                   <div style={{ width: `${finSummary.burnRate}%` }} className="h-full bg-emerald-600 rounded-full" />
@@ -695,7 +685,7 @@ export const DsacOverviewView: React.FC<DsacOverviewViewProps> = ({
                     <span className="w-2 h-2 rounded-full bg-sky-500 shrink-0" />
                     {formatCompactZAR(finSummary.unspentDisbursed)} Unspent Balance
                   </span>
-                  <span className="font-bold text-sky-700 font-mono">{finSummary.unspentPct}%</span>
+                  <span className="font-bold text-sky-700 font-mono">{finSummary.unspentPct.toFixed(1)}%</span>
                 </div>
                 <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
                   <div style={{ width: `${finSummary.unspentPct}%` }} className="h-full bg-sky-500 rounded-full" />
@@ -741,11 +731,11 @@ export const DsacOverviewView: React.FC<DsacOverviewViewProps> = ({
                 <div className="flex items-center justify-between text-[11px] font-bold mb-1.5">
                   <span className="flex items-center gap-1 text-emerald-800">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-600" />
-                    26 PEs ({finSummary.pePct}%)
+                    26 PEs ({finSummary.pePct.toFixed(1)}%)
                   </span>
                   <span className="flex items-center gap-1 text-sky-800">
                     <span className="w-1.5 h-1.5 rounded-full bg-sky-600" />
-                    6 NPOs ({finSummary.npoPct}%)
+                    6 NPOs ({finSummary.npoPct.toFixed(1)}%)
                   </span>
                 </div>
                 <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden flex">
@@ -776,7 +766,7 @@ export const DsacOverviewView: React.FC<DsacOverviewViewProps> = ({
                 <div className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight leading-none">
                   {formatCompactZAR(finSummary.transferred)}{' '}
                   <span className="text-base sm:text-lg font-bold text-indigo-600">
-                    ({finSummary.disbursedPct}.0%)
+                    ({finSummary.disbursedPct.toFixed(1)}%)
                   </span>
                 </div>
                 <div className="text-xs font-bold text-slate-800 mt-1">

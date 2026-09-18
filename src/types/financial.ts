@@ -187,16 +187,78 @@ export interface EntityFinancialSummary {
 
   // Category breakdown
   categories: CategoryQuarterlyPerformance[];
+
+  // Authoritative Core Financial Totals & Concepts
+  budgetAllocated: number; // Approved Vote 40 Parliamentary allocation
+  totalDisbursedToDate: number; // Sum of authorized released tranches
+  totalTransferredToDate: number; // Sum of confirmed EFT transfers deposited to entity account
+  totalCommittedToDate: number; // Sum of contracted commitments and active purchase orders
+  totalSpentToDate: number; // Authoritative actual expenditure to date (synonymous with ytdActual)
+  unspentDisbursedBalance: number; // Transferred - Spent
+  undisbursedAllocation: number; // Allocated - Transferred
+  disbursementRate: number; // (Disbursed / Allocated) * 100
+  transferRate: number; // (Transferred / Allocated) * 100
+  absorptionRate: number; // (Spent / Transferred) * 100
+  disbursementVariance: number; // Allocated - Disbursed
+  transferVariance: number; // Disbursed - Transferred
+  commitmentVsSpendingDifference: number; // Committed - Spent
+  budgetVsSpendingDifference: number; // Allocated - Spent
+
+  // Underlying traceable transactions
+  transactions: FinancialTransaction[];
+}
+
+export type FinancialTransactionType = 
+  | 'ALLOCATION'
+  | 'DISBURSEMENT'
+  | 'TRANSFER'
+  | 'COMMITMENT'
+  | 'EXPENDITURE';
+
+export interface FinancialTransaction {
+  id: string;
+  entityId: string;
+  entityName: string;
+  financialYear: string; // e.g. "2025/26"
+  quarter: FinancialQuarter; // 'Q1' | 'Q2' | 'Q3' | 'Q4'
+  type: FinancialTransactionType;
+  amount: number; // Full precision unrounded number, e.g. 75500.125
+  transactionDate: string; // ISO date or "YYYY-MM-DD"
+  referenceNumber: string; // e.g. "BAS-DISB-4091", "EFT-TR-8812", "PO-2025-0012", "GL-EXP-5591"
+  description: string;
+  categoryId?: string;
+  categoryName?: string;
+  status: 'POSTED' | 'VERIFIED' | 'RECONCILED' | 'PENDING';
+  supportingDocumentId?: string;
+  supportingDocumentName?: string;
+  verifiedBy?: string;
+  createdAt: string;
+  updatedAt?: string;
 }
 
 export interface DepartmentFinancialKPIs {
   totalRequested: number;
   totalApproved: number;
+  totalBudgetAllocated: number;
+  totalDisbursedToDate: number;
+  totalTransferredToDate: number;
+  totalCommittedToDate: number;
+  totalSpentToDate: number;
   totalActualExpenditure: number;
   totalActualYTD: number;
   totalRemaining: number;
+  totalRemainingBudget: number;
+  unspentDisbursedBalance: number;
+  undisbursedAllocation: number;
   overallUtilisationPercent: number;
   departmentUtilisationPercent: number;
+  disbursementRate: number;
+  transferRate: number;
+  expenditureRate: number;
+  disbursementVariance: number;
+  transferVariance: number;
+  commitmentVsSpendingDifference: number;
+  budgetVsSpendingDifference: number;
   targetTrajectoryPercent: number;
   entitiesOverspendingCount: number;
   overspendingEntitiesCount: number;

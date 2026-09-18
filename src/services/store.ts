@@ -49,7 +49,8 @@ import {
   QuarterlyFinancialStatus, 
   EntityFinancialSummary, 
   DepartmentFinancialKPIs,
-  FinancialQuarter 
+  FinancialQuarter,
+  FinancialTransaction 
 } from '../types/financial';
 import { 
   INITIAL_EXPENSE_CATEGORIES, 
@@ -61,6 +62,11 @@ import {
   calculateDepartmentFinancialKPIs, 
   formatZAR 
 } from './financialService';
+import {
+  generateInitialTransactions,
+  filterTransactions,
+  sumTransactions
+} from './financialTransactionService';
 import {
   calculateEntityPerformanceSummary,
   calculateDepartmentPerformanceAggregation,
@@ -88,6 +94,7 @@ const STORAGE_KEYS = {
   BUDGET_PROFILES: 'govtrack_budget_profiles',
   QUARTERLY_FINANCIAL_SUBMISSIONS: 'govtrack_quarterly_financial_submissions',
   SUPPORT_REQUESTS: 'govtrack_support_requests',
+  FINANCIAL_TRANSACTIONS: 'govtrack_financial_transactions',
 };
 
 export const INITIAL_SUPPORT_REQUESTS: SupportRequest[] = [
@@ -318,6 +325,7 @@ export class GovTrackStore {
   budgetProfiles: EntityBudgetProfile[];
   quarterlyFinancialSubmissions: QuarterlyFinancialSubmission[];
   supportRequests: SupportRequest[];
+  financialTransactions: FinancialTransaction[];
 
   private constructor() {
     let loadedUsers = loadFromStorage<User[]>(STORAGE_KEYS.REGISTERED_USERS, INITIAL_USERS);
@@ -470,6 +478,16 @@ export class GovTrackStore {
     });
     this.supportRequests = loadedSupportRequests;
     saveToStorage(STORAGE_KEYS.SUPPORT_REQUESTS, this.supportRequests);
+
+    let loadedTransactions = loadFromStorage<FinancialTransaction[]>(
+      STORAGE_KEYS.FINANCIAL_TRANSACTIONS, 
+      []
+    );
+    if (!loadedTransactions || loadedTransactions.length === 0) {
+      loadedTransactions = generateInitialTransactions(this.entities, this.quarterlyFinancialSubmissions);
+    }
+    this.financialTransactions = loadedTransactions;
+    saveToStorage(STORAGE_KEYS.FINANCIAL_TRANSACTIONS, this.financialTransactions);
   }
 
   public static getInstance(): GovTrackStore {
@@ -505,6 +523,7 @@ export class GovTrackStore {
     saveToStorage(STORAGE_KEYS.BUDGET_PROFILES, this.budgetProfiles);
     saveToStorage(STORAGE_KEYS.QUARTERLY_FINANCIAL_SUBMISSIONS, this.quarterlyFinancialSubmissions);
     saveToStorage(STORAGE_KEYS.SUPPORT_REQUESTS, this.supportRequests);
+    saveToStorage(STORAGE_KEYS.FINANCIAL_TRANSACTIONS, this.financialTransactions);
     this.notify();
   }
 
@@ -521,6 +540,7 @@ export class GovTrackStore {
     this.budgetProfiles = JSON.parse(JSON.stringify(INITIAL_BUDGET_PROFILES));
     this.quarterlyFinancialSubmissions = JSON.parse(JSON.stringify(INITIAL_QUARTERLY_SUBMISSIONS));
     this.supportRequests = JSON.parse(JSON.stringify(INITIAL_SUPPORT_REQUESTS));
+    this.financialTransactions = generateInitialTransactions(this.entities, this.quarterlyFinancialSubmissions);
     this.addAuditLog(
       'SYSTEM_BASELINE_SYNC',
       'Departmental statutory baseline datasets synchronized with gazetted PFMA Vote 37 appropriations.'
@@ -1986,9 +2006,9 @@ export class GovTrackStore {
     const totalExpended = this.entities.reduce((acc, e) => acc + (e.reportedExpenditureZAR || 0), 0);
     const remainingDisbursement = Math.max(0, totalAllocation - totalTransferred);
 
-    const transferRate = totalAllocation > 0 ? Math.round((totalTransferred / totalAllocation) * 1000) / 10 : 0;
-    const expenditureRate = totalTransferred > 0 ? Math.round((totalExpended / totalTransferred) * 1000) / 10 : 0;
-    const burnRate = totalAllocation > 0 ? Math.round((totalExpended / totalAllocation) * 1000) / 10 : 0;
+    const transferRate = totalAllocation > 0 ? (totalTransferred / totalAllocation) * 100 : 0;
+    const expenditureRate = totalTransferred > 0 ? (totalExpended / totalTransferred) * 100 : 0;
+    const burnRate = totalAllocation > 0 ? (totalExpended / totalAllocation) * 100 : 0;
 
     const totalYouthJobs = this.entities.reduce((acc, e) => acc + (e.jobStats?.youthJobsCreated || 0), 0);
     const totalPermanentJobs = this.entities.reduce((acc, e) => acc + (e.jobStats?.permanentJobs || 0), 0);
@@ -2346,7 +2366,7 @@ export class GovTrackStore {
         const ratio = approvedAmount / profile.requestedAmount;
         profile.lines = profile.lines.map(line => ({
           ...line,
-          annualBudget: Math.round(line.requestedAmount * ratio),
+          annualBudget: line.requestedAmount * ratio,
         }));
       }
 
@@ -2497,6 +2517,49 @@ export class GovTrackStore {
       );
     }
 
+    // Synchronize transactions with unrounded precision
+    this.financialTransactions = this.financialTransactions.filter(
+      tx => tx.id !== `tx-exp-${submissionId}` && !tx.id.startsWith(`tx-exp-${submissionId}-`)
+    );
+
+    if (newLines.length > 0) {
+      newLines.forEach((line, idx) => {
+        this.financialTransactions.push({
+          id: `tx-exp-${submissionId}-${idx + 1}`,
+          entityId: data.entityId,
+          entityName: data.entityName,
+          financialYear: data.financialYear,
+          quarter: data.quarter,
+          type: 'EXPENDITURE',
+          amount: line.actualAmount,
+          transactionDate: new Date().toISOString().slice(0, 10),
+          referenceNumber: `GL-EXP-${data.financialYear.replace('/', '')}-${data.quarter}-${(entity?.shortCode || 'ENT')}-${idx + 1}`,
+          description: `${line.categoryName || 'Operating Expenditure'} (Quarterly Return)`,
+          categoryId: line.categoryId,
+          categoryName: line.categoryName,
+          status: 'VERIFIED',
+          verifiedBy: data.accountingOfficerName || this.currentUser?.name || 'Reporting Officer',
+          createdAt: new Date().toISOString(),
+        });
+      });
+    } else {
+      this.financialTransactions.push({
+        id: `tx-exp-${submissionId}`,
+        entityId: data.entityId,
+        entityName: data.entityName,
+        financialYear: data.financialYear,
+        quarter: data.quarter,
+        type: 'EXPENDITURE',
+        amount: data.totalQuarterlyActual,
+        transactionDate: new Date().toISOString().slice(0, 10),
+        referenceNumber: `GL-EXP-${data.financialYear.replace('/', '')}-${data.quarter}-${(entity?.shortCode || 'ENT')}`,
+        description: 'Statutory Quarterly Operating Expenditure',
+        status: 'VERIFIED',
+        verifiedBy: data.accountingOfficerName || this.currentUser?.name || 'Reporting Officer',
+        createdAt: new Date().toISOString(),
+      });
+    }
+
     this.addAuditLog(
       'QUARTERLY_EXPENDITURE_SUBMITTED',
       `Submitted ${data.quarter} verified actual expenditure of ${formatZAR(data.totalQuarterlyActual)} for ${data.entityName}. Affirmation certified by ${data.accountingOfficerName || 'Accounting Officer'}.`,
@@ -2580,7 +2643,8 @@ export class GovTrackStore {
       this.quarterlyFinancialSubmissions,
       this.expenseCategories,
       entityMeta,
-      this.kpis
+      this.kpis,
+      this.financialTransactions
     );
   }
 
@@ -2595,7 +2659,8 @@ export class GovTrackStore {
       this.quarterlyFinancialSubmissions,
       this.entities,
       this.expenseCategories,
-      this.kpis
+      this.kpis,
+      this.financialTransactions
     );
   }
 
@@ -2641,8 +2706,62 @@ export class GovTrackStore {
       this.kpis,
       financialYear,
       quarter,
-      typeFilter
+      typeFilter,
+      this.financialTransactions
     );
+  }
+
+  getFinancialTransactions(
+    entityId?: string, 
+    financialYear?: string, 
+    quarter?: FinancialQuarter | 'FULL_YEAR'
+  ): FinancialTransaction[] {
+    let txs = this.financialTransactions;
+    if (entityId) {
+      txs = txs.filter(t => t.entityId === entityId);
+    }
+    if (financialYear) {
+      txs = txs.filter(t => t.financialYear === financialYear);
+    }
+    if (quarter && (quarter as string) !== 'FULL_YEAR') {
+      txs = txs.filter(t => t.quarter === quarter || (t.quarter as string) === 'FULL_YEAR');
+    }
+    return txs;
+  }
+
+  addFinancialTransaction(txData: Omit<FinancialTransaction, 'id' | 'createdAt'>): FinancialTransaction {
+    const newTx: FinancialTransaction = {
+      ...txData,
+      id: `tx-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      createdAt: new Date().toISOString(),
+    };
+    this.financialTransactions = [newTx, ...this.financialTransactions];
+    
+    if (newTx.type === 'EXPENDITURE') {
+      const ent = this.entities.find(e => e.id === newTx.entityId);
+      if (ent) {
+        const allExp = this.financialTransactions
+          .filter(t => t.entityId === newTx.entityId && t.type === 'EXPENDITURE')
+          .reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+        ent.reportedExpenditureZAR = allExp;
+      }
+    } else if (newTx.type === 'TRANSFER') {
+      const ent = this.entities.find(e => e.id === newTx.entityId);
+      if (ent) {
+        const allTrans = this.financialTransactions
+          .filter(t => t.entityId === newTx.entityId && t.type === 'TRANSFER')
+          .reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+        ent.transferredAmountZAR = allTrans;
+      }
+    }
+
+    this.addAuditLog(
+      'FINANCIAL_RECORD_UPDATED',
+      `Recorded ${newTx.type} transaction of ${formatZAR(newTx.amount)} (Ref: ${newTx.referenceNumber}).`,
+      newTx.entityName
+    );
+    this.persistAll();
+    return newTx;
   }
 
   recalculateFinancialRisks(entityId: string, financialYear = '2026/27'): void {

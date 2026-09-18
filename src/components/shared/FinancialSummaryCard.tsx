@@ -83,7 +83,7 @@ export const FinancialSummaryCard: React.FC<FinancialSummaryCardProps> = ({
           <span className="font-semibold text-slate-700">
             Utilised: <strong className="text-slate-900 font-black">{formatZAR(reportedExpenditure)}</strong> of {formatZAR(approvedBudget)}
           </span>
-          <span className="font-black text-emerald-700 text-sm">{utilizationRate}%</span>
+          <span className="font-black text-emerald-700 text-sm">{typeof utilizationRate === 'number' ? utilizationRate.toFixed(1) : utilizationRate}%</span>
         </div>
 
         <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden p-0.5">

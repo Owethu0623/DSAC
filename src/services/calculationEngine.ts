@@ -10,10 +10,11 @@ import {
 import { 
   calculateEntityFinancialSummary, 
   calculateDepartmentFinancialKPIs,
-  formatZAR 
+  formatZAR,
+  formatCompactZAR
 } from './financialService';
 
-export { formatZAR };
+export { formatZAR, formatCompactZAR };
 
 /**
  * Normalizes user-facing or internal financial year strings to the standard canonical key:
@@ -161,6 +162,9 @@ export interface DepartmentFinancialAggregation {
   pePercentage: number;
   npoPercentage: number;
   entitySummaries: EntityFinancialSummary[];
+  unspentDisbursedBalance: number;
+  undisbursedAllocation: number;
+  remainingBudget: number;
 }
 
 /**
@@ -592,7 +596,8 @@ export function calculateDepartmentFinancialAggregation(
   allKpis: KPIRecord[],
   financialYear: string = '2025/26',
   quarter: FinancialQuarter | 'FULL_YEAR' = 'Q3',
-  typeFilter: 'ALL' | 'PUBLIC_ENTITY' | 'NPO' = 'ALL'
+  typeFilter: 'ALL' | 'PUBLIC_ENTITY' | 'NPO' = 'ALL',
+  transactions?: any[]
 ): DepartmentFinancialAggregation {
   const normYear = normalizeFinancialYear(financialYear);
   const normQuarter = normalizeQuarter(quarter);
@@ -608,56 +613,53 @@ export function calculateDepartmentFinancialAggregation(
       quarterlySubmissions,
       categories,
       e,
-      allKpis
+      allKpis,
+      transactions
     )
   );
 
-  const totalApprovedBudget = entitySummaries.reduce((sum, s) => sum + s.approvedAmount, 0);
+  // Authoritative aggregation from entity summaries (no independent copies, no rounding)
+  const totalApprovedBudget = entitySummaries.reduce((sum, s) => sum + s.budgetAllocated, 0);
   const totalRequestedBudget = entitySummaries.reduce((sum, s) => sum + s.requestedAmount, 0);
-  const totalReportedExpenditure = entitySummaries.reduce((sum, s) => sum + s.ytdActual, 0);
-  
-  // Transferred amount calculation
-  const totalTransferredToDate = normYear === '2024/25' || normYear === '2023/24'
-    ? totalApprovedBudget
-    : filteredEntities.reduce((sum, e) => sum + (e.transferredAmountZAR || 0), 0);
+  const totalReportedExpenditure = entitySummaries.reduce((sum, s) => sum + s.totalSpentToDate, 0);
+  const totalTransferredToDate = entitySummaries.reduce((sum, s) => sum + s.totalTransferredToDate, 0);
 
   const remainingDisbursement = Math.max(0, totalApprovedBudget - totalReportedExpenditure);
 
   const transferRate = totalApprovedBudget > 0
-    ? Math.round((totalTransferredToDate / totalApprovedBudget) * 1000) / 10
+    ? (totalTransferredToDate / totalApprovedBudget) * 100
     : 0;
 
   const expenditureRate = totalTransferredToDate > 0
-    ? Math.round((totalReportedExpenditure / totalTransferredToDate) * 1000) / 10
+    ? (totalReportedExpenditure / totalTransferredToDate) * 100
     : 0;
 
   const utilPercent = totalApprovedBudget > 0
-    ? Math.round((totalReportedExpenditure / totalApprovedBudget) * 1000) / 10
+    ? (totalReportedExpenditure / totalApprovedBudget) * 100
     : 0;
 
-  const remPercent = Math.max(0, Math.round((100 - utilPercent) * 10) / 10);
+  const remPercent = Math.max(0, 100 - utilPercent);
 
   // Institution category breakdown
   const peSummaries = entitySummaries.filter(s => s.entityType === 'PUBLIC_ENTITY');
   const npoSummaries = entitySummaries.filter(s => s.entityType === 'NPO');
 
-  const peBudget = peSummaries.reduce((sum, s) => sum + s.approvedAmount, 0);
-  const npoBudget = npoSummaries.reduce((sum, s) => sum + s.approvedAmount, 0);
+  const peBudget = peSummaries.reduce((sum, s) => sum + s.budgetAllocated, 0);
+  const npoBudget = npoSummaries.reduce((sum, s) => sum + s.budgetAllocated, 0);
 
-  const peTransfer = normYear === '2024/25' || normYear === '2023/24' 
-    ? peBudget 
-    : filteredEntities.filter(e => e.type === 'PUBLIC_ENTITY').reduce((sum, e) => sum + (e.transferredAmountZAR || 0), 0);
-
-  const npoTransfer = normYear === '2024/25' || normYear === '2023/24'
-    ? npoBudget
-    : filteredEntities.filter(e => e.type === 'NPO').reduce((sum, e) => sum + (e.transferredAmountZAR || 0), 0);
+  const peTransfer = peSummaries.reduce((sum, s) => sum + s.totalTransferredToDate, 0);
+  const npoTransfer = npoSummaries.reduce((sum, s) => sum + s.totalTransferredToDate, 0);
 
   const pePercentage = totalApprovedBudget > 0 
-    ? Math.round((peBudget / totalApprovedBudget) * 1000) / 10 
+    ? (peBudget / totalApprovedBudget) * 100 
     : 87.9;
   const npoPercentage = totalApprovedBudget > 0 
-    ? Math.round((npoBudget / totalApprovedBudget) * 1000) / 10 
+    ? (npoBudget / totalApprovedBudget) * 100 
     : 12.1;
+
+  const unspentDisbursedBalance = totalTransferredToDate - totalReportedExpenditure;
+  const undisbursedAllocation = totalApprovedBudget - totalTransferredToDate;
+  const remainingBudget = totalApprovedBudget - totalReportedExpenditure;
 
   let statusTitle = 'Transferred & Expended to Date';
   if (normYear === '2024/25' || normYear === '2023/24') {
@@ -686,5 +688,8 @@ export function calculateDepartmentFinancialAggregation(
     pePercentage,
     npoPercentage,
     entitySummaries,
+    unspentDisbursedBalance,
+    undisbursedAllocation,
+    remainingBudget,
   };
 }
