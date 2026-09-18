@@ -33,18 +33,20 @@ import {
 } from '../types';
 import { DocumentVerificationDossier } from './DocumentVerificationDossier';
 import { EntityFinancialView } from './features/EntityFinancialView';
+import { EntityVisualAnalytics } from './features/EntityVisualAnalytics';
 
 interface EntityWorkspaceProps {
   entityId: string;
   onBackToDashboard: () => void;
-  onLogout?: () => void;
+  financialYear?: string;
 }
 
 export const EntityWorkspace: React.FC<EntityWorkspaceProps> = ({
   entityId,
   onBackToDashboard,
-  onLogout,
+  financialYear: initialYear = '2026/27',
 }) => {
+  const [workspaceYear, setWorkspaceYear] = useState<string>(initialYear);
   const currentUser = store.currentUser;
   const isDSACReviewer = currentUser ? (currentUser.role === 'DSAC_ADMIN' || currentUser.role === 'DSAC_MANAGEMENT') : false;
 
@@ -172,20 +174,10 @@ export const EntityWorkspace: React.FC<EntityWorkspaceProps> = ({
           <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={onBackToDashboard}
-              className="px-3 py-1.5 border border-slate-300 hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+              className="px-3.5 py-1.5 border border-slate-300 hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
             >
-              ← Back to Overview
+              ← Back to Previous Overview
             </button>
-            {onLogout && (
-              <button
-                onClick={onLogout}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-rose-700 hover:text-white bg-rose-50 hover:bg-rose-600 border border-rose-200 hover:border-rose-600 rounded-lg transition-all cursor-pointer"
-                title="Sign Out"
-              >
-                <LogOut className="w-3.5 h-3.5" />
-                <span>Sign Out</span>
-              </button>
-            )}
             
             <div className={`px-3 py-1.5 rounded-lg border text-xs font-bold flex items-center gap-1.5 ${
               entity.riskLevel === 'LOW'
@@ -293,6 +285,16 @@ export const EntityWorkspace: React.FC<EntityWorkspaceProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Visual Analytics: Performance Status & Budget Utilisation Pie Charts */}
+      <EntityVisualAnalytics
+        entityId={entity.id}
+        financialYear={workspaceYear}
+        initialQuarter={workspaceYear.includes('2024') || workspaceYear.includes('2023') ? 'FULL_YEAR' : 'Q3'}
+        showQuarterSelector={true}
+        showYearSelector={true}
+        onYearChange={(newYear) => setWorkspaceYear(newYear)}
+      />
 
       {/* TAB 1: REPORTS (THE CORE GOVERNMENT REPORTING & REVIEW WORKFLOW) */}
       {activeTab === 'reports' && (
@@ -556,6 +558,15 @@ export const EntityWorkspace: React.FC<EntityWorkspaceProps> = ({
           </div>
 
         </div>
+      )}
+
+      {/* TAB 1B: BUDGET & FINANCIAL UTILISATION */}
+      {activeTab === 'financials' && (
+        <EntityFinancialView
+          entityId={entity.id}
+          financialYear="2026/27"
+          readOnly={false}
+        />
       )}
 
       {/* TAB 2: AGREED KPIS & ANNUAL TARGETS */}

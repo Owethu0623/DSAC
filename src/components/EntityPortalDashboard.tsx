@@ -49,6 +49,7 @@ import { UbuntuArtsLogo } from './UbuntuArtsLogo';
 import { downloadStatutoryDocument } from '../services/downloadHelper';
 import { DocumentVerificationDossier } from './DocumentVerificationDossier';
 import { EntityFinancialView } from './features/EntityFinancialView';
+import { EntityVisualAnalytics } from './features/EntityVisualAnalytics';
 
 interface EntityPortalDashboardProps {
   entityId?: string;
@@ -272,88 +273,40 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
 
   // Dynamic Year-Based Stats synchronized with Department Dashboard
   const yearStats = useMemo(() => {
-    if (selectedYear.includes('2024/25')) {
-      return {
-        yearLabel: '2024/25 Financial Year',
-        fiscalTag: '2024/2025',
-        budgetAllocated: 4800000,
-        transferred: 4800000,
-        expenditure: 4720000,
-        utilPercent: 98,
-        remaining: 80000,
-        complianceStatus: 'On Track',
-        complianceScore: 100,
-        upcomingDueDates: 0,
-        overdueItems: 0,
-        kpiAchievedCount: 8,
-        kpiTotalCount: 8,
-        kpiPercent: 100,
-        targets: [
-          { title: 'Community arts programmes', current: '16', target: '16 (100%)', pct: 100, color: 'bg-emerald-500' },
-          { title: 'Youth participants', current: '1 150', target: '1 100 (104%)', pct: 100, color: 'bg-emerald-500' },
-          { title: 'Workshops conducted', current: '24', target: '24 (100%)', pct: 100, color: 'bg-emerald-500' },
-          { title: 'Independent AFS Audit', current: 'Clean Opinion', target: 'Unqualified (100%)', pct: 100, color: 'bg-emerald-500' },
-        ],
-        auditOutcome: 'Clean Audit (Unqualified)',
-        badge: 'Audited & Closed',
-      };
-    } else if (selectedYear.includes('2023/24')) {
-      return {
-        yearLabel: '2023/24 Financial Year',
-        fiscalTag: '2023/2024',
-        budgetAllocated: 4500000,
-        transferred: 4500000,
-        expenditure: 4480000,
-        utilPercent: 100,
-        remaining: 20000,
-        complianceStatus: 'On Track',
-        complianceScore: 96,
-        upcomingDueDates: 0,
-        overdueItems: 0,
-        kpiAchievedCount: 8,
-        kpiTotalCount: 8,
-        kpiPercent: 100,
-        targets: [
-          { title: 'Community arts programmes', current: '14', target: '14 (100%)', pct: 100, color: 'bg-emerald-500' },
-          { title: 'Youth participants', current: '980', target: '950 (103%)', pct: 100, color: 'bg-emerald-500' },
-          { title: 'Workshops conducted', current: '20', target: '20 (100%)', pct: 100, color: 'bg-emerald-500' },
-          { title: 'Independent AFS Audit', current: 'Clean Opinion', target: 'Unqualified (100%)', pct: 100, color: 'bg-emerald-500' },
-        ],
-        auditOutcome: 'Clean Audit (Unqualified)',
-        badge: 'Audited & Closed',
-      };
-    } else {
-      // 2025/26 (Current Active)
-      const allocated = entity.budgetAllocationZAR || 5000000;
-      const transferred = entity.transferredAmountZAR || 3200000;
-      const spent = entity.reportedExpenditureZAR || 3200000;
-      const utilPct = Math.round((transferred / allocated) * 100);
-      return {
-        yearLabel: '2025/26 Financial Year',
-        fiscalTag: '2025/2026',
-        budgetAllocated: allocated,
-        transferred: transferred,
-        expenditure: spent,
-        utilPercent: utilPct, // 64%
-        remaining: Math.max(0, allocated - transferred),
-        complianceStatus: 'On Track',
-        complianceScore: entity.overallComplianceScore || 88,
-        upcomingDueDates: 2,
-        overdueItems: 1,
-        kpiAchievedCount: 6,
-        kpiTotalCount: 8,
-        kpiPercent: 75,
-        targets: [
-          { title: 'Community arts programmes', current: `${kpiActuals.programmes} / 15`, target: '15 (80%)', pct: 80, color: 'bg-emerald-500' },
-          { title: 'Youth participants', current: `${kpiActuals.youth} / 1 000`, target: '1 000 (85%)', pct: 85, color: 'bg-emerald-500' },
-          { title: 'Workshops conducted', current: `${kpiActuals.trainings} / 20`, target: '20 (90%)', pct: 90, color: 'bg-emerald-500' },
-          { title: 'Partnerships established', current: '3 / 5', target: '5 (60%)', pct: 60, color: 'bg-amber-400' },
-        ],
-        auditOutcome: entity.auditOutcome || 'Clean Audit',
-        badge: 'Active Financial Year',
-      };
-    }
-  }, [selectedYear, entity, kpiActuals]);
+    const normYear = selectedYear.includes('2024') ? '2024/25' :
+                     selectedYear.includes('2023') ? '2023/24' :
+                     selectedYear.includes('2026') ? '2026/27' : '2025/26';
+
+    const isAudited = normYear === '2024/25' || normYear === '2023/24';
+    const fin = store.getEntityFinancialSummary(entity.id, normYear, isAudited ? 'FULL_YEAR' : 'Q3');
+    const perf = store.getEntityPerformanceSummary(entity.id, normYear, isAudited ? 'FULL_YEAR' : 'Q3');
+
+    return {
+      yearLabel: `${normYear} Financial Year`,
+      fiscalTag: normYear,
+      budgetAllocated: fin.approvedAmount,
+      transferred: isAudited ? fin.approvedAmount : (entity.transferredAmountZAR || fin.approvedAmount),
+      expenditure: fin.ytdActual,
+      utilPercent: fin.utilisationPercent,
+      remaining: Math.max(0, fin.remainingBudget),
+      complianceStatus: 'On Track',
+      complianceScore: isAudited ? 100 : (entity.overallComplianceScore || 88),
+      upcomingDueDates: isAudited ? 0 : 2,
+      overdueItems: isAudited ? 0 : 1,
+      kpiAchievedCount: perf.completedCount,
+      kpiTotalCount: perf.totalKpis,
+      kpiPercent: perf.completedPercent,
+      targets: perf.items.map(item => ({
+        title: item.name,
+        current: item.actualDisplay,
+        target: `${item.targetDisplay} (${item.percentageAchieved}%)`,
+        pct: Math.min(100, item.percentageAchieved),
+        color: item.percentageAchieved >= 100 ? 'bg-emerald-500' : item.percentageAchieved >= 50 ? 'bg-blue-500' : 'bg-rose-500',
+      })),
+      auditOutcome: isAudited ? 'Clean Audit (Unqualified)' : (entity.auditOutcome || 'Clean Audit'),
+      badge: isAudited ? 'Audited & Closed' : 'Active Financial Year',
+    };
+  }, [selectedYear, entity]);
 
   const currentUser = store.currentUser || {
     name: 'Lerato Phiri',
@@ -879,6 +832,26 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
                   </div>
                 </div>
               </div>
+
+              {/* Visual Analytics: Performance Status & Budget Utilisation Pie Charts */}
+              <EntityVisualAnalytics
+                entityId={entity.id}
+                financialYear={
+                  selectedYear.includes('2026') ? '2026/27' :
+                  selectedYear.includes('2024') ? '2024/25' :
+                  selectedYear.includes('2023') ? '2023/24' :
+                  '2025/26'
+                }
+                initialQuarter={selectedYear.includes('2024') || selectedYear.includes('2023') ? 'FULL_YEAR' : 'Q3'}
+                showQuarterSelector={true}
+                showYearSelector={true}
+                onYearChange={(newYear) => {
+                  if (newYear.includes('2024')) setSelectedYear('2024/25 Financial Year');
+                  else if (newYear.includes('2023')) setSelectedYear('2023/24 Financial Year');
+                  else if (newYear.includes('2026')) setSelectedYear('2026/27 Financial Year');
+                  else setSelectedYear('2025/26 Financial Year');
+                }}
+              />
 
               {/* Row 2: Targets (Left) & Upcoming Due Dates (Right) */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">

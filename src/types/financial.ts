@@ -6,6 +6,8 @@ export type BudgetRequestStatus =
   | 'PARTIALLY_APPROVED'
   | 'REJECTED';
 
+export type BudgetProfileStatus = BudgetRequestStatus;
+
 export type QuarterlyFinancialStatus = 
   | 'DRAFT'
   | 'SUBMITTED'
@@ -14,6 +16,18 @@ export type QuarterlyFinancialStatus =
   | 'CORRECTION_REQUIRED';
 
 export type FinancialQuarter = 'Q1' | 'Q2' | 'Q3' | 'Q4';
+
+export interface QuarterlyTimelinePoint {
+  quarter: FinancialQuarter;
+  quarterName?: string;
+  actualExpenditure: number;
+  plannedExpenditure: number;
+  cumulativeYtdExpenditure: number;
+  remainingBudget: number;
+  utilisationPercent: number;
+  isSubmitted: boolean;
+  status?: string;
+}
 
 export interface ExpenseCategory {
   id: string;
@@ -111,6 +125,7 @@ export interface CategoryQuarterlyPerformance {
   q4Actual: number;
   ytdActual: number;
   remaining: number;
+  remainingBudget: number;
   utilisationPercent: number;
   plannedYtd: number;
   variance: number;
@@ -122,6 +137,7 @@ export interface EntityFinancialSummary {
   entityId: string;
   entityName: string;
   shortCode: string;
+  entityType?: 'PUBLIC_ENTITY' | 'NPO';
   financialYear: string;
   budgetProfileId?: string;
   requestedAmount: number;
@@ -149,6 +165,7 @@ export interface EntityFinancialSummary {
   variance: number; // Actual YTD - Expected YTD
   absoluteVariance: number;
   variancePercent: number;
+  targetTrajectoryPercent?: number;
   
   // Overspending flags
   isOverspent: boolean;
@@ -161,10 +178,13 @@ export interface EntityFinancialSummary {
   // Performance and Finance connection
   targetAchievementRate?: number; // e.g. 48%
   performanceFinanceSignal?: {
-    status: 'ALIGNED' | 'REQUIRES_REVIEW' | 'DISCONNECTED';
+    status: 'ALIGNED' | 'REQUIRES_REVIEW' | 'DISCONNECTED' | 'COMMENDABLE';
     commentary: string;
   };
   
+  // Quarterly timeline progression
+  quarterlyTimeline: QuarterlyTimelinePoint[];
+
   // Category breakdown
   categories: CategoryQuarterlyPerformance[];
 }
@@ -173,12 +193,18 @@ export interface DepartmentFinancialKPIs {
   totalRequested: number;
   totalApproved: number;
   totalActualExpenditure: number;
+  totalActualYTD: number;
   totalRemaining: number;
   overallUtilisationPercent: number;
+  departmentUtilisationPercent: number;
+  targetTrajectoryPercent: number;
   entitiesOverspendingCount: number;
+  overspendingEntitiesCount: number;
   entitiesUnderUtilisingCount: number;
+  underUtilisingEntitiesCount: number;
   entitiesOnTrackCount: number;
   entitiesMissingSubmissionCount: number;
   budgetRequestsPendingCount: number;
+  pendingSubmissionsCount: number;
   totalFundingGap: number;
 }

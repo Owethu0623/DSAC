@@ -58,6 +58,16 @@ import {
   calculateDepartmentFinancialKPIs, 
   formatZAR 
 } from './financialService';
+import {
+  calculateEntityPerformanceSummary,
+  calculateDepartmentPerformanceAggregation,
+  calculateDepartmentFinancialAggregation,
+  normalizeFinancialYear,
+  normalizeQuarter,
+  EntityPerformanceSummary,
+  DepartmentPerformanceAggregation,
+  DepartmentFinancialAggregation
+} from './calculationEngine';
 
 const STORAGE_KEYS = {
   CURRENT_USER: 'govtrack_current_user',
@@ -2135,6 +2145,52 @@ export class GovTrackStore {
       this.entities,
       this.expenseCategories,
       this.kpis
+    );
+  }
+
+  getEntityPerformanceSummary(
+    entityId: string,
+    financialYear = '2025/26',
+    quarter: FinancialQuarter | 'FULL_YEAR' = 'FULL_YEAR'
+  ): EntityPerformanceSummary {
+    const entityMeta = this.entities.find(e => e.id === entityId);
+    return calculateEntityPerformanceSummary(
+      entityId,
+      financialYear,
+      quarter,
+      this.kpis,
+      entityMeta
+    );
+  }
+
+  getDepartmentPerformanceAggregation(
+    financialYear = '2025/26',
+    quarter: FinancialQuarter | 'FULL_YEAR' = 'Q3',
+    typeFilter: 'ALL' | 'PUBLIC_ENTITY' | 'NPO' = 'ALL'
+  ): DepartmentPerformanceAggregation {
+    return calculateDepartmentPerformanceAggregation(
+      this.entities,
+      this.kpis,
+      financialYear,
+      quarter,
+      typeFilter
+    );
+  }
+
+  getDepartmentFinancialAggregation(
+    financialYear = '2025/26',
+    quarter: FinancialQuarter | 'FULL_YEAR' = 'Q3',
+    typeFilter: 'ALL' | 'PUBLIC_ENTITY' | 'NPO' = 'ALL'
+  ): DepartmentFinancialAggregation {
+    return calculateDepartmentFinancialAggregation(
+      this.entities,
+      this.budgetProfiles,
+      this.quarterlyFinancialSubmissions,
+      this.expenseCategories,
+      this.kpis,
+      financialYear,
+      quarter,
+      typeFilter
     );
   }
 

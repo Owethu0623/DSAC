@@ -60,7 +60,6 @@ export default function App() {
           <EntityWorkspace
             entityId={selectedEntityId}
             onBackToDashboard={() => setCurrentTab(store.currentUser?.role === 'ENTITY_OFFICER' ? 'entity-portal' : 'dsac-repo')}
-            onLogout={handleLogout}
           />
         </div>
       )}

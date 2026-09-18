@@ -11,17 +11,20 @@ import {
   Filter, 
   ArrowUpRight, 
   Building2, 
-  Sparkles,
+  Sparkles, 
   PieChart,
   Briefcase,
   HelpCircle,
   Award,
   Clock,
   Layers,
-  FileCheck
+  FileCheck,
+  Calendar
 } from 'lucide-react';
 import { PublicEntity, EntityType } from '../../types';
 import { AIPerformanceAnalyst } from '../AIPerformanceAnalyst';
+import { store } from '../../services/store';
+import { normalizeFinancialYear } from '../../services/calculationEngine';
 
 interface DsacAnalyticsViewProps {
   entities: PublicEntity[];
@@ -40,6 +43,16 @@ export const DsacAnalyticsView: React.FC<DsacAnalyticsViewProps> = ({
   const [typeFilter, setTypeFilter] = useState<'ALL' | 'PUBLIC_ENTITY' | 'NPO'>('ALL');
   const [clusterFilter, setClusterFilter] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [selectedYear, setSelectedYear] = useState<string>('2025/26');
+
+  // Authoritative Department Aggregation from Calculation Engine
+  const deptFinancialAgg = useMemo(() => {
+    return store.getDepartmentFinancialAggregation(selectedYear, 'Q3', typeFilter);
+  }, [selectedYear, typeFilter]);
+
+  const deptPerfAgg = useMemo(() => {
+    return store.getDepartmentPerformanceAggregation(selectedYear, 'Q3', typeFilter);
+  }, [selectedYear, typeFilter]);
 
   // Clusters list
   const clusters = useMemo(() => {
@@ -62,21 +75,12 @@ export const DsacAnalyticsView: React.FC<DsacAnalyticsViewProps> = ({
     });
   }, [entities, typeFilter, clusterFilter, searchQuery]);
 
-  // Core portfolio totals (computed dynamically)
-  const totalBudget = useMemo(() => {
-    return filteredEntities.reduce((sum, e) => sum + (e.budgetAllocationZAR || 0), 0);
-  }, [filteredEntities]);
-
-  const totalTransferred = useMemo(() => {
-    return filteredEntities.reduce((sum, e) => sum + (e.transferredAmountZAR || 0), 0);
-  }, [filteredEntities]);
-
-  const totalReportedExpenditure = useMemo(() => {
-    return filteredEntities.reduce((sum, e) => sum + (e.reportedExpenditureZAR || 0), 0);
-  }, [filteredEntities]);
-
-  const transferPercentage = totalBudget > 0 ? Math.round((totalTransferred / totalBudget) * 100) : 0;
-  const expenditurePercentage = totalTransferred > 0 ? Math.round((totalReportedExpenditure / totalTransferred) * 100) : 0;
+  // Core portfolio totals from Authoritative Department Aggregation
+  const totalBudget = deptFinancialAgg.totalApprovedBudget;
+  const totalTransferred = deptFinancialAgg.totalTransferredToDate;
+  const totalReportedExpenditure = deptFinancialAgg.totalReportedExpenditure;
+  const transferPercentage = deptFinancialAgg.transferRate;
+  const expenditurePercentage = deptFinancialAgg.expenditureRate;
 
   const avgComplianceScore = useMemo(() => {
     if (filteredEntities.length === 0) return 0;
@@ -115,7 +119,7 @@ export const DsacAnalyticsView: React.FC<DsacAnalyticsViewProps> = ({
     return filteredEntities.reduce((sum, e) => sum + (e.jobStats?.creativeSectorPractitionersSupported || 0), 0);
   }, [filteredEntities]);
 
-  // Cluster breakdown data for simple visual chart
+  // Cluster breakdown data using entity financial summaries for selected year
   const clusterData = useMemo(() => {
     const map: { [key: string]: { budget: number; transferred: number; count: number } } = {};
     filteredEntities.forEach(e => {
@@ -123,8 +127,9 @@ export const DsacAnalyticsView: React.FC<DsacAnalyticsViewProps> = ({
       if (!map[c]) {
         map[c] = { budget: 0, transferred: 0, count: 0 };
       }
-      map[c].budget += (e.budgetAllocationZAR || 0);
-      map[c].transferred += (e.transferredAmountZAR || 0);
+      const fin = store.getEntityFinancialSummary(e.id, selectedYear, 'Q3');
+      map[c].budget += fin.approvedAmount;
+      map[c].transferred += fin.ytdActual;
       map[c].count += 1;
     });
 
@@ -135,7 +140,7 @@ export const DsacAnalyticsView: React.FC<DsacAnalyticsViewProps> = ({
       count: data.count,
       percent: data.budget > 0 ? Math.round((data.transferred / data.budget) * 100) : 0,
     })).sort((a, b) => b.budget - a.budget);
-  }, [filteredEntities]);
+  }, [filteredEntities, selectedYear]);
 
   // Top 5 job delivering entities
   const topDeliveringEntities = useMemo(() => {
@@ -203,7 +208,29 @@ export const DsacAnalyticsView: React.FC<DsacAnalyticsViewProps> = ({
           
           {/* Filter Bar */}
           <div className="bg-white rounded-xl p-3 sm:p-4 border border-slate-200 shadow-xs flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Financial Year Selector */}
+              <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-xs font-medium">
+                <span className="text-[11px] font-bold text-slate-500 px-1.5 flex items-center gap-1">
+                  <Calendar className="w-3.5 h-3.5 text-slate-400" />
+                  <span>FY:</span>
+                </span>
+                {(['2024/25', '2025/26', '2026/27', '2023/24'] as const).map(yr => (
+                  <button
+                    key={yr}
+                    type="button"
+                    onClick={() => setSelectedYear(yr)}
+                    className={`px-2 py-0.5 rounded-md text-xs font-bold transition-all cursor-pointer ${
+                      normalizeFinancialYear(selectedYear) === yr
+                        ? 'bg-slate-900 text-white shadow-2xs'
+                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+                    }`}
+                  >
+                    {yr}
+                  </button>
+                ))}
+              </div>
+
               <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-xs font-medium">
                 <button
                   onClick={() => setTypeFilter('ALL')}

@@ -133,25 +133,34 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
   const entities = store.entities;
   const pulse = store.getPerformancePulse();
 
-  // Aggregate calculations across all 26 Public Entities and 6 NPOs from centralized pulse
-  const totalApprovedBudget = pulse.totalAllocation;
-  const totalTransferredToDate = pulse.totalTransferred;
-  const totalReportedExpenditure = pulse.totalExpended;
-  const remainingDisbursement = pulse.remainingDisbursement;
-  const transferRate = pulse.transferRate;
-  const expenditureRate = pulse.expenditureRate;
+  // Department Aggregations from Central Authoritative Calculation Engine
+  const deptFinancialAgg = useMemo(() => {
+    return store.getDepartmentFinancialAggregation(selectedYear, 'Q3');
+  }, [selectedYear]);
+
+  const deptPerfAgg = useMemo(() => {
+    return store.getDepartmentPerformanceAggregation(selectedYear, 'Q3', kpiFilter);
+  }, [selectedYear, kpiFilter]);
+
+  // Aggregate calculations across all 26 Public Entities and 6 NPOs from authoritative aggregation
+  const totalApprovedBudget = deptFinancialAgg.totalApprovedBudget;
+  const totalTransferredToDate = deptFinancialAgg.totalTransferredToDate;
+  const totalReportedExpenditure = deptFinancialAgg.totalReportedExpenditure;
+  const remainingDisbursement = deptFinancialAgg.remainingDisbursement;
+  const transferRate = deptFinancialAgg.transferRate;
+  const expenditureRate = deptFinancialAgg.expenditureRate;
   const highRiskEntitiesCount = pulse.highRiskEntitiesCount;
   const highRiskEntities = entities.filter(e => e.riskLevel === 'HIGH' || e.riskLevel === 'CRITICAL');
 
   // Institution category breakdowns for graphs
   const peEntities = entities.filter(e => e.type === 'PUBLIC_ENTITY');
   const npoEntities = entities.filter(e => e.type === 'NPO');
-  const peBudget = peEntities.reduce((sum, e) => sum + (e.budgetAllocationZAR || 0), 0);
-  const npoBudget = npoEntities.reduce((sum, e) => sum + (e.budgetAllocationZAR || 0), 0);
-  const peTransfer = peEntities.reduce((sum, e) => sum + (e.transferredAmountZAR || 0), 0);
-  const npoTransfer = npoEntities.reduce((sum, e) => sum + (e.transferredAmountZAR || 0), 0);
-  const pePercentage = totalApprovedBudget > 0 ? Math.round((peBudget / totalApprovedBudget) * 1000) / 10 : 87.9;
-  const npoPercentage = totalApprovedBudget > 0 ? Math.round((npoBudget / totalApprovedBudget) * 1000) / 10 : 12.1;
+  const peBudget = deptFinancialAgg.peBudget;
+  const npoBudget = deptFinancialAgg.npoBudget;
+  const peTransfer = deptFinancialAgg.peTransfer;
+  const npoTransfer = deptFinancialAgg.npoTransfer;
+  const pePercentage = deptFinancialAgg.pePercentage;
+  const npoPercentage = deptFinancialAgg.npoPercentage;
 
   const reportsSubmitted = pulse.q3SubmittedCount;
   const reportsOutstanding = pulse.q3OutstandingCount;
@@ -168,48 +177,16 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
     return `R ${val.toLocaleString()}`;
   };
 
-  // Year-based calculations for Budget Utilization card
-  const getYearData = () => {
-    if (selectedYear.includes('2024/2025')) {
-      const budget = Math.round(totalApprovedBudget * 0.945);
-      const spent = Math.round(budget * 0.962);
-      const rem = budget - spent;
-      return {
-        label: '2024/2025 Financial Year',
-        approved: budget,
-        utilized: spent,
-        remaining: rem,
-        utilPercent: 96.2,
-        remPercent: 3.8,
-        statusTitle: 'Audited Expenditure',
-      };
-    } else if (selectedYear.includes('2023/2024')) {
-      const budget = Math.round(totalApprovedBudget * 0.892);
-      const spent = Math.round(budget * 0.978);
-      const rem = budget - spent;
-      return {
-        label: '2023/2024 Financial Year',
-        approved: budget,
-        utilized: spent,
-        remaining: rem,
-        utilPercent: 97.8,
-        remPercent: 2.2,
-        statusTitle: 'Audited Expenditure',
-      };
-    } else {
-      return {
-        label: '2025/2026 (Current)',
-        approved: totalApprovedBudget,
-        utilized: totalTransferredToDate,
-        remaining: remainingDisbursement,
-        utilPercent: Math.round(transferRate * 10) / 10,
-        remPercent: Math.round((100 - transferRate) * 10) / 10,
-        statusTitle: 'Transferred to Date',
-      };
-    }
+  // Year-based calculations for Budget Utilization card matching authoritative calculation engine
+  const yearMetrics = {
+    label: deptFinancialAgg.financialYear,
+    approved: deptFinancialAgg.totalApprovedBudget,
+    utilized: deptFinancialAgg.totalReportedExpenditure,
+    remaining: deptFinancialAgg.remainingDisbursement,
+    utilPercent: deptFinancialAgg.utilPercent,
+    remPercent: deptFinancialAgg.remPercent,
+    statusTitle: deptFinancialAgg.statusTitle,
   };
-
-  const yearMetrics = getYearData();
 
   const currentUser = store.currentUser || {
     name: 'Sicelo Sakhile Mkhize',
@@ -218,25 +195,8 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
     email: 'sakhilesicelo94@gmail.com'
   };
 
-  // Actual Names of Entities and NPOs currently under the Department
-  const actualEntityKpis = [
-    { name: 'South African Heritage Resources Agency (SAHRA)', shortName: 'SAHRA', type: 'PUBLIC_ENTITY', achieved: 65, inProgress: 20, notAchieved: 15, id: 'ent-sahra' },
-    { name: 'National Arts Council of South Africa (NAC)', shortName: 'NAC', type: 'PUBLIC_ENTITY', achieved: 52, inProgress: 23, notAchieved: 25, id: 'ent-nac' },
-    { name: 'National Film and Video Foundation (NFVF)', shortName: 'NFVF', type: 'PUBLIC_ENTITY', achieved: 74, inProgress: 16, notAchieved: 10, id: 'ent-nfvf' },
-    { name: 'Freedom Park Heritage Destination', shortName: 'Freedom Park', type: 'PUBLIC_ENTITY', achieved: 68, inProgress: 20, notAchieved: 12, id: 'ent-freedom-park' },
-    { name: 'The South African State Theatre (Pretoria)', shortName: 'State Theatre', type: 'PUBLIC_ENTITY', achieved: 71, inProgress: 19, notAchieved: 10, id: 'ent-state-theatre' },
-    { name: 'Ubuntu Arts Community NPO', shortName: 'Ubuntu Arts NPO', type: 'NPO', achieved: 82, inProgress: 11, notAchieved: 7, id: 'ent-ubuntu-arts' },
-    { name: 'Business and Arts South Africa (BASA)', shortName: 'BASA NPO', type: 'NPO', achieved: 88, inProgress: 8, notAchieved: 4, id: 'ent-basa' },
-    { name: 'Boxing South Africa (BSA)', shortName: 'Boxing SA', type: 'PUBLIC_ENTITY', achieved: 40, inProgress: 25, notAchieved: 35, id: 'ent-bsa' },
-    { name: 'Iziko Museums of South Africa', shortName: 'Iziko Museums', type: 'PUBLIC_ENTITY', achieved: 77, inProgress: 15, notAchieved: 8, id: 'ent-iziko' },
-    { name: 'Market Theatre Foundation', shortName: 'Market Theatre', type: 'PUBLIC_ENTITY', achieved: 79, inProgress: 14, notAchieved: 7, id: 'ent-market-theatre' },
-    { name: 'South African Cultural Observatory (SACO)', shortName: 'SACO NPO', type: 'NPO', achieved: 85, inProgress: 10, notAchieved: 5, id: 'ent-saco' },
-    { name: 'Blind SA Accessible Cultural Media', shortName: 'Blind SA NPO', type: 'NPO', achieved: 80, inProgress: 12, notAchieved: 8, id: 'ent-blind-sa' },
-  ];
-
-  const displayedEntityKpis = kpiFilter === 'ALL'
-    ? actualEntityKpis
-    : actualEntityKpis.filter(e => e.type === kpiFilter);
+  // Authoritative Entity Performance Breakdown from Calculation Engine
+  const displayedEntityKpis = deptPerfAgg.entityBreakdown;
 
   interface NavItem {
     id: string;

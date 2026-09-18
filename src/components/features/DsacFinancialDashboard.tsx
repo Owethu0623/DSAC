@@ -156,8 +156,8 @@ export const DsacFinancialDashboard: React.FC<DsacFinancialDashboardProps> = ({
 
     store.reviewBudgetRequest(
       reviewBudgetProfileModal.id,
-      'APPROVED',
       approvedAmt,
+      'APPROVED',
       budgetApprovalNotes || 'National Treasury Vote 37 appropriation gazetted and confirmed.',
       lines
     );
@@ -740,7 +740,7 @@ export const DsacFinancialDashboard: React.FC<DsacFinancialDashboardProps> = ({
                     </div>
 
                     <div className="text-xs text-slate-600 flex items-center gap-3">
-                      <span>Submitted: {sub.submittedAt.split('T')[0]}</span>
+                      <span>Submitted: {sub.submittedAt ? sub.submittedAt.split('T')[0] : 'Pending'}</span>
                       <span>By: {sub.submittedByName}</span>
                       <span>Lines: {sub.lines.length} categories</span>
                     </div>

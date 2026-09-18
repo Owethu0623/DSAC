@@ -776,7 +776,7 @@ export const EntityFinancialView: React.FC<EntityFinancialViewProps> = ({
                       </span>
                     </div>
                     <div className="text-xs text-slate-500 flex items-center gap-3">
-                      <span>Submitted: {sub.submittedAt.split('T')[0]}</span>
+                      <span>Submitted: {sub.submittedAt ? sub.submittedAt.split('T')[0] : 'Pending'}</span>
                       <span>By: {sub.submittedByName}</span>
                       <span>Lines: {sub.lines.length} categories</span>
                     </div>
@@ -1218,7 +1218,7 @@ export const EntityFinancialView: React.FC<EntityFinancialViewProps> = ({
                   {getQuarterName(selectedSubmissionForDetails.quarter)} Expenditure Return Dossier
                 </h3>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Submitted: {selectedSubmissionForDetails.submittedAt.split('T')[0]} • Status: {selectedSubmissionForDetails.status}
+                  Submitted: {selectedSubmissionForDetails.submittedAt ? selectedSubmissionForDetails.submittedAt.split('T')[0] : 'Pending'} • Status: {selectedSubmissionForDetails.status}
                 </p>
               </div>
               <button
