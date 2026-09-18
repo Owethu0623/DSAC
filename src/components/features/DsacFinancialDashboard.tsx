@@ -43,11 +43,13 @@ import { DsacSupportView } from './DsacSupportView';
 interface DsacFinancialDashboardProps {
   onSelectEntity?: (entityId: string) => void;
   onOpenWorkspace?: (entityId: string) => void;
+  initialTab?: 'portfolio' | 'approvals' | 'reviews' | 'categories' | 'support';
 }
 
 export const DsacFinancialDashboard: React.FC<DsacFinancialDashboardProps> = ({
   onSelectEntity,
   onOpenWorkspace,
+  initialTab = 'portfolio'
 }) => {
   const [, setTick] = useState(0);
 
@@ -57,7 +59,7 @@ export const DsacFinancialDashboard: React.FC<DsacFinancialDashboardProps> = ({
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [typeFilter, setTypeFilter] = useState<'ALL' | 'PUBLIC_ENTITY' | 'NPO'>('ALL');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
-  const [activeTab, setActiveTab] = useState<'portfolio' | 'approvals' | 'reviews' | 'categories' | 'support'>('portfolio');
+  const [activeTab, setActiveTab] = useState<'portfolio' | 'approvals' | 'reviews' | 'categories' | 'support'>(initialTab);
 
   // Drawer / Inspection
   const [inspectedEntityId, setInspectedEntityId] = useState<string | null>(null);

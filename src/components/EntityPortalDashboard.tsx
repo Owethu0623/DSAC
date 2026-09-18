@@ -16,6 +16,7 @@ import {
   Bell,
   ChevronDown,
   Building,
+  Building2,
   ShieldCheck,
   ShieldAlert,
   FolderLock,
@@ -25,6 +26,8 @@ import {
   ArrowRight,
   ExternalLink,
   User,
+  Wallet,
+  FileCheck,
   ChevronLeft,
   ChevronRight,
   X,
@@ -45,6 +48,8 @@ import {
   Paperclip
 } from 'lucide-react';
 import { store } from '../services/store';
+import { FinancialQuarter } from '../types';
+import { normalizeFinancialYear, normalizeQuarter } from '../services/calculationEngine';
 import { UbuntuArtsLogo } from './UbuntuArtsLogo';
 import { downloadStatutoryDocument } from '../services/downloadHelper';
 import { DocumentVerificationDossier } from './DocumentVerificationDossier';
@@ -71,6 +76,7 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
 
   const [activeSidebar, setActiveSidebar] = useState<string>('overview');
   const [selectedYear, setSelectedYear] = useState<string>('2025/26 Financial Year');
+  const [selectedQuarter, setSelectedQuarter] = useState<FinancialQuarter | 'FULL_YEAR'>('Q3');
   const [showNotifications, setShowNotifications] = useState<boolean>(false);
   const [showProfileMenu, setShowProfileMenu] = useState<boolean>(false);
 
@@ -271,19 +277,20 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
     accessibility: 88,
   });
 
-  // Dynamic Year-Based Stats synchronized with Department Dashboard
+  // Dynamic Year & Quarter Based Stats strictly synchronized with Department Dashboard
   const yearStats = useMemo(() => {
     const normYear = selectedYear.includes('2024') ? '2024/25' :
                      selectedYear.includes('2023') ? '2023/24' :
                      selectedYear.includes('2026') ? '2026/27' : '2025/26';
 
     const isAudited = normYear === '2024/25' || normYear === '2023/24';
-    const fin = store.getEntityFinancialSummary(entity.id, normYear, isAudited ? 'FULL_YEAR' : 'Q3');
-    const perf = store.getEntityPerformanceSummary(entity.id, normYear, isAudited ? 'FULL_YEAR' : 'Q3');
+    const fin = store.getEntityFinancialSummary(entity.id, normYear, selectedQuarter);
+    const perf = store.getEntityPerformanceSummary(entity.id, normYear, selectedQuarter);
 
     return {
       yearLabel: `${normYear} Financial Year`,
       fiscalTag: normYear,
+      quarterLabel: selectedQuarter === 'FULL_YEAR' ? 'Full Year' : selectedQuarter,
       budgetAllocated: fin.approvedAmount,
       transferred: isAudited ? fin.approvedAmount : (entity.transferredAmountZAR || fin.approvedAmount),
       expenditure: fin.ytdActual,
@@ -306,7 +313,7 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
       auditOutcome: isAudited ? 'Clean Audit (Unqualified)' : (entity.auditOutcome || 'Clean Audit'),
       badge: isAudited ? 'Audited & Closed' : 'Active Financial Year',
     };
-  }, [selectedYear, entity]);
+  }, [selectedYear, selectedQuarter, entity]);
 
   const currentUser = store.currentUser || {
     name: 'Lerato Phiri',
@@ -730,22 +737,53 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
               {/* Welcome Banner */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
                 <div>
-                  <h3 className="text-base sm:text-lg font-black text-slate-900 leading-tight">
-                    Welcome back, Lerato
-                  </h3>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    Here's your current status and what needs your attention.
-                  </p>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base sm:text-lg font-black text-slate-900 leading-tight">
+                      Welcome, Lerato
+                    </h3>
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                      <CheckCircle className="w-3 h-3" /> Online
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 mt-1">
+                    <span className="flex items-center gap-1">
+                      <Building2 className="w-3 h-3 text-slate-400" />
+                      <span>{entity.name}</span>
+                    </span>
+                    <span className="text-slate-300">•</span>
+                    <span className="flex items-center gap-1">
+                      <Clock className="w-3 h-3 text-slate-400" />
+                      <span>{yearStats.fiscalTag} {yearStats.quarterLabel}</span>
+                    </span>
+                  </div>
                 </div>
-                <div>
+                <div className="flex flex-wrap items-center gap-2">
                   <select
                     value={selectedYear}
-                    onChange={(e) => setSelectedYear(e.target.value)}
-                    className="text-xs font-semibold text-slate-700 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 focus:outline-hidden"
+                    onChange={(e) => {
+                      const newYr = e.target.value;
+                      setSelectedYear(newYr);
+                      if (newYr.includes('2024') || newYr.includes('2023')) {
+                        setSelectedQuarter('FULL_YEAR');
+                      }
+                    }}
+                    className="text-xs font-semibold text-slate-700 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 focus:outline-hidden cursor-pointer"
                   >
                     <option>2025/26 Financial Year</option>
                     <option>2024/25 Financial Year</option>
                     <option>2023/24 Financial Year</option>
+                  </select>
+
+                  <select
+                    value={selectedQuarter}
+                    onChange={(e) => setSelectedQuarter(e.target.value as FinancialQuarter | 'FULL_YEAR')}
+                    className="text-xs font-semibold text-slate-700 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 focus:outline-hidden cursor-pointer"
+                  >
+                    <option value="FULL_YEAR">Full Year</option>
+                    <option value="Q1">Quarter 1 (Q1)</option>
+                    <option value="Q2">Quarter 2 (Q2)</option>
+                    <option value="Q3">Quarter 3 (Q3)</option>
+                    <option value="Q4">Quarter 4 (Q4)</option>
                   </select>
                 </div>
               </div>
@@ -756,14 +794,17 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
                   onClick={() => setActiveSidebar('compliance')}
                   className="bg-white rounded-xl p-4 border border-slate-200 shadow-xs flex flex-col justify-between cursor-pointer hover:border-emerald-300 transition-all"
                 >
-                  <div className="text-xs font-medium text-slate-500 mb-2">Compliance Status</div>
+                  <div className="flex items-center justify-between text-xs font-medium text-slate-500 mb-2">
+                    <span>Compliance</span>
+                    <ShieldCheck className="w-3.5 h-3.5 text-slate-400" />
+                  </div>
                   <div className="flex items-center gap-2">
                     <div className="w-8 h-8 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center shrink-0">
                       <CheckCircle className="w-5 h-5" />
                     </div>
                     <div>
                       <div className="text-base font-bold text-emerald-600 leading-none">{yearStats.complianceStatus}</div>
-                      <div className="text-[10px] text-slate-500 font-medium mt-0.5">Score: {yearStats.complianceScore}%</div>
+                      <div className="text-[10px] text-slate-500 font-medium mt-0.5">{yearStats.complianceScore}% Score</div>
                     </div>
                   </div>
                 </div>
@@ -772,14 +813,17 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
                   onClick={() => setActiveSidebar('calendar')}
                   className="bg-white rounded-xl p-4 border border-slate-200 shadow-xs flex flex-col justify-between cursor-pointer hover:border-blue-300 transition-all"
                 >
-                  <div className="text-xs font-medium text-slate-500 mb-2">Upcoming Due Dates</div>
+                  <div className="flex items-center justify-between text-xs font-medium text-slate-500 mb-2">
+                    <span>Due Dates</span>
+                    <Calendar className="w-3.5 h-3.5 text-slate-400" />
+                  </div>
                   <div className="flex items-center gap-2">
                     <div className="w-8 h-8 rounded-lg bg-blue-100 text-blue-600 flex items-center justify-center shrink-0">
                       <Calendar className="w-4 h-4" />
                     </div>
                     <div>
                       <div className="text-xl font-black text-slate-900 leading-none">{yearStats.upcomingDueDates}</div>
-                      <div className="text-[10px] text-slate-500 font-medium">Next 30 days</div>
+                      <div className="text-[10px] text-slate-500 font-medium">Next 30d</div>
                     </div>
                   </div>
                 </div>
@@ -788,14 +832,17 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
                   onClick={() => setActiveSidebar('submissions')}
                   className="bg-white rounded-xl p-4 border border-slate-200 shadow-xs flex flex-col justify-between cursor-pointer hover:border-rose-300 transition-all"
                 >
-                  <div className="text-xs font-medium text-slate-500 mb-2">Overdue Items</div>
+                  <div className="flex items-center justify-between text-xs font-medium text-slate-500 mb-2">
+                    <span>Overdue</span>
+                    <AlertCircle className="w-3.5 h-3.5 text-slate-400" />
+                  </div>
                   <div className="flex items-center gap-2">
                     <div className={`w-8 h-8 rounded-full ${yearStats.overdueItems > 0 ? 'bg-rose-100 text-rose-600' : 'bg-emerald-100 text-emerald-600'} flex items-center justify-center shrink-0`}>
                       {yearStats.overdueItems > 0 ? <AlertCircle className="w-5 h-5" /> : <CheckCircle className="w-5 h-5" />}
                     </div>
                     <div>
                       <div className="text-xl font-black text-slate-900 leading-none">{yearStats.overdueItems}</div>
-                      <div className="text-[10px] text-slate-500 font-medium">{yearStats.overdueItems > 0 ? 'Requires attention' : 'All clear'}</div>
+                      <div className="text-[10px] text-slate-500 font-medium">{yearStats.overdueItems > 0 ? 'Pending' : 'All clear'}</div>
                     </div>
                   </div>
                 </div>
@@ -804,14 +851,17 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
                   onClick={() => setActiveSidebar('kpis')}
                   className="bg-white rounded-xl p-4 border border-slate-200 shadow-xs flex flex-col justify-between cursor-pointer hover:border-teal-300 transition-all"
                 >
-                  <div className="text-xs font-medium text-slate-500 mb-2">KPIs Achieved</div>
+                  <div className="flex items-center justify-between text-xs font-medium text-slate-500 mb-2">
+                    <span>Targets</span>
+                    <Target className="w-3.5 h-3.5 text-slate-400" />
+                  </div>
                   <div className="flex items-center gap-2">
                     <div className="w-8 h-8 rounded-lg bg-teal-100 text-teal-600 flex items-center justify-center shrink-0">
                       <Target className="w-4 h-4" />
                     </div>
                     <div>
                       <div className="text-xl font-black text-slate-900 leading-none">{yearStats.kpiAchievedCount}/{yearStats.kpiTotalCount}</div>
-                      <div className="text-[10px] text-teal-700 font-bold">{yearStats.kpiPercent}%</div>
+                      <div className="text-[10px] text-teal-700 font-bold">{yearStats.kpiPercent}% Achieved</div>
                     </div>
                   </div>
                 </div>
@@ -820,14 +870,17 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
                   onClick={() => setActiveSidebar('budget')}
                   className="bg-white rounded-xl p-4 border border-slate-200 shadow-xs flex flex-col justify-between col-span-2 sm:col-span-1 cursor-pointer hover:border-amber-300 transition-all"
                 >
-                  <div className="text-xs font-medium text-slate-500 mb-2">Budget Utilized</div>
+                  <div className="flex items-center justify-between text-xs font-medium text-slate-500 mb-2">
+                    <span>Spend</span>
+                    <Coins className="w-3.5 h-3.5 text-slate-400" />
+                  </div>
                   <div className="flex items-center gap-2">
                     <div className="w-8 h-8 rounded-lg bg-amber-100 text-amber-600 flex items-center justify-center shrink-0">
                       <Coins className="w-4 h-4" />
                     </div>
                     <div>
                       <div className="text-xl font-black text-slate-900 leading-none">{yearStats.utilPercent}%</div>
-                      <div className="text-[10px] text-slate-500 font-medium">R {(yearStats.transferred / 1_000_000).toFixed(1)}M of R {(yearStats.budgetAllocated / 1_000_000).toFixed(1)}M</div>
+                      <div className="text-[10px] text-slate-500 font-medium">R {(yearStats.expenditure / 1_000_000).toFixed(1)}M / R {(yearStats.budgetAllocated / 1_000_000).toFixed(1)}M</div>
                     </div>
                   </div>
                 </div>
@@ -842,7 +895,9 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
                   selectedYear.includes('2023') ? '2023/24' :
                   '2025/26'
                 }
-                initialQuarter={selectedYear.includes('2024') || selectedYear.includes('2023') ? 'FULL_YEAR' : 'Q3'}
+                initialQuarter={selectedQuarter}
+                selectedQuarter={selectedQuarter}
+                onQuarterChange={(q) => setSelectedQuarter(q)}
                 showQuarterSelector={true}
                 showYearSelector={true}
                 onYearChange={(newYear) => {
@@ -860,13 +915,14 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
                   <div className="flex items-center justify-between pb-3 border-b border-slate-100">
                     <h4 className="font-bold text-sm text-slate-900 flex items-center gap-2">
                       <Target className="w-4 h-4 text-indigo-600" />
-                      <span>My Key Targets ({yearStats.fiscalTag})</span>
+                      <span>Key Targets ({yearStats.fiscalTag} • {yearStats.quarterLabel})</span>
                     </h4>
                     <button
                       onClick={() => setActiveSidebar('kpis')}
-                      className="text-xs text-indigo-700 font-semibold hover:underline cursor-pointer"
+                      className="text-xs text-indigo-700 font-semibold hover:underline cursor-pointer flex items-center gap-1"
                     >
-                      View All
+                      <span>View All</span>
+                      <ArrowRight className="w-3 h-3" />
                     </button>
                   </div>
 
@@ -874,8 +930,11 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
                     {yearStats.targets.map((tgt, i) => (
                       <div key={i}>
                         <div className="flex justify-between text-xs mb-1">
-                          <span className="font-medium text-slate-700">{tgt.title}</span>
-                          <span className="font-bold text-slate-900">{tgt.current} / {tgt.target}</span>
+                          <span className="font-medium text-slate-700 flex items-center gap-1.5">
+                            <Target className="w-3 h-3 text-slate-400" />
+                            <span>{tgt.title}</span>
+                          </span>
+                          <span className="font-bold text-slate-900 font-mono">{tgt.current} / {tgt.target}</span>
                         </div>
                         <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
                           <div className={`${tgt.color} h-2 rounded-full transition-all duration-500`} style={{ width: `${tgt.pct}%` }}></div>
@@ -890,66 +949,71 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
                   <div className="flex items-center justify-between pb-3 border-b border-slate-100">
                     <h4 className="font-bold text-sm text-slate-900 flex items-center gap-2">
                       <Calendar className="w-4 h-4 text-blue-600" />
-                      <span>Upcoming Due Dates</span>
+                      <span>Upcoming Deadlines</span>
                     </h4>
                     <button
                       onClick={() => setActiveSidebar('calendar')}
-                      className="text-xs text-indigo-700 font-semibold hover:underline cursor-pointer"
+                      className="text-xs text-indigo-700 font-semibold hover:underline cursor-pointer flex items-center gap-1"
                     >
-                      View Calendar
+                      <span>Calendar</span>
+                      <ArrowRight className="w-3 h-3" />
                     </button>
                   </div>
 
-                  <div className="py-2 space-y-3 text-xs">
-                    <div className="flex items-center justify-between p-1.5 rounded-lg hover:bg-slate-50 transition-colors">
+                  <div className="py-2 space-y-2.5 text-xs">
+                    <div className="flex items-center justify-between p-2 rounded-lg hover:bg-slate-50 transition-colors">
                       <div className="flex items-start gap-2.5">
-                        <FileText className="w-4 h-4 text-blue-500 mt-0.5 shrink-0" />
+                        <BarChart3 className="w-4 h-4 text-indigo-500 mt-0.5 shrink-0" />
                         <div>
                           <div className="font-semibold text-slate-800">Quarter 2 Report</div>
                           <div className="text-[11px] text-slate-400">15 Aug 2025</div>
                         </div>
                       </div>
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
-                        5 days left
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
+                        <Clock className="w-3 h-3" />
+                        <span>5d left</span>
                       </span>
                     </div>
 
-                    <div className="flex items-center justify-between p-1.5 rounded-lg hover:bg-slate-50 transition-colors">
+                    <div className="flex items-center justify-between p-2 rounded-lg hover:bg-slate-50 transition-colors">
                       <div className="flex items-start gap-2.5">
-                        <FileText className="w-4 h-4 text-blue-500 mt-0.5 shrink-0" />
+                        <Coins className="w-4 h-4 text-amber-500 mt-0.5 shrink-0" />
                         <div>
                           <div className="font-semibold text-slate-800">Budget Utilization Report</div>
                           <div className="text-[11px] text-slate-400">31 Aug 2025</div>
                         </div>
                       </div>
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
-                        21 days left
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                        <Clock className="w-3 h-3" />
+                        <span>21d left</span>
                       </span>
                     </div>
 
-                    <div className="flex items-center justify-between p-1.5 rounded-lg hover:bg-slate-50 transition-colors">
+                    <div className="flex items-center justify-between p-2 rounded-lg hover:bg-slate-50 transition-colors">
                       <div className="flex items-start gap-2.5">
-                        <FileText className="w-4 h-4 text-blue-500 mt-0.5 shrink-0" />
+                        <Target className="w-4 h-4 text-blue-500 mt-0.5 shrink-0" />
                         <div>
                           <div className="font-semibold text-slate-800">Strategic Plan Update</div>
                           <div className="text-[11px] text-slate-400">30 Sep 2025</div>
                         </div>
                       </div>
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800 border border-blue-200">
-                        51 days left
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800 border border-blue-200">
+                        <Clock className="w-3 h-3" />
+                        <span>51d left</span>
                       </span>
                     </div>
 
-                    <div className="flex items-center justify-between p-1.5 rounded-lg hover:bg-slate-50 transition-colors">
+                    <div className="flex items-center justify-between p-2 rounded-lg hover:bg-slate-50 transition-colors">
                       <div className="flex items-start gap-2.5">
-                        <FileText className="w-4 h-4 text-blue-500 mt-0.5 shrink-0" />
+                        <FileCheck className="w-4 h-4 text-emerald-500 mt-0.5 shrink-0" />
                         <div>
                           <div className="font-semibold text-slate-800">Annual Report</div>
                           <div className="text-[11px] text-slate-400">31 Mar 2026</div>
                         </div>
                       </div>
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
-                        On track
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                        <CheckCircle className="w-3 h-3" />
+                        <span>On track</span>
                       </span>
                     </div>
                   </div>
@@ -963,36 +1027,42 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
                   <div className="flex items-center justify-between pb-3 border-b border-slate-100">
                     <h4 className="font-bold text-sm text-slate-900 flex items-center gap-2">
                       <Coins className="w-4 h-4 text-amber-600" />
-                      <span>Budget Overview</span>
+                      <span>Budget Summary</span>
                     </h4>
                     <button
                       onClick={() => setActiveSidebar('budget')}
-                      className="text-xs text-indigo-700 font-semibold hover:underline cursor-pointer"
+                      className="text-xs text-indigo-700 font-semibold hover:underline cursor-pointer flex items-center gap-1"
                     >
-                      View Details
+                      <span>View Details</span>
+                      <ArrowRight className="w-3 h-3" />
                     </button>
                   </div>
 
                   <div className="py-3 space-y-3">
                     <div className="flex items-center justify-between text-xs">
-                      <span className="font-black text-slate-900 text-sm">R 3.2M of R 5.0M utilized</span>
-                      <span className="font-bold text-emerald-700 text-xs">64%</span>
+                      <span className="font-bold text-slate-900 text-sm">
+                        R {(yearStats.expenditure / 1_000_000).toFixed(1)}M / R {(yearStats.budgetAllocated / 1_000_000).toFixed(1)}M
+                      </span>
+                      <span className="font-bold text-emerald-700 text-xs">{yearStats.utilPercent}%</span>
                     </div>
                     <div className="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden">
-                      <div className="bg-emerald-500 h-full rounded-full" style={{ width: '64%' }}></div>
+                      <div className="bg-emerald-500 h-full rounded-full" style={{ width: `${Math.min(yearStats.utilPercent, 100)}%` }}></div>
                     </div>
 
                     <div className="grid grid-cols-3 gap-3 pt-2">
                       <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-100 text-center">
-                        <div className="text-sm font-black text-slate-900">R 5.0M</div>
+                        <Wallet className="w-3.5 h-3.5 text-slate-400 mx-auto mb-1" />
+                        <div className="text-sm font-black text-slate-900">R {(yearStats.budgetAllocated / 1_000_000).toFixed(1)}M</div>
                         <div className="text-[10px] text-slate-500 font-medium">Approved</div>
                       </div>
                       <div className="p-2.5 rounded-lg bg-emerald-50/70 border border-emerald-100 text-center">
-                        <div className="text-sm font-black text-emerald-800">R 3.2M</div>
+                        <Coins className="w-3.5 h-3.5 text-emerald-600 mx-auto mb-1" />
+                        <div className="text-sm font-black text-emerald-800">R {(yearStats.expenditure / 1_000_000).toFixed(1)}M</div>
                         <div className="text-[10px] text-emerald-700 font-medium">Utilized</div>
                       </div>
                       <div className="p-2.5 rounded-lg bg-blue-50/70 border border-blue-100 text-center">
-                        <div className="text-sm font-black text-blue-800">R 1.8M</div>
+                        <ShieldCheck className="w-3.5 h-3.5 text-blue-600 mx-auto mb-1" />
+                        <div className="text-sm font-black text-blue-800">R {(yearStats.remaining / 1_000_000).toFixed(1)}M</div>
                         <div className="text-[10px] text-blue-700 font-medium">Remaining</div>
                       </div>
                     </div>
@@ -1109,61 +1179,76 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
 
                 {/* Quick Actions (2x2 Grid) */}
                 <div className="bg-white rounded-xl p-5 border border-slate-200 shadow-xs flex flex-col justify-between">
-                  <div className="pb-3 border-b border-slate-100">
-                    <h4 className="font-bold text-sm text-slate-900">Quick Actions</h4>
+                  <div className="pb-3 border-b border-slate-100 flex items-center justify-between">
+                    <h4 className="font-bold text-sm text-slate-900 flex items-center gap-2">
+                      <Sparkles className="w-4 h-4 text-indigo-600" />
+                      <span>Quick Actions</span>
+                    </h4>
                   </div>
 
                   <div className="grid grid-cols-2 gap-3 py-2">
                     <button
                       onClick={() => setActiveModal('report')}
-                      className="p-3 bg-blue-50/60 hover:bg-blue-50 border border-blue-100 rounded-xl text-left transition-colors flex items-center gap-3 cursor-pointer group"
+                      className="p-3 bg-blue-50/60 hover:bg-blue-50 border border-blue-100 rounded-xl text-left transition-colors flex items-center justify-between cursor-pointer group"
                     >
-                      <div className="w-8 h-8 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center shrink-0">
-                        <FileText className="w-4 h-4" />
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="w-8 h-8 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center shrink-0">
+                          <FileText className="w-4 h-4" />
+                        </div>
+                        <div className="truncate">
+                          <div className="font-bold text-slate-900 text-xs group-hover:text-blue-700">Submit Report</div>
+                          <div className="text-[10px] text-slate-500">Statutory PoE</div>
+                        </div>
                       </div>
-                      <div>
-                        <div className="font-bold text-slate-900 text-xs group-hover:text-blue-700">Submit a Report</div>
-                        <div className="text-[10px] text-slate-500">Quarterly statutory PoE</div>
-                      </div>
+                      <ArrowRight className="w-3.5 h-3.5 text-blue-400 group-hover:text-blue-700 transition-colors shrink-0" />
                     </button>
 
                     <button
                       onClick={() => setActiveModal('support')}
-                      className="p-3 bg-amber-50/60 hover:bg-amber-50 border border-amber-100 rounded-xl text-left transition-colors flex items-center gap-3 cursor-pointer group"
+                      className="p-3 bg-amber-50/60 hover:bg-amber-50 border border-amber-100 rounded-xl text-left transition-colors flex items-center justify-between cursor-pointer group"
                     >
-                      <div className="w-8 h-8 rounded-lg bg-amber-100 text-amber-700 flex items-center justify-center shrink-0">
-                        <HandCoins className="w-4 h-4" />
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="w-8 h-8 rounded-lg bg-amber-100 text-amber-700 flex items-center justify-center shrink-0">
+                          <HandCoins className="w-4 h-4" />
+                        </div>
+                        <div className="truncate">
+                          <div className="font-bold text-slate-900 text-xs group-hover:text-amber-700">Request Support</div>
+                          <div className="text-[10px] text-slate-500">Funding / Advice</div>
+                        </div>
                       </div>
-                      <div>
-                        <div className="font-bold text-slate-900 text-xs group-hover:text-amber-700">Request Support</div>
-                        <div className="text-[10px] text-slate-500">Financial or technical</div>
-                      </div>
+                      <ArrowRight className="w-3.5 h-3.5 text-amber-400 group-hover:text-amber-700 transition-colors shrink-0" />
                     </button>
 
                     <button
                       onClick={() => setActiveSidebar('kpis')}
-                      className="p-3 bg-emerald-50/60 hover:bg-emerald-50 border border-emerald-100 rounded-xl text-left transition-colors flex items-center gap-3 cursor-pointer group"
+                      className="p-3 bg-emerald-50/60 hover:bg-emerald-50 border border-emerald-100 rounded-xl text-left transition-colors flex items-center justify-between cursor-pointer group"
                     >
-                      <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
-                        <BarChart3 className="w-4 h-4" />
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+                          <Target className="w-4 h-4" />
+                        </div>
+                        <div className="truncate">
+                          <div className="font-bold text-slate-900 text-xs group-hover:text-emerald-700">Update KPIs</div>
+                          <div className="text-[10px] text-slate-500">Progress metrics</div>
+                        </div>
                       </div>
-                      <div>
-                        <div className="font-bold text-slate-900 text-xs group-hover:text-emerald-700">Update KPI Data</div>
-                        <div className="text-[10px] text-slate-500">Record quarterly figures</div>
-                      </div>
+                      <ArrowRight className="w-3.5 h-3.5 text-emerald-400 group-hover:text-emerald-700 transition-colors shrink-0" />
                     </button>
 
                     <button
                       onClick={() => setActiveModal('uploadPoE')}
-                      className="p-3 bg-indigo-50/60 hover:bg-indigo-50 border border-indigo-100 rounded-xl text-left transition-colors flex items-center gap-3 cursor-pointer group"
+                      className="p-3 bg-indigo-50/60 hover:bg-indigo-50 border border-indigo-100 rounded-xl text-left transition-colors flex items-center justify-between cursor-pointer group"
                     >
-                      <div className="w-8 h-8 rounded-lg bg-indigo-100 text-indigo-700 flex items-center justify-center shrink-0">
-                        <UploadCloud className="w-4 h-4" />
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="w-8 h-8 rounded-lg bg-indigo-100 text-indigo-700 flex items-center justify-center shrink-0">
+                          <UploadCloud className="w-4 h-4" />
+                        </div>
+                        <div className="truncate">
+                          <div className="font-bold text-slate-900 text-xs group-hover:text-indigo-700">Upload Files</div>
+                          <div className="text-[10px] text-slate-500">Registers &amp; docs</div>
+                        </div>
                       </div>
-                      <div>
-                        <div className="font-bold text-slate-900 text-xs group-hover:text-indigo-700">Upload Documents</div>
-                        <div className="text-[10px] text-slate-500">Statutory registers</div>
-                      </div>
+                      <ArrowRight className="w-3.5 h-3.5 text-indigo-400 group-hover:text-indigo-700 transition-colors shrink-0" />
                     </button>
                   </div>
                 </div>

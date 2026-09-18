@@ -14,7 +14,12 @@ import {
   Eye,
   Building2,
   Calendar,
-  Layers
+  Layers,
+  Send,
+  FolderLock,
+  Inbox,
+  ShieldCheck,
+  AlertCircle
 } from 'lucide-react';
 import { PublicEntity, QuarterlyReport, EntityDocument } from '../../types';
 import { store } from '../../services/store';
@@ -24,6 +29,7 @@ interface DsacReportsViewProps {
   entities: PublicEntity[];
   onSelectEntity?: (entityId: string) => void;
   onOpenWorkspace?: (entityId: string) => void;
+  initialSubtab?: 'submissions' | 'documents' | 'review';
 }
 
 interface ReportItemRecord {
@@ -198,12 +204,15 @@ const INITIAL_REPORTS_LIST: ReportItemRecord[] = [
 export const DsacReportsView: React.FC<DsacReportsViewProps> = ({
   entities,
   onSelectEntity,
-  onOpenWorkspace
+  onOpenWorkspace,
+  initialSubtab = 'submissions'
 }) => {
   const [, setTick] = useState(0);
   useEffect(() => {
     return store.subscribe(() => setTick(t => t + 1));
   }, []);
+
+  const [activeTab, setActiveTab] = useState<'submissions' | 'documents' | 'review'>(initialSubtab);
 
   // Merge store documents & reports with baseline list to give a 100% comprehensive view
   const reports: ReportItemRecord[] = useMemo(() => {
@@ -286,7 +295,14 @@ export const DsacReportsView: React.FC<DsacReportsViewProps> = ({
     const matchesQuarter = quarterFilter === 'ALL' || rep.quarter === quarterFilter;
     const matchesType = typeFilter === 'ALL' || rep.type === typeFilter;
     const matchesStatus = statusFilter === 'ALL' || rep.status === statusFilter;
-    return matchesSearch && matchesQuarter && matchesType && matchesStatus;
+    
+    // Subtab alignment
+    const matchesSubtab = 
+      activeTab === 'submissions' ? rep.type === 'Quarterly Performance Report (QPR)' :
+      activeTab === 'documents' ? rep.type !== 'Quarterly Performance Report (QPR)' :
+      (rep.status === 'UNDER_REVIEW' || rep.status === 'REQUIRES_AMENDMENT');
+
+    return matchesSearch && matchesQuarter && matchesType && matchesStatus && matchesSubtab;
   });
 
   const selectedReport = reports.find(r => r.id === selectedReportId) || filteredReports[0] || reports[0];
@@ -359,21 +375,59 @@ export const DsacReportsView: React.FC<DsacReportsViewProps> = ({
               <span className="p-1.5 rounded-lg bg-emerald-100 text-emerald-800">
                 <FileText className="w-5 h-5" />
               </span>
-              <h2 className="text-lg font-black text-slate-900">
-                Statutory Reports Repository
-              </h2>
+              <div>
+                <h2 className="text-lg font-black text-slate-900">
+                  Reporting Centre
+                </h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Submissions, evidence dossiers, and statutory review across 32 institutions
+                </p>
+              </div>
             </div>
-            <p className="text-xs text-slate-500 mt-1">
-              Quarterly Performance Reports (QPR), Annual Performance Plans (APP), Portfolios of Evidence &amp; Financial Statements across all 26 Public Entities and 6 NPOs (32 Total)
-            </p>
           </div>
 
-          {actionNotice && (
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-medium animate-fadeIn">
-              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-              <span>{actionNotice}</span>
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* 3 Sub-tabs */}
+            <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-xl border border-slate-200/80">
+              <button
+                onClick={() => { setActiveTab('submissions'); setTypeFilter('ALL'); setStatusFilter('ALL'); }}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  activeTab === 'submissions' ? 'bg-white text-emerald-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Inbox className="w-3.5 h-3.5 text-emerald-700" />
+                <span>Submissions</span>
+              </button>
+              <button
+                onClick={() => { setActiveTab('documents'); setTypeFilter('ALL'); setStatusFilter('ALL'); }}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  activeTab === 'documents' ? 'bg-white text-emerald-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <FolderLock className="w-3.5 h-3.5 text-blue-700" />
+                <span>Documents &amp; PoE</span>
+              </button>
+              <button
+                onClick={() => { setActiveTab('review'); setTypeFilter('ALL'); setStatusFilter('ALL'); }}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  activeTab === 'review' ? 'bg-white text-amber-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <AlertCircle className="w-3.5 h-3.5 text-amber-600" />
+                <span>Review Queue</span>
+                <span className="text-[10px] px-1.5 py-0.2 bg-amber-100 text-amber-900 rounded-full font-black">
+                  {underReviewCount + amendmentCount}
+                </span>
+              </button>
             </div>
-          )}
+
+            {actionNotice && (
+              <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-medium animate-fadeIn">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                <span>{actionNotice}</span>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* 4 Summary Document Metrics */}

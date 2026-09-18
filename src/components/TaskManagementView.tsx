@@ -10,12 +10,22 @@ import {
   Check,
   Building2,
   ShieldCheck,
-  User
+  User,
+  Send,
+  ListTodo,
+  FileCheck2
 } from 'lucide-react';
 import { store } from '../services/store';
 import { CorrectiveTask } from '../types';
 
-export const TaskManagementView: React.FC = () => {
+interface TaskManagementViewProps {
+  initialSubtab?: 'directives' | 'tasks' | 'approvals';
+}
+
+export const TaskManagementView: React.FC<TaskManagementViewProps> = ({
+  initialSubtab = 'directives'
+}) => {
+  const [activeTab, setActiveTab] = useState<'directives' | 'tasks' | 'approvals'>(initialSubtab);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedStatus, setSelectedStatus] = useState<string>('ALL');
   const [showCreateModal, setShowCreateModal] = useState(false);

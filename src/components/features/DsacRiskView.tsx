@@ -40,7 +40,7 @@ export const DsacRiskView: React.FC<DsacRiskViewProps> = ({
 
   const selectedEntity = entities.find(e => e.id === selectedEntityId) || entities[0];
 
-  const highRiskCount = entities.filter(e => e.riskLevel === 'HIGH' || e.overallComplianceScore < 65).length;
+  const highRiskCount = entities.filter(e => e.riskLevel === 'HIGH' || e.riskLevel === 'CRITICAL').length;
   const mediumRiskCount = entities.filter(e => e.riskLevel === 'MEDIUM').length;
   const lowRiskCount = entities.filter(e => e.riskLevel === 'LOW').length;
 
@@ -60,11 +60,11 @@ export const DsacRiskView: React.FC<DsacRiskViewProps> = ({
                 <AlertTriangle className="w-5 h-5" />
               </span>
               <h2 className="text-lg font-black text-slate-900">
-                Early Warning Oversight Radar &amp; Institutional Risk
+                Early Warning Risk Radar
               </h2>
             </div>
             <p className="text-xs text-slate-500 mt-1">
-              PFMA Compliance Hazards, Audit Findings &amp; Governance Remediation across all 26 Public Entities and 6 NPOs (32 Total)
+              PFMA compliance hazards, audit findings &amp; governance oversight across 32 entities
             </p>
           </div>
 
@@ -79,22 +79,34 @@ export const DsacRiskView: React.FC<DsacRiskViewProps> = ({
         {/* 4 Risk Metrics */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-3">
           <div className="p-2.5 rounded-lg bg-rose-50/70 border border-rose-200/70">
-            <div className="text-[11px] font-semibold text-rose-800">High Risk Institutions</div>
+            <div className="flex items-center justify-between text-[11px] font-semibold text-rose-800">
+              <span>High Risk</span>
+              <AlertOctagon className="w-3.5 h-3.5 text-rose-600" />
+            </div>
             <div className="text-xl font-black text-rose-700 mt-0.5">{highRiskCount}</div>
-            <div className="text-[10px] text-rose-600 font-medium">Immediate DSAC Oversight</div>
+            <div className="text-[10px] text-rose-600 font-medium">Critical attention</div>
           </div>
           <div className="p-2.5 rounded-lg bg-amber-50/70 border border-amber-200/70">
-            <div className="text-[11px] font-semibold text-amber-800">Medium Risk Institutions</div>
+            <div className="flex items-center justify-between text-[11px] font-semibold text-amber-800">
+              <span>Medium Risk</span>
+              <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+            </div>
             <div className="text-xl font-black text-amber-700 mt-0.5">{mediumRiskCount}</div>
-            <div className="text-[10px] text-amber-600 font-medium">Under Regular Review</div>
+            <div className="text-[10px] text-amber-600 font-medium">Regular review</div>
           </div>
           <div className="p-2.5 rounded-lg bg-emerald-50/70 border border-emerald-200/70">
-            <div className="text-[11px] font-semibold text-emerald-800">Low Risk / Compliant</div>
+            <div className="flex items-center justify-between text-[11px] font-semibold text-emerald-800">
+              <span>Low Risk</span>
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+            </div>
             <div className="text-xl font-black text-emerald-700 mt-0.5">{lowRiskCount}</div>
-            <div className="text-[10px] text-emerald-600 font-medium">Satisfactory Assurance</div>
+            <div className="text-[10px] text-emerald-600 font-medium">Satisfactory</div>
           </div>
           <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200/70">
-            <div className="text-[11px] font-semibold text-slate-500">Overdue Statutory Returns</div>
+            <div className="flex items-center justify-between text-[11px] font-semibold text-slate-500">
+              <span>Overdue Returns</span>
+              <FileWarning className="w-3.5 h-3.5 text-slate-400" />
+            </div>
             <div className="text-xl font-black text-slate-900 mt-0.5">
               {entities.reduce((acc, e) => acc + e.overdueReportsCount, 0)}
             </div>
@@ -266,19 +278,19 @@ export const DsacRiskView: React.FC<DsacRiskViewProps> = ({
               <div className="flex flex-wrap items-center gap-2">
                 <button
                   onClick={handleIssueDirective}
-                  className="px-3 py-1.5 rounded-lg bg-rose-700 hover:bg-rose-800 text-white text-xs font-semibold flex items-center gap-1.5 shadow-xs transition-colors"
+                  className="px-3 py-1.5 rounded-lg bg-rose-700 hover:bg-rose-800 text-white text-xs font-semibold flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
                 >
                   <Send className="w-3.5 h-3.5" />
-                  <span>Issue Statutory Intervention Directive</span>
+                  <span>Issue Directive</span>
                 </button>
 
                 {onOpenWorkspace && (
                   <button
                     onClick={() => onOpenWorkspace(selectedEntity.id)}
-                    className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold flex items-center gap-1.5 transition-colors ml-auto"
+                    className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold flex items-center gap-1.5 transition-colors ml-auto cursor-pointer"
                   >
                     <ExternalLink className="w-3.5 h-3.5 text-slate-500" />
-                    <span>Open Entity Workspace</span>
+                    <span>Entity Workspace</span>
                   </button>
                 )}
               </div>

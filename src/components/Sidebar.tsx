@@ -22,7 +22,9 @@ import {
   Layers,
   Sparkles,
   ExternalLink,
-  ShieldCheck
+  ShieldCheck,
+  Coins,
+  Settings
 } from 'lucide-react';
 import { store } from '../services/store';
 import { SouthAfricanCoatOfArms } from './SouthAfricanCoatOfArms';
@@ -95,78 +97,107 @@ export const Sidebar: React.FC<SidebarProps> = ({
         },
       ];
 
-  const navSections: NavSection[] = [
-    {
-      title: isEntityUser ? 'Institutional Portal' : 'Departmental Oversight',
-      items: portalItems,
-    },
-    {
-      title: 'Statutory Operations',
-      items: [
+  const navSections: NavSection[] = isEntityUser
+    ? [
         {
-          id: 'entities',
-          label: '26 Entities & 6 NPOs',
-          sublabel: 'Institutional Directory',
-          icon: Building2,
-          count: pulse.totalEntities,
+          title: 'Institutional Portal',
+          items: portalItems,
         },
         {
-          id: 'executive',
-          label: 'Executive Pulse',
-          sublabel: 'Delivery & Expenditure',
-          icon: BarChart3,
+          title: 'Entity Workspace',
+          items: [
+            {
+              id: 'workspace',
+              label: 'Quarterly Review & PoE',
+              sublabel: 'Reports & Evidentiary Registers',
+              icon: Building,
+            },
+            {
+              id: 'documents',
+              label: 'Document Vault',
+              sublabel: 'Statutory Uploads',
+              icon: FolderLock,
+              count: store.documents.length,
+            },
+          ],
+        },
+      ]
+    : [
+        {
+          title: 'Primary Oversight',
+          items: [
+            {
+              id: 'dsac-repo',
+              label: 'Overview',
+              sublabel: 'Executive Performance Radar',
+              icon: LayoutDashboard,
+              badge: 'Live',
+              badgeColor: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
+            },
+            {
+              id: 'entities',
+              label: 'Entities',
+              sublabel: '26 PEs & 6 NPOs Directory',
+              icon: Building2,
+              count: pulse.totalEntities,
+            },
+            {
+              id: 'reports',
+              label: 'Reporting',
+              sublabel: 'Submissions, Review & Clearance',
+              icon: FileText,
+              count: pulse.q3OutstandingCount > 0 ? pulse.q3OutstandingCount : undefined,
+              countColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30',
+            },
+            {
+              id: 'performance',
+              label: 'Performance',
+              sublabel: 'KPIs, Targets & Pulse',
+              icon: Target,
+            },
+            {
+              id: 'financials',
+              label: 'Finance',
+              sublabel: 'Budgets, Expenditure & Grants',
+              icon: Coins,
+            },
+            {
+              id: 'tasks',
+              label: 'Actions',
+              sublabel: 'Directives, Risks & Tasks',
+              icon: ListTodo,
+              count: openTasksCount > 0 ? openTasksCount : undefined,
+              countColor: 'bg-rose-500/20 text-rose-300 border-rose-500/30',
+            },
+          ],
         },
         {
-          id: 'radar',
-          label: 'Early Warning Radar',
-          sublabel: 'Risk & PFMA Compliance',
-          icon: ShieldAlert,
-          count: pulse.highRiskEntitiesCount > 0 ? pulse.highRiskEntitiesCount : undefined,
-          countColor: 'bg-rose-500/20 text-rose-300 border-rose-500/30',
+          title: 'Intelligence & Administration',
+          items: [
+            {
+              id: 'ai',
+              label: 'Insights',
+              sublabel: 'AI Analyst & Comparative Trends',
+              icon: Bot,
+              badge: 'AI',
+              badgeColor: 'bg-teal-500/20 text-teal-300 border-teal-500/30',
+            },
+            {
+              id: 'documents',
+              label: 'Documents',
+              sublabel: 'Evidence Vault & Verification',
+              icon: FolderLock,
+              count: store.documents.length,
+            },
+            {
+              id: 'settings',
+              label: 'Administration',
+              sublabel: 'Governance, Roles & Audit',
+              icon: Settings,
+            },
+          ],
         },
-        {
-          id: 'tasks',
-          label: 'Statutory Directives',
-          sublabel: 'Corrective Action Tasks',
-          icon: ListTodo,
-          count: openTasksCount > 0 ? openTasksCount : undefined,
-          countColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30',
-        },
-        {
-          id: 'workspace',
-          label: 'Entity Workspace',
-          sublabel: 'Quarterly Review & PoE',
-          icon: Building,
-        },
-        {
-          id: 'documents',
-          label: 'Document Repository',
-          sublabel: 'Statutory PoE & Policies',
-          icon: FolderLock,
-          count: store.documents.length,
-        },
-      ],
-    },
-    {
-      title: 'Intelligence & Governance',
-      items: [
-        {
-          id: 'ai',
-          label: 'AI Performance Analyst',
-          sublabel: 'PFMA Grounded Intelligence',
-          icon: Bot,
-          badge: 'AI',
-          badgeColor: 'bg-teal-500/20 text-teal-300 border-teal-500/30',
-        },
-        {
-          id: 'audit',
-          label: 'PFMA Statutory Audit',
-          sublabel: 'Immutable Audit Trail',
-          icon: History,
-        },
-      ],
-    },
-  ];
+      ];
 
   const handleItemClick = (id: string) => {
     onSelectTab(id);
