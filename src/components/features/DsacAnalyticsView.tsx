@@ -89,15 +89,15 @@ export const DsacAnalyticsView: React.FC<DsacAnalyticsViewProps> = ({
   }, [filteredEntities]);
 
   const compliantCount = useMemo(() => {
-    return filteredEntities.filter(e => e.overallComplianceScore >= 80).length;
+    return filteredEntities.filter(e => e.riskLevel === 'LOW').length;
   }, [filteredEntities]);
 
   const monitoringCount = useMemo(() => {
-    return filteredEntities.filter(e => e.overallComplianceScore >= 60 && e.overallComplianceScore < 80).length;
+    return filteredEntities.filter(e => e.riskLevel === 'MEDIUM').length;
   }, [filteredEntities]);
 
   const nonCompliantCount = useMemo(() => {
-    return filteredEntities.filter(e => e.overallComplianceScore < 60).length;
+    return filteredEntities.filter(e => e.riskLevel === 'HIGH' || e.riskLevel === 'CRITICAL').length;
   }, [filteredEntities]);
 
   const totalJobsCreated = useMemo(() => {
@@ -303,8 +303,8 @@ export const DsacAnalyticsView: React.FC<DsacAnalyticsViewProps> = ({
                 {avgComplianceScore}%
               </div>
               <div className="mt-2 flex items-center justify-between text-[11px]">
-                <span className="text-emerald-700 font-semibold">{compliantCount} Compliant (≥80%)</span>
-                <span className="text-rose-600 font-semibold">{nonCompliantCount} Critical</span>
+                <span className="text-emerald-700 font-semibold">{compliantCount} On Track</span>
+                <span className="text-rose-600 font-semibold">{nonCompliantCount} High/Critical ({monitoringCount} Med)</span>
               </div>
               <div className="text-[10px] text-slate-400 mt-1">Section 38(1)(j) Written Assurance</div>
             </div>

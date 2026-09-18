@@ -104,14 +104,14 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
   const entities = store.entities;
   const pulse = store.getPerformancePulse();
 
-  // Aggregate calculations across all 26 Public Entities and 6 NPOs (billions and millions)
-  const totalApprovedBudget = entities.reduce((sum, e) => sum + (e.budgetAllocationZAR || 0), 0);
-  const totalTransferredToDate = entities.reduce((sum, e) => sum + (e.transferredAmountZAR || 0), 0);
-  const totalReportedExpenditure = entities.reduce((sum, e) => sum + (e.reportedExpenditureZAR || 0), 0);
-  const remainingDisbursement = Math.max(0, totalApprovedBudget - totalTransferredToDate);
-  const transferRate = totalApprovedBudget > 0 ? (totalTransferredToDate / totalApprovedBudget) * 100 : 0;
-  const expenditureRate = totalTransferredToDate > 0 ? (totalReportedExpenditure / totalTransferredToDate) * 100 : 0;
-  const highRiskEntitiesCount = entities.filter(e => e.riskLevel === 'HIGH' || e.riskLevel === 'CRITICAL').length;
+  // Aggregate calculations across all 26 Public Entities and 6 NPOs from centralized pulse
+  const totalApprovedBudget = pulse.totalAllocation;
+  const totalTransferredToDate = pulse.totalTransferred;
+  const totalReportedExpenditure = pulse.totalExpended;
+  const remainingDisbursement = pulse.remainingDisbursement;
+  const transferRate = pulse.transferRate;
+  const expenditureRate = pulse.expenditureRate;
+  const highRiskEntitiesCount = pulse.highRiskEntitiesCount;
   const highRiskEntities = entities.filter(e => e.riskLevel === 'HIGH' || e.riskLevel === 'CRITICAL');
 
   // Institution category breakdowns for graphs
@@ -121,11 +121,11 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
   const npoBudget = npoEntities.reduce((sum, e) => sum + (e.budgetAllocationZAR || 0), 0);
   const peTransfer = peEntities.reduce((sum, e) => sum + (e.transferredAmountZAR || 0), 0);
   const npoTransfer = npoEntities.reduce((sum, e) => sum + (e.transferredAmountZAR || 0), 0);
-  const pePercentage = totalApprovedBudget > 0 ? (peBudget / totalApprovedBudget) * 100 : 87.9;
-  const npoPercentage = totalApprovedBudget > 0 ? (npoBudget / totalApprovedBudget) * 100 : 12.1;
+  const pePercentage = totalApprovedBudget > 0 ? Math.round((peBudget / totalApprovedBudget) * 1000) / 10 : 87.9;
+  const npoPercentage = totalApprovedBudget > 0 ? Math.round((npoBudget / totalApprovedBudget) * 1000) / 10 : 12.1;
 
-  const reportsSubmitted = pulse.reportsSubmittedCount;
-  const reportsOutstanding = pulse.reportsOutstandingCount;
+  const reportsSubmitted = pulse.q3SubmittedCount;
+  const reportsOutstanding = pulse.q3OutstandingCount;
   const reportsSubmittedPercent = entities.length > 0 ? Math.round((reportsSubmitted / entities.length) * 100) : 0;
   const reportsOutstandingPercent = 100 - reportsSubmittedPercent;
 

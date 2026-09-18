@@ -294,44 +294,54 @@ export const EarlyWarningRadar: React.FC<EarlyWarningRadarProps> = ({
                 <div className="text-slate-600 mt-0.5">{activeExplainAlert.title}</div>
               </div>
 
-              <div>
-                <div className="font-bold text-slate-800 mb-2">Mathematical Risk Weighting Model:</div>
-                <div className="space-y-2.5">
-                  <div>
-                    <div className="flex justify-between text-slate-700 font-semibold mb-1">
-                      <span>1. Target Trajectory Deficit (45% Weight)</span>
-                      <span>{activeExplainAlert.evidenceData.actualAchieved} / {activeExplainAlert.evidenceData.expectedTrajectory} expected</span>
+              {(() => {
+                const explanation = store.explainEntityRisk(activeExplainAlert.entityId);
+                if (!explanation || explanation.factors.length === 0) {
+                  return (
+                    <div>
+                      <div className="font-bold text-slate-800 mb-2">Deterministic Risk Breakdown:</div>
+                      <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-slate-600">
+                        Entity compliance indicators are currently within stable operating boundaries (Risk Score: {activeExplainAlert.riskScore}/100).
+                      </div>
                     </div>
-                    <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
-                      <div className="bg-rose-500 h-full rounded-full" style={{ width: '75%' }}></div>
-                    </div>
-                  </div>
+                  );
+                }
 
+                return (
                   <div>
-                    <div className="flex justify-between text-slate-700 font-semibold mb-1">
-                      <span>2. Funding vs Delivery Variance Gap (25% Weight)</span>
-                      <span>{activeExplainAlert.evidenceData.financialUtilisationRate}% funding drawn</span>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="font-bold text-slate-800">Dynamic Risk Factor Decomposition:</span>
+                      <span className="text-[11px] font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                        Deterministic Total: {explanation.riskScore}/100
+                      </span>
                     </div>
-                    <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
-                      <div className="bg-amber-500 h-full rounded-full" style={{ width: '85%' }}></div>
-                    </div>
-                  </div>
 
-                  <div>
-                    <div className="flex justify-between text-slate-700 font-semibold mb-1">
-                      <span>3. Historical Late Reporting Index (15% Weight)</span>
-                      <span>{activeExplainAlert.evidenceData.historicalLateReportsCount} previous overdue returns</span>
-                    </div>
-                    <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
-                      <div className="bg-blue-500 h-full rounded-full" style={{ width: '60%' }}></div>
+                    <div className="space-y-2">
+                      {explanation.factors.map((factor, idx) => (
+                        <div key={idx} className="p-2.5 rounded-lg border border-slate-200 bg-slate-50/70">
+                          <div className="flex items-center justify-between text-slate-900 font-semibold mb-1">
+                            <span className="text-slate-800">{factor.name}</span>
+                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                              factor.severity === 'CRITICAL' ? 'bg-rose-100 text-rose-800 border border-rose-200' :
+                              factor.severity === 'HIGH' ? 'bg-amber-100 text-amber-800 border border-amber-200' :
+                              'bg-blue-100 text-blue-800 border border-blue-200'
+                            }`}>
+                              +{factor.scoreContribution} pts • {factor.severity}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-slate-600 leading-relaxed">
+                            {factor.description}
+                          </p>
+                        </div>
+                      ))}
                     </div>
                   </div>
-                </div>
-              </div>
+                );
+              })()}
 
               <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-900 leading-relaxed">
-                <div className="font-bold mb-1">Responsible AI Guarantee:</div>
-                This calculation uses deterministic arithmetic based on verified departmental returns. It represents a managerial risk signal designed to provide proactive departmental assistance before non-compliance crystallises.
+                <div className="font-bold mb-1">Responsible AI & Data Governance Guarantee:</div>
+                This calculation uses deterministic arithmetic based on verified departmental returns (KPI achievement trajectory, Section 38 drawdowns, and AGSA audit outcomes). It represents a managerial risk signal designed to provide proactive departmental assistance before non-compliance crystallises.
               </div>
             </div>
 

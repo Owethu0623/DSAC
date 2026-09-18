@@ -40,6 +40,9 @@ const STORAGE_KEYS = {
 
 // Safe JSON parse from localStorage with fallback
 function loadFromStorage<T>(key: string, fallback: T): T {
+  if (typeof window === 'undefined' || typeof localStorage === 'undefined') {
+    return fallback;
+  }
   try {
     const item = localStorage.getItem(key);
     return item ? JSON.parse(item) : fallback;
@@ -49,6 +52,9 @@ function loadFromStorage<T>(key: string, fallback: T): T {
 }
 
 function saveToStorage<T>(key: string, data: T): void {
+  if (typeof window === 'undefined' || typeof localStorage === 'undefined') {
+    return;
+  }
   try {
     localStorage.setItem(key, JSON.stringify(data));
   } catch (e) {
@@ -114,8 +120,32 @@ export class GovTrackStore {
     });
     this.entities = loadedEntities;
     saveToStorage(STORAGE_KEYS.ENTITIES, this.entities);
-    this.kpis = loadFromStorage<KPIRecord[]>(STORAGE_KEYS.KPIS, INITIAL_KPIS);
-    this.reports = loadFromStorage<QuarterlyReport[]>(STORAGE_KEYS.REPORTS, INITIAL_REPORTS);
+
+    let loadedKpis = loadFromStorage<KPIRecord[]>(STORAGE_KEYS.KPIS, INITIAL_KPIS);
+    if (!loadedKpis || loadedKpis.length < 30) {
+      loadedKpis = INITIAL_KPIS;
+    } else {
+      INITIAL_KPIS.forEach(initK => {
+        if (!loadedKpis.some(k => k.id === initK.id)) {
+          loadedKpis.push(initK);
+        }
+      });
+    }
+    this.kpis = loadedKpis;
+    saveToStorage(STORAGE_KEYS.KPIS, this.kpis);
+
+    let loadedReports = loadFromStorage<QuarterlyReport[]>(STORAGE_KEYS.REPORTS, INITIAL_REPORTS);
+    if (!loadedReports || loadedReports.length < 30) {
+      loadedReports = INITIAL_REPORTS;
+    } else {
+      INITIAL_REPORTS.forEach(initR => {
+        if (!loadedReports.some(r => r.id === initR.id)) {
+          loadedReports.push(initR);
+        }
+      });
+    }
+    this.reports = loadedReports;
+    saveToStorage(STORAGE_KEYS.REPORTS, this.reports);
     let loadedDocs = loadFromStorage<EntityDocument[]>(STORAGE_KEYS.DOCUMENTS, INITIAL_DOCUMENTS);
     INITIAL_DOCUMENTS.forEach(initDoc => {
       const existing = loadedDocs.find(d => d.id === initDoc.id);
@@ -744,41 +774,60 @@ export class GovTrackStore {
 
     const entityKPIs = this.kpis.filter(k => k.entityId === entityId);
     const entityReports = this.reports.filter(r => r.entityId === entityId);
+    const entityTasks = this.tasks.filter(t => t.entityId === entityId && (t.status === 'OPEN' || t.status === 'IN_PROGRESS' || t.status === 'OVERDUE'));
 
-    // Factors:
-    // 1. Trajectory delay: average % achieved vs expected
+    // 1. KPI Trajectory Achievement
     let avgAchievementRatio = 1.0;
     if (entityKPIs.length > 0) {
-      const sum = entityKPIs.reduce((acc, k) => acc + (k.currentValue / Math.max(1, k.expectedValue)), 0);
+      const sum = entityKPIs.reduce((acc, k) => {
+        const exp = Math.max(1, k.expectedValue || (k.q1Target + k.q2Target + k.q3Target));
+        const act = k.currentValue;
+        return acc + Math.min(1.2, act / exp);
+      }, 0);
       avgAchievementRatio = sum / entityKPIs.length;
     }
 
-    // 2. Financial vs Output Variance
+    // 2. Financial vs Output Variance (PFMA delivery lag)
     const fundingUtilisationRate = (entity.reportedExpenditureZAR / Math.max(1, entity.transferredAmountZAR));
     const varianceGap = Math.max(0, fundingUtilisationRate - avgAchievementRatio);
 
-    // 3. Overdue reports
+    // 3. Overdue reports and non-compliance
     const overdueCount = entityReports.filter(r => r.submissionStatus === 'OVERDUE').length;
+    const correctionCount = entityReports.filter(r => r.submissionStatus === 'CORRECTION_REQUIRED').length;
+    entity.overdueReportsCount = overdueCount;
 
-    // 4. Audit penalty
+    // 4. AGSA Audit Outcome Penalty
     let auditScoreDeduction = 0;
-    if (entity.auditOutcome === 'QUALIFIED') auditScoreDeduction = 30;
+    if (entity.auditOutcome === 'DISCLAIMER') auditScoreDeduction = 40;
+    else if (entity.auditOutcome === 'QUALIFIED') auditScoreDeduction = 25;
     else if (entity.auditOutcome === 'UNQUALIFIED_WITH_FINDINGS') auditScoreDeduction = 15;
-    else if (entity.auditOutcome === 'DISCLAIMER') auditScoreDeduction = 50;
 
-    // Mathematical Risk Score (0 = lowest risk, 100 = critical)
+    // 5. Unresolved statutory tasks penalty
+    const openTaskPenalty = Math.min(15, entityTasks.length * 5);
+
+    // Deterministic Risk Score calculation (0 to 100)
     let calculatedRisk = 0;
-    calculatedRisk += Math.max(0, (1.0 - avgAchievementRatio) * 45); // up to 45 pts
-    calculatedRisk += varianceGap * 25; // up to 25 pts for spending without delivering
-    calculatedRisk += overdueCount * 15; // 15 pts per overdue report
-    calculatedRisk += (auditScoreDeduction * 0.5); // audit quality
+    // KPI trajectory lag: up to 50 points
+    calculatedRisk += Math.max(0, (1.0 - avgAchievementRatio) * 50);
+    // Financial variance gap: up to 40 points
+    calculatedRisk += Math.max(0, varianceGap * 40);
+    // Overdue reports: 25 points per overdue report
+    calculatedRisk += overdueCount * 25;
+    // Correction required: 12 points per rejected report
+    calculatedRisk += correctionCount * 12;
+    // Audit outcome penalty
+    if (entity.auditOutcome === 'DISCLAIMER') calculatedRisk += 45;
+    else if (entity.auditOutcome === 'QUALIFIED') calculatedRisk += 30;
+    else if (entity.auditOutcome === 'UNQUALIFIED_WITH_FINDINGS') calculatedRisk += 15;
+    // Open tasks penalty: up to 20 points
+    calculatedRisk += Math.min(20, entityTasks.length * 5);
 
-    calculatedRisk = Math.min(99, Math.max(5, Math.round(calculatedRisk)));
+    calculatedRisk = Math.min(98, Math.max(8, Math.round(calculatedRisk)));
     entity.riskScore = calculatedRisk;
 
-    if (calculatedRisk >= 75) {
+    if (calculatedRisk >= 85) {
       entity.riskLevel = 'CRITICAL';
-    } else if (calculatedRisk >= 60) {
+    } else if (calculatedRisk >= 55) {
       entity.riskLevel = 'HIGH';
     } else if (calculatedRisk >= 35) {
       entity.riskLevel = 'MEDIUM';
@@ -786,67 +835,211 @@ export class GovTrackStore {
       entity.riskLevel = 'LOW';
     }
 
-    // Update overall compliance
-    entity.overallComplianceScore = Math.max(20, 100 - Math.round(calculatedRisk * 0.7));
+    // Mathematically coherent compliance score (100 - risk adjusted)
+    entity.overallComplianceScore = Math.min(98, Math.max(18, 100 - Math.round(calculatedRisk * 0.75)));
+  }
+
+  explainEntityRisk(entityId: string) {
+    const entity = this.entities.find(e => e.id === entityId);
+    if (!entity) return null;
+
+    const entityKPIs = this.kpis.filter(k => k.entityId === entityId);
+    const entityReports = this.reports.filter(r => r.entityId === entityId);
+    const entityTasks = this.tasks.filter(t => t.entityId === entityId && (t.status === 'OPEN' || t.status === 'IN_PROGRESS' || t.status === 'OVERDUE'));
+
+    let avgAchievementRatio = 1.0;
+    if (entityKPIs.length > 0) {
+      const sum = entityKPIs.reduce((acc, k) => {
+        const exp = Math.max(1, k.expectedValue || (k.q1Target + k.q2Target + k.q3Target));
+        return acc + Math.min(1.2, k.currentValue / exp);
+      }, 0);
+      avgAchievementRatio = sum / entityKPIs.length;
+    }
+
+    const fundingUtilisationRate = (entity.reportedExpenditureZAR / Math.max(1, entity.transferredAmountZAR));
+    const varianceGap = Math.max(0, fundingUtilisationRate - avgAchievementRatio);
+    const overdueCount = entityReports.filter(r => r.submissionStatus === 'OVERDUE').length;
+    const correctionCount = entityReports.filter(r => r.submissionStatus === 'CORRECTION_REQUIRED').length;
+
+    const factors: { name: string; scoreContribution: number; description: string; severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' }[] = [];
+
+    if (avgAchievementRatio < 0.9) {
+      const lag = Math.round((1.0 - avgAchievementRatio) * 100);
+      factors.push({
+        name: 'KPI Trajectory Delivery Lag',
+        scoreContribution: Math.round(Math.max(0, (1.0 - avgAchievementRatio) * 40)),
+        description: `Average target delivery is lagging ${lag}% behind expected quarterly milestones across ${entityKPIs.length} statutory indicators.`,
+        severity: avgAchievementRatio < 0.6 ? 'CRITICAL' : avgAchievementRatio < 0.8 ? 'HIGH' : 'MEDIUM',
+      });
+    }
+
+    if (varianceGap > 0.1) {
+      const gapPct = Math.round(varianceGap * 100);
+      factors.push({
+        name: 'PFMA Financial vs Output Variance Anomaly',
+        scoreContribution: Math.round(varianceGap * 30),
+        description: `Disbursement expenditure rate (${Math.round(fundingUtilisationRate * 100)}%) is disproportionately outstripping output delivery (${Math.round(avgAchievementRatio * 100)}%) by ${gapPct}%.`,
+        severity: varianceGap > 0.3 ? 'CRITICAL' : 'HIGH',
+      });
+    }
+
+    if (overdueCount > 0) {
+      factors.push({
+        name: 'Statutory Reporting Non-Compliance',
+        scoreContribution: overdueCount * 20,
+        description: `${overdueCount} quarterly statutory return(s) have passed their statutory reporting deadline without Accounting Officer submission.`,
+        severity: 'CRITICAL',
+      });
+    }
+
+    if (correctionCount > 0) {
+      factors.push({
+        name: 'Portfolio of Evidence Correction Required',
+        scoreContribution: correctionCount * 10,
+        description: `${correctionCount} submitted quarterly return(s) flagged with deficient evidence or unverified audit schedules by DSAC Oversight.`,
+        severity: 'MEDIUM',
+      });
+    }
+
+    if (entity.auditOutcome !== 'CLEAN_AUDIT') {
+      const label = entity.auditOutcome === 'DISCLAIMER' ? 'Disclaimer of Opinion' : entity.auditOutcome === 'QUALIFIED' ? 'Qualified Audit Opinion' : 'Unqualified with Findings';
+      const pts = entity.auditOutcome === 'DISCLAIMER' ? 40 : entity.auditOutcome === 'QUALIFIED' ? 25 : 15;
+      factors.push({
+        name: `Auditor-General Findings: ${label}`,
+        scoreContribution: pts,
+        description: `Entity received a ${label} in the latest statutory audit cycle from the Auditor-General of South Africa.`,
+        severity: entity.auditOutcome === 'DISCLAIMER' ? 'CRITICAL' : entity.auditOutcome === 'QUALIFIED' ? 'HIGH' : 'MEDIUM',
+      });
+    }
+
+    if (entityTasks.length > 0) {
+      factors.push({
+        name: 'Unresolved DSAC Corrective Directives',
+        scoreContribution: Math.min(15, entityTasks.length * 5),
+        description: `${entityTasks.length} formal remedial task(s) currently open or overdue on the monitoring register.`,
+        severity: entityTasks.length >= 2 ? 'HIGH' : 'MEDIUM',
+      });
+    }
+
+    return {
+      entityId: entity.id,
+      entityName: entity.name,
+      riskScore: entity.riskScore,
+      riskLevel: entity.riskLevel,
+      complianceScore: entity.overallComplianceScore,
+      factors,
+      recommendedIntervention: entity.riskLevel === 'CRITICAL'
+        ? 'Convene emergency Ministerial and Board oversight session; withhold subsequent grant tranches pending physical verification.'
+        : entity.riskLevel === 'HIGH'
+        ? 'Dispatch DSAC Governance Task Team; issue PFMA Section 38 remedial directive within 14 working days.'
+        : entity.riskLevel === 'MEDIUM'
+        ? 'Monitor Q4 operational delivery trajectory closely; verify revised Portfolio of Evidence before sign-off.'
+        : 'Maintain standard quarterly monitoring cycle in accordance with statutory reporting framework.',
+    };
   }
 
   // --- EXECUTIVE PERFORMANCE PULSE AGGREGATION ---
   getPerformancePulse() {
     const totalEntities = this.entities.length;
+    const publicEntitiesCount = this.entities.filter(e => e.type === 'PUBLIC_ENTITY').length;
+    const nposCount = this.entities.filter(e => e.type === 'NPO').length;
+
     const onTrackCount = this.entities.filter(e => e.riskLevel === 'LOW').length;
     const monitoringCount = this.entities.filter(e => e.riskLevel === 'MEDIUM').length;
-    const interventionCount = this.entities.filter(e => e.riskLevel === 'HIGH' || e.riskLevel === 'CRITICAL').length;
-    
-    const overdueReportsCount = this.reports.filter(r => r.submissionStatus === 'OVERDUE').length;
-    const pendingReviewCount = this.reports.filter(r => r.submissionStatus === 'SUBMITTED' || r.submissionStatus === 'RESUBMITTED').length;
-    const openTasksCount = this.tasks.filter(t => t.status === 'OPEN' || t.status === 'IN_PROGRESS').length;
+    const highRiskCount = this.entities.filter(e => e.riskLevel === 'HIGH').length;
+    const criticalRiskCount = this.entities.filter(e => e.riskLevel === 'CRITICAL').length;
+    const interventionCount = highRiskCount + criticalRiskCount;
 
-    const totalAllocation = this.entities.reduce((acc, e) => acc + e.budgetAllocationZAR, 0);
-    const totalTransferred = this.entities.reduce((acc, e) => acc + e.transferredAmountZAR, 0);
-    const totalExpended = this.entities.reduce((acc, e) => acc + e.reportedExpenditureZAR, 0);
-    const expenditureRate = totalTransferred > 0 ? (totalExpended / totalTransferred) * 100 : 0;
+    const totalAllocation = this.entities.reduce((acc, e) => acc + (e.budgetAllocationZAR || 0), 0);
+    const totalTransferred = this.entities.reduce((acc, e) => acc + (e.transferredAmountZAR || 0), 0);
+    const totalExpended = this.entities.reduce((acc, e) => acc + (e.reportedExpenditureZAR || 0), 0);
+    const remainingDisbursement = Math.max(0, totalAllocation - totalTransferred);
 
-    const totalYouthJobs = this.entities.reduce((acc, e) => acc + e.jobStats.youthJobsCreated, 0);
-    const totalPermanentJobs = this.entities.reduce((acc, e) => acc + e.jobStats.permanentJobs, 0);
-    const totalCreativePractitioners = this.entities.reduce((acc, e) => acc + e.jobStats.creativeSectorPractitionersSupported, 0);
+    const transferRate = totalAllocation > 0 ? Math.round((totalTransferred / totalAllocation) * 1000) / 10 : 0;
+    const expenditureRate = totalTransferred > 0 ? Math.round((totalExpended / totalTransferred) * 1000) / 10 : 0;
+    const burnRate = totalAllocation > 0 ? Math.round((totalExpended / totalAllocation) * 1000) / 10 : 0;
+
+    const totalYouthJobs = this.entities.reduce((acc, e) => acc + (e.jobStats?.youthJobsCreated || 0), 0);
+    const totalPermanentJobs = this.entities.reduce((acc, e) => acc + (e.jobStats?.permanentJobs || 0), 0);
+    const totalCreativePractitioners = this.entities.reduce((acc, e) => acc + (e.jobStats?.creativeSectorPractitionersSupported || 0), 0);
+
+    const cleanAuditCount = this.entities.filter(e => e.auditOutcome === 'CLEAN_AUDIT').length;
+    const cleanAuditRate = totalEntities > 0 ? Math.round((cleanAuditCount / totalEntities) * 1000) / 10 : 0;
+    const averageCompliance = Math.round(this.entities.reduce((acc, e) => acc + e.overallComplianceScore, 0) / Math.max(1, totalEntities));
 
     const totalDocumentsCount = this.documents.length;
     const verifiedDocumentsCount = this.documents.filter(d => d.approvalStatus === 'APPROVED').length;
     const pendingDocumentsCount = this.documents.filter(d => d.approvalStatus === 'PENDING_REVIEW').length;
     const amendmentRequiredDocumentsCount = this.documents.filter(d => d.approvalStatus === 'REQUIRES_AMENDMENT').length;
-    
-    // Total reports submitted vs outstanding across all entities
-    const entitiesWithSubmittedReports = new Set(
-      this.reports
-        .filter(r => r.submissionStatus === 'SUBMITTED' || r.submissionStatus === 'APPROVED' || r.submissionStatus === 'RESUBMITTED')
-        .map(r => r.entityId)
-    );
-    const reportsSubmittedCount = entitiesWithSubmittedReports.size;
-    const reportsOutstandingCount = Math.max(0, totalEntities - reportsSubmittedCount);
+
+    // Reports calculations
+    const totalReports = this.reports.length;
+    const reportsApprovedCount = this.reports.filter(r => r.submissionStatus === 'APPROVED').length;
+    const reportsSubmittedCount = this.reports.filter(r => r.submissionStatus === 'SUBMITTED' || r.submissionStatus === 'RESUBMITTED').length;
+    const reportsUnderReviewCount = this.reports.filter(r => r.submissionStatus === 'UNDER_REVIEW').length;
+    const reportsCorrectionRequiredCount = this.reports.filter(r => r.submissionStatus === 'CORRECTION_REQUIRED').length;
+    const overdueReportsCount = this.reports.filter(r => r.submissionStatus === 'OVERDUE').length;
+    const pendingReviewCount = reportsSubmittedCount + reportsUnderReviewCount;
+
+    // Active Q3 submission stats across all 32 entities
+    const q3Reports = this.reports.filter(r => r.quarter === 'Q3');
+    const q3SubmittedOrApproved = q3Reports.filter(r => r.submissionStatus === 'APPROVED' || r.submissionStatus === 'SUBMITTED' || r.submissionStatus === 'UNDER_REVIEW' || r.submissionStatus === 'RESUBMITTED');
+    const q3SubmittedCount = q3SubmittedOrApproved.length;
+    const q3OutstandingCount = Math.max(0, totalEntities - q3SubmittedCount);
+
+    const openTasksCount = this.tasks.filter(t => t.status === 'OPEN' || t.status === 'IN_PROGRESS' || t.status === 'OVERDUE').length;
+
+    // KPI aggregations
+    const totalKpis = this.kpis.length;
+    const kpisOnTrack = this.kpis.filter(k => k.status === 'ON_TRACK' || k.status === 'COMPLETED').length;
+    const kpisAtRisk = this.kpis.filter(k => k.status === 'AT_RISK').length;
+    const kpisMissed = this.kpis.filter(k => k.status === 'MISSED').length;
+    const averageKpiAchievement = totalKpis > 0 ? Math.round((this.kpis.reduce((acc, k) => acc + k.percentageAchieved, 0) / totalKpis) * 10) / 10 : 0;
 
     return {
       totalEntities,
+      publicEntitiesCount,
+      nposCount,
       onTrackCount,
       monitoringCount,
+      highRiskCount,
+      criticalRiskCount,
       interventionCount,
       highRiskEntitiesCount: interventionCount,
-      openTasksCount,
-      overdueReportsCount,
-      pendingReviewCount,
       totalAllocation,
       totalTransferred,
       totalExpended,
-      expenditureRate: Math.round(expenditureRate * 10) / 10,
+      remainingDisbursement,
+      transferRate,
+      expenditureRate,
+      burnRate,
       totalYouthJobs,
       totalPermanentJobs,
       totalCreativePractitioners,
-      averageCompliance: Math.round(this.entities.reduce((acc, e) => acc + e.overallComplianceScore, 0) / Math.max(1, totalEntities)),
+      cleanAuditCount,
+      cleanAuditRate,
+      averageCompliance,
       totalDocumentsCount,
       verifiedDocumentsCount,
       pendingDocumentsCount,
       amendmentRequiredDocumentsCount,
-      reportsSubmittedCount,
-      reportsOutstandingCount,
+      totalReports,
+      reportsApprovedCount,
+      allSubmittedReportsCount: reportsSubmittedCount,
+      reportsUnderReviewCount,
+      reportsCorrectionRequiredCount,
+      overdueReportsCount,
+      pendingReviewCount,
+      q3SubmittedCount,
+      q3OutstandingCount,
+      reportsSubmittedCount: q3SubmittedCount,
+      reportsOutstandingCount: q3OutstandingCount,
+      openTasksCount,
+      totalKpis,
+      kpisOnTrack,
+      kpisAtRisk,
+      kpisMissed,
+      averageKpiAchievement,
     };
   }
 
