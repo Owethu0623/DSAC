@@ -10,9 +10,12 @@ import {
   Send,
   Building2,
   FileWarning,
-  Clock
+  Clock,
+  Calendar,
+  Bell
 } from 'lucide-react';
 import { PublicEntity } from '../../types';
+import { store } from '../../services/store';
 
 interface DsacRiskViewProps {
   entities: PublicEntity[];
@@ -29,6 +32,40 @@ export const DsacRiskView: React.FC<DsacRiskViewProps> = ({
   const [riskFilter, setRiskFilter] = useState<'ALL' | 'HIGH' | 'MEDIUM' | 'LOW'>('ALL');
   const [selectedEntityId, setSelectedEntityId] = useState<string>(entities[0]?.id || 'ent-sahra');
   const [actionNotice, setActionNotice] = useState<string | null>(null);
+
+  const deadlines = store.deadlines;
+
+  // Countdown broken down as 30 days / 15 days / hourly for due reports (Requirement b)
+  const getCountdown = (isoDate: string) => {
+    const diffMs = new Date(isoDate).getTime() - Date.now();
+    if (diffMs <= 0) return { text: 'DEADLINE MISSED / OVERDUE', isOverdue: true, bracket: 'OVERDUE', badge: 'Critical Overdue' };
+    
+    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+    const diffDays = Math.floor(diffHours / 24);
+
+    if (diffHours < 24) {
+      return { 
+        text: `${diffHours}h ${Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60))}m remaining`, 
+        isOverdue: false, 
+        bracket: 'HOURLY_URGENT',
+        badge: 'Hourly Urgency'
+      };
+    } else if (diffDays <= 15) {
+      return { 
+        text: `${diffDays} days remaining`, 
+        isOverdue: false, 
+        bracket: '15_DAYS',
+        badge: '15-Day Reminder'
+      };
+    } else {
+      return { 
+        text: `${diffDays} days remaining`, 
+        isOverdue: false, 
+        bracket: '30_DAYS',
+        badge: '30-Day Notice'
+      };
+    }
+  };
 
   const filteredEntities = entities.filter(ent => {
     const matchesSearch = 
@@ -111,6 +148,69 @@ export const DsacRiskView: React.FC<DsacRiskViewProps> = ({
               {entities.reduce((acc, e) => acc + e.overdueReportsCount, 0)}
             </div>
             <div className="text-[10px] text-slate-400">Section 38 Overdue</div>
+          </div>
+        </div>
+
+        {/* Regulatory Due Dates Countdown Tracker (Requirement b: 30 Days / 15 Days / Hourly Countdown) */}
+        <div className="mt-4 pt-4 border-t border-slate-100">
+          <div className="flex items-center justify-between mb-2.5">
+            <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-slate-700">
+              <Clock className="w-3.5 h-3.5 text-amber-500" />
+              <span>Regulatory Due Dates &amp; Multi-Stage Countdown Tracker</span>
+            </div>
+            <span className="text-[11px] text-slate-400 font-medium hidden sm:inline">
+              30-Day Notice • 15-Day Critical • Hourly Urgency
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+            {deadlines.slice(0, 3).map(deadline => {
+              const countdown = getCountdown(deadline.dueDate);
+
+              return (
+                <div 
+                  key={deadline.id}
+                  className={`p-3 rounded-xl border transition-all ${
+                    countdown.bracket === 'HOURLY_URGENT'
+                      ? 'bg-rose-50/80 border-rose-300 ring-1 ring-rose-300'
+                      : countdown.bracket === '15_DAYS'
+                      ? 'bg-amber-50/80 border-amber-300'
+                      : 'bg-slate-50 border-slate-200'
+                  }`}
+                >
+                  <div className="flex items-center justify-between text-xs mb-1">
+                    <span className={`px-2 py-0.5 rounded font-bold text-[10px] ${
+                      countdown.bracket === 'HOURLY_URGENT'
+                        ? 'bg-rose-600 text-white animate-pulse'
+                        : countdown.bracket === '15_DAYS'
+                        ? 'bg-amber-600 text-white'
+                        : 'bg-slate-200 text-slate-700'
+                    }`}>
+                      {countdown.badge}
+                    </span>
+                    <span className="font-mono text-[10px] font-bold text-slate-600">
+                      Due: {new Date(deadline.dueDate).toLocaleDateString('en-ZA')}
+                    </span>
+                  </div>
+
+                  <h3 className="font-bold text-slate-900 text-xs truncate">{deadline.title}</h3>
+                  <p className="text-[11px] text-slate-500 mt-0.5 line-clamp-1">{deadline.description}</p>
+
+                  <div className="mt-2 pt-2 border-t border-slate-200/60 flex items-center justify-between text-[11px] font-semibold">
+                    <span className="text-slate-400 font-mono">Countdown:</span>
+                    <span className={`font-mono ${
+                      countdown.bracket === 'HOURLY_URGENT' 
+                        ? 'text-rose-700 font-black animate-pulse' 
+                        : countdown.bracket === '15_DAYS'
+                        ? 'text-amber-700 font-bold'
+                        : 'text-slate-700 font-bold'
+                    }`}>
+                      {countdown.text}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>

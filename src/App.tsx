@@ -77,7 +77,6 @@ export default function App() {
       {currentTab !== 'workspace' && currentTab !== 'entity-portal' && (
         <DsacRepoDashboard
           initialSection={
-            currentTab === 'entities' ? 'entities' :
             currentTab === 'executive' || currentTab === 'performance' ? 'performance' :
             currentTab === 'kpis' ? 'kpis' :
             currentTab === 'targets' ? 'targets' :
@@ -99,7 +98,7 @@ export default function App() {
             setSelectedEntityId(entityId);
             setCurrentTab('workspace');
           }}
-          onNavigateToEntitiesList={() => setCurrentTab('entities')}
+          onNavigateToEntitiesList={() => setCurrentTab('overview')}
           onOpenReportDetails={() => setCurrentTab('workspace')}
           onLogout={handleLogout}
         />

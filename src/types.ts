@@ -99,6 +99,14 @@ export interface PublicEntity {
   headOfEntity: string;
   contactEmail: string;
   reportingOfficerName: string;
+  // PFMA Section 38(1)(j) & Statutory Non-Submission Policy Fields
+  trancheStatus?: 'RELEASED' | 'WITHHELD' | 'CONDITIONAL_HOLD' | 'UNDER_REVIEW';
+  trancheAmountZAR?: number;
+  statutoryDefaultStage?: 0 | 1 | 2 | 3 | 4; // 0: Compliant, 1: 7-Day Warning, 2: Tranche Freeze (PFMA Sec 38), 3: Board Censure, 4: AGSA Referral
+  statutoryDefaultNoticeDate?: string;
+  statutoryDefaultReason?: string;
+  extensionGrantedUntil?: string;
+  extensionRequestedReason?: string;
 }
 
 export interface KPIRecord {

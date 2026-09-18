@@ -21,7 +21,9 @@ import {
   SlidersHorizontal,
   RefreshCw,
   ExternalLink,
-  DollarSign
+  DollarSign,
+  Upload,
+  FileSpreadsheet
 } from 'lucide-react';
 import { store } from '../../services/store';
 import { 
@@ -79,6 +81,42 @@ export const DsacFinancialDashboard: React.FC<DsacFinancialDashboardProps> = ({
   const [newCatCode, setNewCatCode] = useState('');
   const [newCatName, setNewCatName] = useState('');
   const [newCatDesc, setNewCatDesc] = useState('');
+
+  // Treasury Allocation Upload State (Requirement c)
+  const [showUploadTreasuryModal, setShowUploadTreasuryModal] = useState(false);
+  const [treasuryUploadFileName, setTreasuryUploadFileName] = useState<string>('National_Treasury_Vote_37_ENE_2026_27.csv');
+  const [treasuryAllocationsPreview, setTreasuryAllocationsPreview] = useState<{ shortCode: string; name: string; amount: number }[]>([]);
+  const [isProcessingTreasuryFile, setIsProcessingTreasuryFile] = useState(false);
+
+  // Initialize preview when modal opens
+  const openTreasuryUploadModal = () => {
+    const previewList = store.entities.map(e => ({
+      shortCode: e.shortCode,
+      name: e.name,
+      amount: e.budgetAllocationZAR || 10_000_000
+    }));
+    setTreasuryAllocationsPreview(previewList);
+    setShowUploadTreasuryModal(true);
+  };
+
+  const handleApplyTreasuryAllocations = (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsProcessingTreasuryFile(true);
+    
+    setTimeout(() => {
+      const result = store.uploadTreasuryAllocations(
+        treasuryAllocationsPreview.map(p => ({ shortCode: p.shortCode, amount: p.amount })),
+        selectedYear,
+        treasuryUploadFileName
+      );
+
+      setIsProcessingTreasuryFile(false);
+      setShowUploadTreasuryModal(false);
+      setNotificationMsg(`Successfully imported National Treasury Vote 37 budget allocations: ${result.updatedCount} institutions updated totaling ${formatZAR(result.totalZAR)}.`);
+      setTimeout(() => setNotificationMsg(null), 5000);
+      setTick(t => t + 1);
+    }, 400);
+  };
 
   const [notificationMsg, setNotificationMsg] = useState<string | null>(null);
 
@@ -263,6 +301,14 @@ export const DsacFinancialDashboard: React.FC<DsacFinancialDashboardProps> = ({
             >
               <Download className="w-3.5 h-3.5" />
               <span>Export CSV</span>
+            </button>
+
+            <button
+              onClick={openTreasuryUploadModal}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-emerald-800 hover:bg-emerald-900 rounded-lg transition-colors cursor-pointer shadow-xs"
+            >
+              <Upload className="w-3.5 h-3.5" />
+              <span>Upload Treasury Allocations</span>
             </button>
           </div>
         </div>
@@ -1102,6 +1148,146 @@ export const DsacFinancialDashboard: React.FC<DsacFinancialDashboardProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Upload National Treasury Budget Allocations Modal (Requirement c) */}
+      {showUploadTreasuryModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl max-w-3xl w-full border border-slate-200 shadow-2xl p-6 space-y-5 my-8">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <span className="p-2 rounded-xl bg-emerald-100 text-emerald-800 font-bold">
+                  <Upload className="w-5 h-5" />
+                </span>
+                <div>
+                  <h3 className="font-black text-slate-900 text-base">
+                    Upload National Treasury Budget Allocations
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Vote 37 / Estimates of National Expenditure (ENE) gazetted baseline appropriations ({selectedYear})
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowUploadTreasuryModal(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* File Dropzone / Selector */}
+            <div className="border-2 border-dashed border-slate-200 hover:border-emerald-500 rounded-xl p-5 text-center bg-slate-50/50 transition-colors">
+              <FileSpreadsheet className="w-8 h-8 text-emerald-600 mx-auto mb-2" />
+              <div className="text-xs font-bold text-slate-800">
+                {treasuryUploadFileName}
+              </div>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                CSV or XLSX containing columns: <code className="font-mono text-emerald-700 font-bold">EntityCode, EntityName, AllocatedBudgetZAR</code>
+              </p>
+              <div className="mt-3 flex items-center justify-center gap-3">
+                <label className="px-3 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg text-xs font-bold text-slate-700 cursor-pointer shadow-2xs">
+                  <span>Choose Another File</span>
+                  <input
+                    type="file"
+                    accept=".csv,.xlsx,.xls"
+                    className="hidden"
+                    onChange={(e) => {
+                      if (e.target.files?.[0]) {
+                        setTreasuryUploadFileName(e.target.files[0].name);
+                      }
+                    }}
+                  />
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const sample = "EntityCode,EntityName,AllocatedBudgetZAR\n" + treasuryAllocationsPreview.map(p => `${p.shortCode},"${p.name}",${p.amount}`).join('\n');
+                    const blob = new Blob([sample], { type: 'text/csv' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `Template_National_Treasury_Allocations_${selectedYear.replace('/', '_')}.csv`;
+                    a.click();
+                  }}
+                  className="px-3 py-1.5 text-xs text-emerald-800 hover:underline font-semibold"
+                >
+                  Download Standard Template
+                </button>
+              </div>
+            </div>
+
+            {/* Preview Allocation Table */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-bold text-slate-700">
+                  Allocation Breakdown Preview ({treasuryAllocationsPreview.length} Institutions)
+                </span>
+                <span className="font-mono font-black text-emerald-800 text-sm">
+                  Total: {formatZAR(treasuryAllocationsPreview.reduce((sum, p) => sum + p.amount, 0))}
+                </span>
+              </div>
+
+              <div className="max-h-60 overflow-y-auto border border-slate-200 rounded-xl divide-y divide-slate-100 text-xs">
+                {treasuryAllocationsPreview.map((item, idx) => (
+                  <div key={item.shortCode} className="p-2.5 flex items-center justify-between gap-3 hover:bg-slate-50">
+                    <div className="min-w-0">
+                      <div className="font-bold text-slate-900 truncate">{item.name}</div>
+                      <div className="text-[10px] text-slate-400 font-mono">{item.shortCode}</div>
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <span className="text-slate-400 font-mono text-xs">R</span>
+                      <input
+                        type="number"
+                        value={item.amount}
+                        onChange={(e) => {
+                          const val = Math.max(0, parseInt(e.target.value) || 0);
+                          setTreasuryAllocationsPreview(prev => {
+                            const copy = [...prev];
+                            copy[idx] = { ...copy[idx], amount: val };
+                            return copy;
+                          });
+                        }}
+                        className="w-32 px-2 py-1 bg-slate-50 border border-slate-200 rounded-lg text-right font-mono font-bold text-slate-900 text-xs"
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Footer Buttons */}
+            <div className="flex items-center justify-between pt-3 border-t border-slate-100">
+              <span className="text-[11px] text-slate-500 font-medium">
+                Under Section 38 PFMA, allocated amounts bind quarterly tranche releases.
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowUploadTreasuryModal(false)}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={isProcessingTreasuryFile}
+                  onClick={handleApplyTreasuryAllocations}
+                  className="px-5 py-2 bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-bold rounded-lg shadow-xs cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  {isProcessingTreasuryFile ? (
+                    <span>Processing Allocations...</span>
+                  ) : (
+                    <>
+                      <Check className="w-4 h-4" />
+                      <span>Commit &amp; Synchronize Allocations</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

@@ -37,14 +37,16 @@ import {
   Award,
   Menu,
   X,
-  Shield
+  Shield,
+  Compass,
+  BookOpen,
+  Info
 } from 'lucide-react';
 import { store } from '../services/store';
 import { SouthAfricanCoatOfArms, DsacOfficialLogo } from './SouthAfricanCoatOfArms';
 import { PublicEntity } from '../types';
 import { DsacFeatureSideView, DsacFeatureId } from './features/DsacFeatureSideView';
 import { EntityInspectionDrawer } from './features/EntityInspectionDrawer';
-import { DsacEntitiesView } from './features/DsacEntitiesView';
 import { DsacPerformanceView } from './features/DsacPerformanceView';
 import { DsacComplianceView } from './features/DsacComplianceView';
 import { DsacSupportView } from './features/DsacSupportView';
@@ -61,6 +63,7 @@ import { DsacQueriesView } from './features/DsacQueriesView';
 import { DocumentRepositoryView } from './DocumentRepositoryView';
 import { DsacNotificationsView } from './features/DsacNotificationsView';
 import { PresentationDemoMode } from './PresentationDemoMode';
+import { SystemGuideModal } from './SystemGuideModal';
 
 interface DsacRepoDashboardProps {
   onNavigateToEntity?: (entityId: string) => void;
@@ -89,12 +92,13 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
   const [isDrawerOpen, setIsDrawerOpen] = useState<boolean>(false);
   const [kpiFilter, setKpiFilter] = useState<'ALL' | 'PUBLIC_ENTITY' | 'NPO'>('ALL');
   const [isDemoModeOpen, setIsDemoModeOpen] = useState<boolean>(false);
+  const [isGuideModalOpen, setIsGuideModalOpen] = useState<boolean>(false);
   const [showPulseExplanation, setShowPulseExplanation] = useState<boolean>(false);
 
   // Sub-navigation tab states for progressive disclosure in primary views
-  const [reportingSubtab, setReportingSubtab] = useState<'reports' | 'compliance' | 'queries'>('reports');
+  const [reportingSubtab, setReportingSubtab] = useState<'submissions' | 'documents' | 'review'>('submissions');
   const [performanceSubtab, setPerformanceSubtab] = useState<'performance' | 'kpis' | 'targets'>('performance');
-  const [financeSubtab, setFinanceSubtab] = useState<'financials' | 'support'>('financials');
+  const [financeSubtab, setFinanceSubtab] = useState<'financials' | 'support' | 'transfers' | 'variance'>('financials');
   const [actionSubtab, setActionSubtab] = useState<'tasks' | 'risks' | 'notifications'>('tasks');
   const [insightsSubtab, setInsightsSubtab] = useState<'ai' | 'analytics'>('ai');
   const [adminSubtab, setAdminSubtab] = useState<'settings' | 'audit'>('settings');
@@ -137,40 +141,39 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
     setIsSideViewOpen(false);
     setIsMobileMenuOpen(false);
 
-    // Progressive routing to 9 primary sections with active subtabs
-    if (sectionId === 'reports' || sectionId === 'compliance' || sectionId === 'queries') {
+    if (sectionId === 'documents') {
+      setActiveSidebar('documents');
+    } else if (sectionId === 'reports' || sectionId === 'submissions' || sectionId === 'review') {
       setActiveSidebar('reports');
-      setReportingSubtab(sectionId as any);
+      if (sectionId === 'submissions' || sectionId === 'review') {
+        setReportingSubtab(sectionId);
+      }
+    } else if (sectionId === 'compliance') {
+      setActiveSidebar('compliance');
+    } else if (sectionId === 'queries') {
+      setActiveSidebar('queries');
+    } else if (sectionId === 'risks' || sectionId === 'radar' || sectionId === 'early-warning') {
+      setActiveSidebar('risks');
+    } else if (sectionId === 'tasks' || sectionId === 'approvals' || sectionId === 'action-centre' || sectionId === 'action_centre') {
+      setActiveSidebar('tasks');
+    } else if (sectionId === 'notifications') {
+      setActiveSidebar('notifications');
     } else if (sectionId === 'performance' || sectionId === 'kpis' || sectionId === 'targets') {
       setActiveSidebar('performance');
       setPerformanceSubtab(sectionId as any);
-    } else if (sectionId === 'financials' || sectionId === 'support') {
+    } else if (sectionId === 'financials' || sectionId === 'transfers' || sectionId === 'variance') {
       setActiveSidebar('financials');
       setFinanceSubtab(sectionId as any);
-    } else if (
-      sectionId === 'tasks' ||
-      sectionId === 'approvals' ||
-      sectionId === 'action-centre' ||
-      sectionId === 'action_centre' ||
-      sectionId === 'risks' ||
-      sectionId === 'radar' ||
-      sectionId === 'early-warning' ||
-      sectionId === 'notifications'
-    ) {
-      setActiveSidebar('tasks');
-      if (sectionId === 'risks' || sectionId === 'radar' || sectionId === 'early-warning') {
-        setActionSubtab('risks');
-      } else if (sectionId === 'notifications') {
-        setActionSubtab('notifications');
-      } else {
-        setActionSubtab('tasks');
-      }
-    } else if (sectionId === 'ai' || sectionId === 'analytics') {
+    } else if (sectionId === 'support') {
+      setActiveSidebar('support');
+    } else if (sectionId === 'ai') {
       setActiveSidebar('ai');
-      setInsightsSubtab(sectionId as any);
-    } else if (sectionId === 'settings' || sectionId === 'audit' || sectionId === 'audit_logs' || sectionId === 'audit-logs') {
+    } else if (sectionId === 'analytics') {
+      setActiveSidebar('analytics');
+    } else if (sectionId === 'audit' || sectionId === 'audit_logs' || sectionId === 'audit-logs') {
+      setActiveSidebar('audit');
+    } else if (sectionId === 'settings') {
       setActiveSidebar('settings');
-      setAdminSubtab(sectionId === 'settings' ? 'settings' : 'audit');
     } else {
       setActiveSidebar(sectionId);
     }
@@ -251,6 +254,7 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
   interface NavItem {
     id: string;
     label: string;
+    desc: string;
     icon: React.ComponentType<{ className?: string }>;
     count?: number | string;
     badge?: string;
@@ -262,56 +266,61 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
     items: NavItem[];
   }
 
-  // Simplified 9-Section Navigation Architecture (Simple on surface, intelligent underneath)
+  // Intuitive, plain-English navigation architecture suitable for both executives and first-time users
   const navGroups: NavGroup[] = [
     {
-      title: 'Department Oversight',
+      title: 'Main Oversight',
       items: [
-        { id: 'overview', label: 'Overview', icon: Building2 },
-        { id: 'entities', label: 'Entities', icon: Users, count: pulse.totalEntities },
-        { id: 'reports', label: 'Reporting', icon: FileText, count: pulse.q3OutstandingCount > 0 ? pulse.q3OutstandingCount : undefined, badgeColor: 'bg-amber-500/30 text-amber-300' },
-        { id: 'performance', label: 'Performance', icon: Target },
-        { id: 'financials', label: 'Finance', icon: Coins },
-        { id: 'tasks', label: 'Actions', icon: FileCheck, count: store.tasks.filter(t => t.status === 'OPEN').length > 0 ? store.tasks.filter(t => t.status === 'OPEN').length : undefined, badgeColor: 'bg-rose-500/30 text-rose-300' },
+        { id: 'overview', label: 'Dashboard Overview', desc: 'At-a-glance portfolio status', icon: Building2 },
+        { id: 'reports', label: 'Quarterly Reports', desc: 'Check submissions & approvals', icon: FileText, count: pulse.q3OutstandingCount > 0 ? pulse.q3OutstandingCount : undefined, badgeColor: 'bg-amber-500/30 text-amber-300' },
+        { id: 'performance', label: 'Targets & Delivery', desc: 'Are annual goals being met?', icon: Target },
+        { id: 'financials', label: 'Budgets & Spending', desc: 'Vote 40 grants & expenditures', icon: Coins },
       ],
     },
     {
-      title: 'Intelligence & Administration',
+      title: 'Issues & Action',
       items: [
-        { id: 'ai', label: 'Insights', icon: Sparkles, badge: 'AI', badgeColor: 'bg-teal-500/30 text-teal-300' },
-        { id: 'documents', label: 'Documents', icon: FolderLock, count: store.documents.length },
-        { id: 'settings', label: 'Administration', icon: Settings },
+        { id: 'risks', label: 'Risk & Early Warning', desc: 'Spot delays & problems early', icon: AlertTriangle, count: highRiskEntitiesCount > 0 ? highRiskEntitiesCount : undefined, badgeColor: 'bg-rose-500/30 text-rose-300' },
+        { id: 'compliance', label: 'Deadlines & Rules', desc: 'Statutory calendar & PFMA laws', icon: ShieldCheck },
+        { id: 'tasks', label: 'Action Centre & Tasks', desc: 'Fix problems & issue directives', icon: FileCheck, count: store.tasks.filter(t => t.status === 'OPEN').length > 0 ? store.tasks.filter(t => t.status === 'OPEN').length : undefined, badgeColor: 'bg-rose-500/30 text-rose-300' },
+        { id: 'queries', label: 'Parliament Questions', desc: 'Official parliamentary inquiries', icon: HelpCircle },
+      ],
+    },
+    {
+      title: 'Records & Tools',
+      items: [
+        { id: 'documents', label: 'Evidence Vault (PoE)', desc: 'Proof files & attendance lists', icon: FolderLock, count: store.documents.length },
+        { id: 'ai', label: 'AI Smart Analyst', desc: 'Ask questions & explore trends', icon: Sparkles, badge: 'AI', badgeColor: 'bg-teal-500/30 text-teal-300' },
+        { id: 'audit', label: 'Audit Trail & History', desc: 'Who did what and when', icon: History },
+        { id: 'settings', label: 'System Settings', desc: 'User access & permissions', icon: Settings },
       ],
     },
   ];
 
   const getPageTitle = (id: string): { title: string; subtitle: string } => {
     switch (id) {
-      case 'overview': return { title: 'Executive Oversight Dashboard', subtitle: 'Report → Monitor → Identify → Act' };
-      case 'entities': return { title: '26 Public Entities & 6 NPOs Directory', subtitle: 'Statutory Entities and Subsidized Cultural Non-Profits' };
-      case 'reports':
-      case 'compliance':
-      case 'queries': return { title: 'Statutory Reporting & Compliance', subtitle: 'Submit, review and track periodic performance reports across all 32 institutions' };
+      case 'overview': return { title: 'Executive Oversight Dashboard', subtitle: 'National portfolio monitoring, delivery tracking, and early risk detection' };
+      case 'reports': return { title: 'Quarterly Reporting & Clearances', subtitle: 'Statutory quarterly performance and expenditure submission clearances' };
       case 'performance':
       case 'kpis':
-      case 'targets': return { title: 'Performance Oversight', subtitle: 'Monitor entity progress against targets and identify areas requiring attention' };
+      case 'targets': return { title: 'Performance & Target Oversight', subtitle: 'Target attainment, delivery pacing, and milestone verification' };
       case 'financials':
-      case 'support': return { title: 'Financial Monitoring & Grants', subtitle: 'Monitor approved budgets, expenditure and financial utilisation' };
-      case 'tasks':
-      case 'approvals':
-      case 'action-centre':
-      case 'action_centre':
+      case 'support': return { title: 'Financial Monitoring & Vote 40 Transfers', subtitle: 'Approved parliamentary subventions, transfer tranches, and expenditure burn rates' };
       case 'risks':
       case 'radar':
-      case 'early-warning':
-      case 'notifications': return { title: 'Action Centre & Directives', subtitle: 'Track issues, corrective actions and formal departmental directives' };
-      case 'ai':
-      case 'analytics': return { title: 'Intelligence & Portfolio Insights', subtitle: 'Understand trends, detect anomalies, and investigate performance using system data' };
-      case 'documents': return { title: 'Document Vault & Evidence Repository', subtitle: 'Statutory evidence repository and verification dossier' };
-      case 'settings':
+      case 'early-warning': return { title: 'Risk Radar & Early Warning System', subtitle: 'Early detection of target slippage, reporting delays, and governance issues' };
+      case 'compliance': return { title: 'Statutory Compliance & PFMA Deadlines', subtitle: 'Filing calendars, Section 38 PFMA requirements, and statutory milestones' };
+      case 'tasks':
+      case 'approvals':
+      case 'action-centre': return { title: 'Action Centre & Directives', subtitle: 'Ministerial directives, remedial actions, and task execution tracking' };
+      case 'queries': return { title: 'Parliamentary Questions & Stakeholder Queries', subtitle: 'Ministerial inquiries, parliamentary questions, and oversight audits' };
+      case 'documents': return { title: 'Document Vault & Evidence Repository', subtitle: 'Portfolio of Evidence (PoE) dossiers and verified statutory filings' };
+      case 'ai': return { title: 'AI Performance Analyst', subtitle: 'Automated cross-portfolio anomaly detection, root cause analysis, and insights' };
+      case 'analytics': return { title: 'Comparative Analytics & Multi-Year Trends', subtitle: 'Cross-entity delivery correlations and trend analyses' };
       case 'audit':
       case 'audit_logs':
-      case 'audit-logs': return { title: 'Department Administration', subtitle: 'Users, permissions, configuration and statutory PFMA audit history' };
+      case 'audit-logs': return { title: 'PFMA Statutory Audit Trail', subtitle: 'Immutable, tamper-evident log of all official reviews, clearances, and directives' };
+      case 'settings': return { title: 'System Administration & Access Control', subtitle: 'Role-based access permissions, workflow configurations, and statutory profiles' };
       default: return { title: 'DSAC Executive Oversight', subtitle: 'Department of Sport, Arts and Culture' };
     }
   };
@@ -330,12 +339,12 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
       )}
 
       {/* 1. Official DSAC Dark Green Sidebar (Always positioned on left of content) */}
-      <aside className={`fixed md:sticky top-0 bottom-0 left-0 z-40 md:z-30 w-60 lg:w-64 shrink-0 bg-[#044332] text-emerald-100 flex flex-col justify-between select-none border-r border-emerald-950 h-screen transition-transform duration-200 ease-in-out ${
+      <aside className={`fixed md:sticky top-0 bottom-0 left-0 z-40 md:z-30 w-64 lg:w-72 shrink-0 bg-[#044332] text-emerald-100 flex flex-col justify-between select-none border-r border-emerald-950 h-screen transition-transform duration-200 ease-in-out ${
         isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
       }`}>
         <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
           {/* Logo & Header in Sidebar */}
-          <div className="p-3.5 border-b border-emerald-800/60 flex items-center justify-between gap-3 shrink-0">
+          <div className="p-4 border-b border-emerald-800/60 flex items-center justify-between gap-3 shrink-0 bg-[#033628]/40">
             <div 
               onClick={() => handleNavSelect('overview')}
               className="flex items-center gap-3 cursor-pointer group"
@@ -345,7 +354,7 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
               </div>
               <div>
                 <div className="font-black text-white text-xs tracking-wider font-['Cabinet_Grotesk']">DSAC REPO</div>
-                <div className="text-[10px] text-emerald-300/80 font-medium">Statutory Oversight</div>
+                <div className="text-[10px] text-emerald-300/90 font-medium">Public Entities Oversight</div>
               </div>
             </div>
 
@@ -358,11 +367,34 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
             </button>
           </div>
 
+          {/* Quick Beginner Guide Callout Box inside Sidebar */}
+          <div className="px-3 pt-3">
+            <button
+              onClick={() => setIsGuideModalOpen(true)}
+              className="w-full p-2.5 rounded-xl bg-emerald-900/70 hover:bg-emerald-800 border border-emerald-500/40 text-left transition-all cursor-pointer group shadow-2xs"
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 rounded-lg bg-emerald-500/30 text-emerald-200 flex items-center justify-center">
+                    <Compass className="w-3.5 h-3.5 text-emerald-300" />
+                  </div>
+                  <span className="text-xs font-bold text-white group-hover:text-emerald-100 transition-colors">
+                    New to this system?
+                  </span>
+                </div>
+                <ChevronRight className="w-3.5 h-3.5 text-emerald-300 group-hover:translate-x-0.5 transition-transform" />
+              </div>
+              <p className="text-[10px] text-emerald-300/80 mt-1 pl-8 leading-tight">
+                Click for a 2-minute plain-English guide &amp; glossary
+              </p>
+            </button>
+          </div>
+
           {/* Navigation Groups */}
-          <nav className="flex-1 overflow-y-auto p-2.5 space-y-4 custom-scrollbar">
+          <nav className="flex-1 overflow-y-auto p-3 space-y-4 custom-scrollbar">
             {navGroups.map((group, gIdx) => (
               <div key={gIdx} className="space-y-1">
-                <div className="px-2.5 py-1 text-[10px] font-bold text-emerald-400/70 uppercase tracking-wider">
+                <div className="px-2.5 py-1 text-[10px] font-black text-emerald-400/80 uppercase tracking-wider">
                   {group.title}
                 </div>
                 {group.items.map((item) => {
@@ -371,25 +403,38 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
                     (item.id === 'performance' && (activeSidebar === 'kpis' || activeSidebar === 'targets')) ||
                     (item.id === 'financials' && activeSidebar === 'support') ||
                     (item.id === 'risks' && (activeSidebar === 'radar' || activeSidebar === 'early-warning')) ||
-                    (item.id === 'tasks' && (activeSidebar === 'approvals' || activeSidebar === 'action-centre' || activeSidebar === 'notifications'));
+                    (item.id === 'tasks' && (activeSidebar === 'approvals' || activeSidebar === 'action-centre' || activeSidebar === 'notifications')) ||
+                    (item.id === 'ai' && activeSidebar === 'analytics') ||
+                    (item.id === 'audit' && (activeSidebar === 'audit_logs' || activeSidebar === 'audit-logs'));
                   
                   return (
                     <button
                       key={item.id}
                       onClick={() => handleNavSelect(item.id)}
-                      className={`w-full flex items-center justify-between gap-2.5 px-3 py-2 rounded-xl text-xs transition-all cursor-pointer ${
+                      className={`w-full flex items-center justify-between gap-2.5 px-3 py-2 rounded-xl text-xs transition-all cursor-pointer text-left group ${
                         isActive
                           ? 'bg-[#0c5943] text-white shadow-sm font-bold ring-1 ring-emerald-400/40'
                           : 'text-emerald-200/80 hover:bg-[#07533f] hover:text-white font-medium'
                       }`}
                     >
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-emerald-300' : 'text-emerald-400/80'}`} />
-                        <span className="truncate text-left">{item.label}</span>
+                      <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                        <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
+                          isActive ? 'bg-emerald-500/20 text-emerald-300' : 'bg-emerald-950/40 text-emerald-400/80 group-hover:text-emerald-300'
+                        }`}>
+                          <Icon className="w-4 h-4" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="font-bold text-xs truncate leading-snug">{item.label}</div>
+                          <div className={`text-[10px] truncate leading-tight mt-0.5 ${
+                            isActive ? 'text-emerald-200/90 font-medium' : 'text-emerald-400/70 font-normal group-hover:text-emerald-300/80'
+                          }`}>
+                            {item.desc}
+                          </div>
+                        </div>
                       </div>
                       
                       {item.count !== undefined && (
-                        <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded-full shrink-0 ${
+                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ${
                           item.badgeColor || (isActive ? 'bg-emerald-900 text-emerald-200' : 'bg-emerald-950/80 text-emerald-400 border border-emerald-800/40')
                         }`}>
                           {item.count}
@@ -397,7 +442,7 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
                       )}
 
                       {item.badge && (
-                        <span className={`text-[9px] font-extrabold uppercase px-1.5 py-0.2 rounded shrink-0 ${
+                        <span className={`text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded shrink-0 ${
                           item.badgeColor || 'bg-emerald-950 text-emerald-400 border border-emerald-800/50'
                         }`}>
                           {item.badge}
@@ -415,7 +460,7 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
         <div className="p-3.5 border-t border-emerald-800/60 shrink-0 bg-[#033628]/40">
           <div className="space-y-0.5 text-[10px] font-semibold tracking-wider text-emerald-300/80 uppercase">
             <div className="text-white font-bold text-[11px]">Culture • Heritage • People</div>
-            <div className="text-emerald-400 font-bold">A Better South Africa</div>
+            <div className="text-emerald-400 font-bold">Department of Sport, Arts and Culture</div>
           </div>
         </div>
       </aside>
@@ -448,6 +493,16 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
           </div>
 
           <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+            {/* System Guide Trigger (How it Works for beginners) */}
+            <button
+              onClick={() => setIsGuideModalOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-300 shadow-2xs transition-all cursor-pointer hover:scale-102"
+              title="System Guide - Learn what this system does and how to use every section"
+            >
+              <Compass className="w-3.5 h-3.5 text-emerald-700" />
+              <span className="hidden sm:inline">System Guide</span>
+            </button>
+
             {/* Presentation Demo Mode Trigger */}
             <button
               onClick={() => setIsDemoModeOpen(true)}
@@ -463,7 +518,7 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
               <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
               <input
                 type="text"
-                placeholder="Search entities, reports..."
+                placeholder="Search reports, indicators, risks..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="w-full pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:bg-white focus:outline-hidden focus:ring-1 focus:ring-emerald-600"
@@ -605,23 +660,8 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
             onNavigate={handleNavSelect}
             onInvestigateEntity={onNavigateToEntity}
             onOpenDemo={() => setIsDemoModeOpen(true)}
+            onOpenGuide={() => setIsGuideModalOpen(true)}
           />
-        )}
-
-        {/* VIEW 2: ENTITIES & NPOS */}
-        {(activeSidebar === 'entities' || activeSidebar === 'public-entities') && (
-          <div className="p-4 sm:p-6 overflow-y-auto flex-1 w-full">
-            <DsacEntitiesView
-              entities={entities}
-              onSelectEntity={(entId) => {
-                if (onNavigateToEntity) onNavigateToEntity(entId);
-              }}
-              onOpenWorkspace={(entId) => {
-                if (onNavigateToEntity) onNavigateToEntity(entId);
-              }}
-              onNavigateToTab={(tab) => handleNavSelect(tab)}
-            />
-          </div>
         )}
 
         {/* VIEW 3: PERFORMANCE, KPIS & TARGETS */}
@@ -804,6 +844,21 @@ export const DsacRepoDashboard: React.FC<DsacRepoDashboardProps> = ({
             Last updated: 09 Aug 2025 10:24
           </div>
         </footer>
+
+        {/* Guided Presentation Demo Mode */}
+        <PresentationDemoMode
+          isOpen={isDemoModeOpen}
+          onClose={() => setIsDemoModeOpen(false)}
+          onNavigateToSection={(section) => handleNavSelect(section)}
+          onNavigateToEntity={onNavigateToEntity}
+        />
+
+        {/* Beginner-Friendly System Guide & Glossary Modal */}
+        <SystemGuideModal
+          isOpen={isGuideModalOpen}
+          onClose={() => setIsGuideModalOpen(false)}
+          onNavigateToSection={(section) => handleNavSelect(section)}
+        />
 
       </div>
 

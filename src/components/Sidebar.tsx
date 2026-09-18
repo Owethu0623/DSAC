@@ -135,13 +135,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
               badgeColor: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
             },
             {
-              id: 'entities',
-              label: 'Entities',
-              sublabel: '26 PEs & 6 NPOs Directory',
-              icon: Building2,
-              count: pulse.totalEntities,
-            },
-            {
               id: 'reports',
               label: 'Reporting',
               sublabel: 'Submissions, Review & Clearance',
@@ -384,23 +377,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 National Treasury Vote 37 compliance cycle in progress.
               </p>
             </div>
-
-            {/* Entity Login & Register Quick Switch Button */}
-            {onOpenEntityAuthModal && (
-              <button
-                type="button"
-                onClick={onOpenEntityAuthModal}
-                className="w-full mb-3 flex items-center justify-between px-3 py-2 rounded-xl bg-purple-950/40 border border-purple-800/60 text-purple-200 hover:bg-purple-900/50 hover:text-white transition-all text-xs group"
-              >
-                <div className="flex items-center gap-2 min-w-0">
-                  <span className="w-2 h-2 rounded-full bg-purple-400 group-hover:animate-ping shrink-0" />
-                  <span className="font-semibold text-xs truncate">Entity Login & Sign Up</span>
-                </div>
-                <span className="text-[10px] text-purple-300 font-mono bg-purple-900/60 px-1.5 py-0.5 rounded border border-purple-700/50 shrink-0">
-                  PE / NPO
-                </span>
-              </button>
-            )}
 
             {/* User Session Quick Card */}
             {currentUser && (

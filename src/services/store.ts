@@ -258,7 +258,14 @@ export class GovTrackStore {
         loadedEntities.push(initEnt);
       }
     });
-    this.entities = loadedEntities;
+    this.entities = loadedEntities.map(e => ({
+      ...e,
+      trancheAmountZAR: e.trancheAmountZAR || Math.round((e.budgetAllocationZAR || 40000000) / 4),
+      trancheStatus: e.trancheStatus || (e.overdueReportsCount > 0 || e.riskLevel === 'CRITICAL' ? 'WITHHELD' : 'RELEASED'),
+      statutoryDefaultStage: e.statutoryDefaultStage !== undefined ? e.statutoryDefaultStage : (e.overdueReportsCount > 0 ? 2 : 0),
+      statutoryDefaultReason: e.statutoryDefaultReason || (e.overdueReportsCount > 0 ? 'Statutory Q3 Performance Return and certified PoE overdue past 30-day PFMA Section 38(1)(j) deadline.' : undefined),
+      statutoryDefaultNoticeDate: e.statutoryDefaultNoticeDate || (e.overdueReportsCount > 0 ? '2026-02-01T08:00:00.000Z' : undefined)
+    }));
     saveToStorage(STORAGE_KEYS.ENTITIES, this.entities);
 
     let loadedKpis = loadFromStorage<KPIRecord[]>(STORAGE_KEYS.KPIS, INITIAL_KPIS);
@@ -600,7 +607,20 @@ export class GovTrackStore {
       report.reviewedAt = new Date().toISOString();
       report.reviewedBy = actorDesc;
       report.reviewNotes = notes;
-      this.addAuditLog('REPORT_APPROVED', `Approved ${report.quarter} Report for ${report.entityName}. Decision notes: ${notes}`, report.entityName);
+
+      // Auto-lift statutory non-submission hold and issue clearance certificate
+      const entity = this.entities.find(e => e.id === report.entityId);
+      if (entity) {
+        entity.overdueReportsCount = Math.max(0, (entity.overdueReportsCount || 1) - 1);
+        if (entity.overdueReportsCount === 0) {
+          entity.trancheStatus = 'RELEASED';
+          entity.statutoryDefaultStage = 0;
+          entity.statutoryDefaultReason = undefined;
+          entity.statutoryDefaultNoticeDate = undefined;
+        }
+      }
+
+      this.addAuditLog('REPORT_APPROVED', `Approved ${report.quarter} Report for ${report.entityName}. Statutory Tranche Clearance issued. Decision notes: ${notes}`, report.entityName);
     } else {
       report.submissionStatus = 'CORRECTION_REQUIRED';
       report.reviewedAt = new Date().toISOString();
@@ -630,6 +650,103 @@ export class GovTrackStore {
     }
 
     this.recalculateEntityRisk(report.entityId);
+    this.persistAll();
+  }
+
+  // --- STATUTORY NON-SUBMISSION & PFMA SECTION 38(1)(j) ENFORCEMENT ---
+  enforceTrancheWithholding(entityId: string, reason: string): void {
+    const entity = this.entities.find(e => e.id === entityId);
+    if (!entity) return;
+
+    const actor = this.currentUser ? `${this.currentUser.name} (${this.currentUser.designation})` : 'Ministerial Oversight Directorate';
+    entity.trancheStatus = 'WITHHELD';
+    entity.statutoryDefaultStage = 2; // PFMA Sec 38(1)(j) Tranche Freeze
+    entity.statutoryDefaultNoticeDate = new Date().toISOString();
+    entity.statutoryDefaultReason = reason;
+    entity.riskLevel = 'CRITICAL';
+    entity.riskScore = Math.max(entity.riskScore, 88);
+
+    // Create high-priority corrective task
+    const task: CorrectiveTask = {
+      id: `task-sec38-${Date.now()}`,
+      entityId: entity.id,
+      entityName: entity.name,
+      title: `PFMA Sec 38(1)(j) Grant Suspension: Cure Statutory Non-Submission`,
+      description: `Formal ministerial withholding enforced on Vote 40 operational subsidy. Reason: "${reason}". Submit outstanding statutory returns and certified PoE to restore disbursement eligibility.`,
+      assignedToName: entity.headOfEntity,
+      createdByName: actor,
+      createdByRole: 'DSAC_ADMIN',
+      priority: 'CRITICAL',
+      status: 'OPEN',
+      createdAt: new Date().toISOString(),
+      dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+      direction: 'DSAC_TO_ENTITY',
+    };
+    this.tasks = [task, ...this.tasks];
+
+    this.addAuditLog(
+      'TRANCHE_WITHHELD',
+      `PFMA Section 38(1)(j) Tranche Withholding ENFORCED for ${entity.name}. Reason: ${reason}. Grant disbursement suspended on BAS.`,
+      entity.name
+    );
+    this.persistAll();
+  }
+
+  liftTrancheWithholding(entityId: string, notes: string): void {
+    const entity = this.entities.find(e => e.id === entityId);
+    if (!entity) return;
+
+    entity.trancheStatus = 'RELEASED';
+    entity.statutoryDefaultStage = 0;
+    entity.statutoryDefaultReason = undefined;
+    entity.statutoryDefaultNoticeDate = undefined;
+    entity.riskLevel = entity.riskScore > 65 ? 'HIGH' : entity.riskScore > 40 ? 'MEDIUM' : 'LOW';
+
+    this.addAuditLog(
+      'TRANCHE_RELEASED',
+      `PFMA Section 38(1)(j) Tranche Released for ${entity.name}. Statutory Clearance Certificate issued. Notes: ${notes}`,
+      entity.name
+    );
+    this.persistAll();
+  }
+
+  requestComplianceExtension(entityId: string, days: number, motive: string): void {
+    const entity = this.entities.find(e => e.id === entityId);
+    if (!entity) return;
+
+    const expiryDate = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
+    entity.extensionGrantedUntil = expiryDate;
+    entity.extensionRequestedReason = motive;
+    entity.trancheStatus = 'CONDITIONAL_HOLD';
+
+    this.addAuditLog(
+      'EXTENSION_REQUESTED',
+      `Statutory compliance extension granted for ${days} days until ${expiryDate.split('T')[0]}. Motive: "${motive}".`,
+      entity.name
+    );
+    this.persistAll();
+  }
+
+  issueStatutoryNotice(entityId: string, stage: 1 | 2 | 3 | 4, reason: string): void {
+    const entity = this.entities.find(e => e.id === entityId);
+    if (!entity) return;
+
+    entity.statutoryDefaultStage = stage;
+    entity.statutoryDefaultNoticeDate = new Date().toISOString();
+    entity.statutoryDefaultReason = reason;
+
+    const stageTitles: Record<number, string> = {
+      1: 'Stage 1: 7-Day Early Warning Notice of Impending Default',
+      2: 'Stage 2: PFMA Section 38(1)(j) Formal Tranche Suspension Notice',
+      3: 'Stage 3: Accounting Authority & Board Chairperson Statutory Censure',
+      4: 'Stage 4: AGSA Material Irregularity & Parliamentary Tabling Referral',
+    };
+
+    this.addAuditLog(
+      'STATUTORY_NOTICE_ISSUED',
+      `Issued ${stageTitles[stage] || 'Statutory Non-Compliance Notice'} to ${entity.name}. Reason: ${reason}`,
+      entity.name
+    );
     this.persistAll();
   }
 
@@ -772,6 +889,38 @@ export class GovTrackStore {
     this.addAuditLog('DOCUMENT_UPLOADED', `Registered new statutory document "${title}" (${category}) for ${newDoc.entityName}. Submitted for DSAC Section 38 verification.`, newDoc.entityName);
     this.persistAll();
     return newDoc;
+  }
+
+  uploadDocument(
+    entityId: string, 
+    title: string, 
+    category: EntityDocument['category'], 
+    fileName: string, 
+    initialSummary: string
+  ): EntityDocument {
+    return this.createNewDocument(
+      entityId, 
+      title, 
+      category, 
+      '2026/27', 
+      fileName, 
+      2.4 * 1024 * 1024, 
+      initialSummary
+    );
+  }
+
+  downloadDocument(docId: string): void {
+    const doc = this.documents.find(d => d.id === docId);
+    if (!doc) return;
+    const content = `Republic of South Africa - Department of Sport, Arts and Culture\nStatutory Document: ${doc.title}\nInstitution: ${doc.entityName}\nClassification: ${doc.category}\nVersion: ${doc.currentVersion}\nFile: ${doc.fileName}\nVerification Status: ${doc.approvalStatus}\nUploaded: ${doc.uploadedAt}\nUploaded By: ${doc.uploadedBy}\nSummary: ${doc.verificationSummary}`;
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = doc.fileName || `${doc.title.replace(/\s+/g, '_')}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
   }
 
   verifyDocument(docId: string, decision: 'APPROVED' | 'REQUIRES_AMENDMENT', notes?: string): void {
@@ -1959,6 +2108,46 @@ export class GovTrackStore {
     }
 
     this.persistAll();
+  }
+
+  uploadTreasuryAllocations(
+    allocations: { entityId?: string; shortCode?: string; amount: number }[],
+    financialYear: string,
+    sourceFileName: string
+  ): { updatedCount: number; totalZAR: number } {
+    let updatedCount = 0;
+    let totalZAR = 0;
+
+    allocations.forEach(alloc => {
+      const entity = this.entities.find(e => 
+        (alloc.entityId && e.id === alloc.entityId) ||
+        (alloc.shortCode && e.shortCode.toLowerCase() === alloc.shortCode.toLowerCase())
+      );
+
+      if (entity && alloc.amount > 0) {
+        entity.budgetAllocationZAR = alloc.amount;
+        
+        // Also synchronize existing budgetProfile for this year if exists
+        const profile = this.budgetProfiles.find(p => p.entityId === entity.id && p.financialYear === financialYear);
+        if (profile) {
+          profile.approvedAmount = alloc.amount;
+          profile.status = 'APPROVED';
+          profile.fundingGap = Math.max(0, profile.requestedAmount - alloc.amount);
+        }
+
+        updatedCount++;
+        totalZAR += alloc.amount;
+      }
+    });
+
+    this.addAuditLog(
+      'BUDGET_APPROVED',
+      `Imported National Treasury Vote 37 budget allocations from "${sourceFileName}" for FY ${financialYear}. ${updatedCount} institutions updated totaling ${formatZAR(totalZAR)}.`,
+      'National Treasury Import'
+    );
+
+    this.persistAll();
+    return { updatedCount, totalZAR };
   }
 
   getQuarterlyFinancialSubmissions(): QuarterlyFinancialSubmission[] {
