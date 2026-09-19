@@ -20,9 +20,13 @@ import {
   Sparkles,
   LogOut,
   Coins,
-  Download
+  Download,
+  BarChart3,
+  ShieldCheck
 } from 'lucide-react';
 import { store } from '../services/store';
+import { formatZAR } from '../services/financialService';
+import { financialYearStart, getCurrentReportingPeriod, isFinancialYearClosed, normalizeFinancialYear, pct1, toLongFinancialYear } from '../services/reportingPeriod';
 import { 
   PublicEntity, 
   KPIRecord, 
@@ -34,17 +38,38 @@ import {
 import { DocumentVerificationDossier } from './DocumentVerificationDossier';
 import { EntityFinancialView } from './features/EntityFinancialView';
 import { EntityVisualAnalytics } from './features/EntityVisualAnalytics';
+import { EntityOverviewTab } from './entity/EntityOverviewTab';
+import { EntityPerformanceTab } from './entity/EntityPerformanceTab';
+import { EntityFinanceTab } from './entity/EntityFinanceTab';
+import { EntityComplianceTab } from './entity/EntityComplianceTab';
+import { EntityProfileTab } from './entity/EntityProfileTab';
+import { fmtDate } from './entity/parts';
+import { EntityTab } from '../services/attention';
 
 interface EntityWorkspaceProps {
   entityId: string;
   onBackToDashboard: () => void;
   financialYear?: string;
+  /** Tab to open on. */
+  initialTab?: EntityTab;
+  backLabel?: string;
 }
+
+const TAB_LABEL: Record<EntityTab, string> = {
+  overview: 'Overview',
+  performance: 'Performance',
+  finance: 'Finance',
+  compliance: 'Compliance',
+  reports: 'Reports',
+  profile: 'Profile',
+};
 
 export const EntityWorkspace: React.FC<EntityWorkspaceProps> = ({
   entityId,
   onBackToDashboard,
-  financialYear: initialYear = '2026/27',
+  financialYear: initialYear = getCurrentReportingPeriod().financialYear,
+  initialTab = 'overview',
+  backLabel = '← Back to Previous Overview',
 }) => {
   const [workspaceYear, setWorkspaceYear] = useState<string>(initialYear);
   const currentUser = store.currentUser;
@@ -56,9 +81,30 @@ export const EntityWorkspace: React.FC<EntityWorkspaceProps> = ({
   const entityDocs = store.documents.filter(d => d.entityId === entity.id);
   const entityTasks = store.tasks.filter(t => t.entityId === entity.id);
 
+  React.useEffect(() => { setActiveTab(initialTab); }, [entityId, initialTab]);
+
+  // Years this organisation has a budget for, newest first. The current year is always offered.
+  const yearOptions = Array.from(new Set([
+    normalizeFinancialYear(getCurrentReportingPeriod().financialYear),
+    ...store.getBudgetProfiles().filter(p => p.entityId === entityId).map(p => normalizeFinancialYear(p.financialYear)),
+  ])).sort().reverse();
+
+  const badgeFor: Partial<Record<EntityTab, number>> = {
+    reports: entityReports.filter(r => r.submissionStatus === 'OVERDUE' || r.submissionStatus === 'CORRECTION_REQUIRED').length,
+    compliance: entityTasks.filter(t => t.status !== 'COMPLETED').length,
+  };
+  const TAB_ICON: Record<EntityTab, React.ComponentType<{ className?: string }>> = {
+    overview: BarChart3,
+    performance: Layers,
+    finance: Coins,
+    compliance: ShieldCheck,
+    reports: FileText,
+    profile: Building2,
+  };
+
   // Tabs inside Workspace
-  const [activeTab, setActiveTab] = useState<'reports' | 'financials' | 'kpis' | 'documents' | 'tasks'>('reports');
-  const [docSubTab, setDocSubTab] = useState<'verification' | 'repository'>('verification');
+  const [activeTab, setActiveTab] = useState<EntityTab>(initialTab);
+  const [docSubTab, setDocSubTab] = useState<'verification' | 'repository' | 'directives'>('verification');
 
   // Report Review State (for DSAC Admin)
   const [reviewReportModal, setReviewReportModal] = useState<QuarterlyReport | null>(null);
@@ -95,12 +141,15 @@ export const EntityWorkspace: React.FC<EntityWorkspaceProps> = ({
     setReviewNotes('');
   };
 
+  // Demonstration uploads attach no real file in this build, so a nominal size is recorded.
+  const SIMULATED_UPLOAD_BYTES = 4 * 1024 * 1024;
+
   // Upload New Version
   const handleUploadVersion = (e: React.FormEvent) => {
     e.preventDefault();
     if (!versionModalDoc || !versionFileName || !versionSummary) return;
 
-    store.uploadDocumentVersion(versionModalDoc.id, versionFileName, 4500000, versionSummary);
+    store.uploadDocumentVersion(versionModalDoc.id, versionFileName, SIMULATED_UPLOAD_BYTES, versionSummary);
     setVersionModalDoc(null);
     setVersionFileName('');
     setVersionSummary('');
@@ -115,9 +164,9 @@ export const EntityWorkspace: React.FC<EntityWorkspaceProps> = ({
       entity.id,
       newDocTitle,
       newDocCategory,
-      '2025/2026',
+      toLongFinancialYear(getCurrentReportingPeriod().financialYear),
       newDocFileName,
-      3800000,
+      SIMULATED_UPLOAD_BYTES,
       newDocSummary || 'Initial version submitted'
     );
     setShowUploadModal(false);
@@ -176,7 +225,7 @@ export const EntityWorkspace: React.FC<EntityWorkspaceProps> = ({
               onClick={onBackToDashboard}
               className="px-3.5 py-1.5 border border-slate-300 hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
             >
-              ← Back to Previous Overview
+              {backLabel}
             </button>
             
             <div className={`px-3 py-1.5 rounded-lg border text-xs font-bold flex items-center gap-1.5 ${
@@ -194,107 +243,62 @@ export const EntityWorkspace: React.FC<EntityWorkspaceProps> = ({
           </div>
         </div>
 
-        {/* Quick Stats Grid */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-6 pt-6 border-t border-slate-100 text-xs">
-          <div>
-            <div className="text-slate-500">Parliamentary Allocation</div>
-            <div className="text-base font-bold font-mono text-slate-900 mt-0.5">
-              R {(entity.budgetAllocationZAR / 1_000_000).toFixed(2)}M
-            </div>
+        {/* Tabs: the same six on every entity page */}
+        <div className="flex items-end justify-between gap-3 border-b border-slate-200 mt-6 -mb-6 flex-wrap">
+          <div role="tablist" className="flex overflow-x-auto">
+            {(Object.keys(TAB_LABEL) as EntityTab[]).map(tab => {
+              const Icon = TAB_ICON[tab];
+              const badge = badgeFor[tab];
+              return (
+                <button
+                  key={tab}
+                  role="tab"
+                  aria-selected={activeTab === tab}
+                  onClick={() => setActiveTab(tab)}
+                  className={`px-4 py-2.5 text-xs font-bold border-b-2 transition-colors flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
+                    activeTab === tab ? 'border-emerald-600 text-emerald-700' : 'border-transparent text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  <Icon className="w-4 h-4" />
+                  <span>{TAB_LABEL[tab]}</span>
+                  {badge ? <span className="text-[10px] px-1.5 rounded-full bg-amber-100 text-amber-800 font-black">{badge}</span> : null}
+                </button>
+              );
+            })}
           </div>
-          <div>
-            <div className="text-slate-500">Tranches Received (75%)</div>
-            <div className="text-base font-bold font-mono text-emerald-700 mt-0.5">
-              R {(entity.transferredAmountZAR / 1_000_000).toFixed(2)}M
-            </div>
-          </div>
-          <div>
-            <div className="text-slate-500">Expenditure Utilised</div>
-            <div className="text-base font-bold font-mono text-blue-700 mt-0.5">
-              R {(entity.reportedExpenditureZAR / 1_000_000).toFixed(2)}M
-            </div>
-          </div>
-          <div>
-            <div className="text-slate-500">AGSA Audit Outcome</div>
-            <div className="font-bold text-slate-900 mt-0.5">
-              {entity.auditOutcome.replace(/_/g, ' ')}
-            </div>
-          </div>
-        </div>
 
-        {/* Workspace Navigation Tabs */}
-        <div className="flex border-b border-slate-200 mt-6 -mb-6">
-          <button
-            onClick={() => setActiveTab('reports')}
-            className={`px-4 py-2.5 text-xs font-bold border-b-2 transition-colors flex items-center gap-1.5 ${
-              activeTab === 'reports'
-                ? 'border-emerald-600 text-emerald-700'
-                : 'border-transparent text-slate-500 hover:text-slate-800'
-            }`}
-          >
-            <FileText className="w-4 h-4" />
-            <span>Quarterly Performance Reports ({entityReports.length})</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('financials')}
-            className={`px-4 py-2.5 text-xs font-bold border-b-2 transition-colors flex items-center gap-1.5 ${
-              activeTab === 'financials'
-                ? 'border-emerald-600 text-emerald-700'
-                : 'border-transparent text-slate-500 hover:text-slate-800'
-            }`}
-          >
-            <Coins className="w-4 h-4" />
-            <span>Budget & Financial Utilisation</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('kpis')}
-            className={`px-4 py-2.5 text-xs font-bold border-b-2 transition-colors flex items-center gap-1.5 ${
-              activeTab === 'kpis'
-                ? 'border-emerald-600 text-emerald-700'
-                : 'border-transparent text-slate-500 hover:text-slate-800'
-            }`}
-          >
-            <Layers className="w-4 h-4" />
-            <span>Agreed KPIs & Targets ({entityKPIs.length})</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('documents')}
-            className={`px-4 py-2.5 text-xs font-bold border-b-2 transition-colors flex items-center gap-1.5 ${
-              activeTab === 'documents'
-                ? 'border-emerald-600 text-emerald-700'
-                : 'border-transparent text-slate-500 hover:text-slate-800'
-            }`}
-          >
-            <UploadCloud className="w-4 h-4" />
-            <span>Document Repository ({entityDocs.length})</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('tasks')}
-            className={`px-4 py-2.5 text-xs font-bold border-b-2 transition-colors flex items-center gap-1.5 ${
-              activeTab === 'tasks'
-                ? 'border-emerald-600 text-emerald-700'
-                : 'border-transparent text-slate-500 hover:text-slate-800'
-            }`}
-          >
-            <CheckCircle2 className="w-4 h-4" />
-            <span>Corrective Tasks ({entityTasks.length})</span>
-          </button>
+          <label className="flex items-center gap-2 pb-2 text-[11px] font-semibold text-slate-500">
+            <span>Financial year</span>
+            <select
+              value={normalizeFinancialYear(workspaceYear)}
+              onChange={(e) => setWorkspaceYear(e.target.value)}
+              className="px-2 py-1 rounded-lg border border-slate-200 bg-white text-xs font-bold text-slate-700 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+            >
+              {yearOptions.map(y => <option key={y} value={y}>{y}</option>)}
+            </select>
+          </label>
         </div>
       </div>
 
-      {/* Visual Analytics: Performance Status & Budget Utilisation Pie Charts */}
-      <EntityVisualAnalytics
-        entityId={entity.id}
-        financialYear={workspaceYear}
-        initialQuarter={workspaceYear.includes('2024') || workspaceYear.includes('2023') ? 'FULL_YEAR' : 'Q3'}
-        showQuarterSelector={true}
-        showYearSelector={true}
-        onYearChange={(newYear) => setWorkspaceYear(newYear)}
-      />
+      {/* OVERVIEW: headline figures, what needs attention, and the charts */}
+      {activeTab === 'overview' && (
+        <div className="space-y-6">
+          <EntityOverviewTab entity={entity} financialYear={workspaceYear} onGoToTab={setActiveTab} />
+          <EntityVisualAnalytics
+            entityId={entity.id}
+            financialYear={workspaceYear}
+            initialQuarter={isFinancialYearClosed(normalizeFinancialYear(workspaceYear)) ? 'FULL_YEAR' : getCurrentReportingPeriod().quarter}
+            showQuarterSelector={true}
+            showYearSelector={false}
+          />
+        </div>
+      )}
+
+      {activeTab === 'performance' && <EntityPerformanceTab entity={entity} financialYear={workspaceYear} />}
+
+      {activeTab === 'finance' && <EntityFinanceTab entity={entity} financialYear={workspaceYear} isDsac={isDSACReviewer} />}
+
+      {activeTab === 'profile' && <EntityProfileTab entity={entity} />}
 
       {/* TAB 1: REPORTS (THE CORE GOVERNMENT REPORTING & REVIEW WORKFLOW) */}
       {activeTab === 'reports' && (
@@ -321,92 +325,84 @@ export const EntityWorkspace: React.FC<EntityWorkspaceProps> = ({
               </div>
 
               <span className="self-start md:self-auto px-3 py-1 rounded-md text-xs font-bold bg-emerald-800/80 border border-emerald-500/40 text-emerald-200">
-                December Submissions Verified
+                December Statutory Submissions
               </span>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-5">
-              {/* Box 1: Current Year Budget in 4 Quarters */}
-              <div className="bg-white/5 border border-white/10 rounded-xl p-4 space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-black uppercase tracking-wider text-emerald-300">
-                    Current Year Budget (2024/25) • 4 Quarters
-                  </span>
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                    Submitted Dec
-                  </span>
-                </div>
+              {(() => {
+                const fy = getCurrentReportingPeriod().financialYear;
+                const start = financialYearStart(fy);
+                const nextFy = `${start + 1}/${String((start + 2) % 100).padStart(2, '0')}`;
+                const ledger = store.getDisbursements(entity.id, fy).slice().sort((a, b) => a.tranche.localeCompare(b.tranche));
+                const nextProfile = store.getBudgetProfileForEntity(entity.id, nextFy);
+                const months: Record<string, string> = { Q1: 'Apr–Jun', Q2: 'Jul–Sep', Q3: 'Oct–Dec', Q4: 'Jan–Mar' };
+                return (
+                  <>
+                    {/* Box 1: current year allocation by quarter, from the disbursement ledger */}
+                    <div className="bg-white/5 border border-white/10 rounded-xl p-4 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-black uppercase tracking-wider text-emerald-300">
+                          Current Year Budget ({fy}) • by Quarter
+                        </span>
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                          {ledger.filter(d => d.status === 'RELEASED').length} of {ledger.length} released
+                        </span>
+                      </div>
 
-                <div className="text-xs text-slate-300">
-                  Approved Annual Baseline: <strong className="text-white">R {((entity.budgetAllocationZAR) / 1_000_000).toFixed(2)}M ZAR</strong>
-                </div>
+                      <div className="text-xs text-slate-300">
+                        Approved Annual Baseline: <strong className="text-white">{formatZAR(entity.budgetAllocationZAR)}</strong>
+                      </div>
 
-                <div className="grid grid-cols-2 gap-2 pt-1">
-                  <div className="p-2.5 rounded-lg bg-white/5 border border-white/10">
-                    <div className="text-[10px] font-bold text-emerald-300">Q1 Tranche (25%)</div>
-                    <div className="text-sm font-black text-white">R {((entity.budgetAllocationZAR * 0.25) / 1_000_000).toFixed(2)}M</div>
-                    <div className="text-[10px] text-slate-400">Apr–Jun • Disbursed</div>
-                  </div>
-                  <div className="p-2.5 rounded-lg bg-white/5 border border-white/10">
-                    <div className="text-[10px] font-bold text-emerald-300">Q2 Tranche (25%)</div>
-                    <div className="text-sm font-black text-white">R {((entity.budgetAllocationZAR * 0.25) / 1_000_000).toFixed(2)}M</div>
-                    <div className="text-[10px] text-slate-400">Jul–Sep • Disbursed</div>
-                  </div>
-                  <div className="p-2.5 rounded-lg bg-white/5 border border-white/10">
-                    <div className="text-[10px] font-bold text-emerald-300">Q3 Tranche (25%)</div>
-                    <div className="text-sm font-black text-white">R {((entity.budgetAllocationZAR * 0.25) / 1_000_000).toFixed(2)}M</div>
-                    <div className="text-[10px] text-slate-400">Oct–Dec • Disbursed</div>
-                  </div>
-                  <div className="p-2.5 rounded-lg bg-white/5 border border-white/10">
-                    <div className="text-[10px] font-bold text-sky-300">Q4 Tranche (25%)</div>
-                    <div className="text-sm font-black text-white">R {((entity.budgetAllocationZAR * 0.25) / 1_000_000).toFixed(2)}M</div>
-                    <div className="text-[10px] text-slate-400">Jan–Mar • Pending Gate</div>
-                  </div>
-                </div>
-              </div>
+                      <div className="grid grid-cols-2 gap-2 pt-1">
+                        {ledger.map(d => (
+                          <div key={d.id} className="p-2.5 rounded-lg bg-white/5 border border-white/10">
+                            <div className={`text-[10px] font-bold ${d.status === 'RELEASED' ? 'text-emerald-300' : d.status === 'WITHHELD' ? 'text-rose-300' : 'text-sky-300'}`}>
+                              {d.tranche} Tranche ({pct1(d.amountZAR, entity.budgetAllocationZAR)}%)
+                            </div>
+                            <div className="text-sm font-black text-white">{formatZAR(d.amountZAR)}</div>
+                            <div className="text-[10px] text-slate-400">
+                              {months[d.tranche]} • {d.status === 'RELEASED' ? 'Disbursed' : d.status === 'WITHHELD' ? 'Withheld' : 'Scheduled'}
+                            </div>
+                          </div>
+                        ))}
+                        {ledger.length === 0 && <div className="text-[11px] text-slate-400 col-span-2">No tranches are scheduled for this financial year.</div>}
+                      </div>
+                    </div>
 
-              {/* Box 2: Following Year Budget (2025/26 MTEF) */}
-              <div className="bg-white/5 border border-white/10 rounded-xl p-4 space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-black uppercase tracking-wider text-teal-300">
-                    Following Year Budget (2025/26 MTEF)
-                  </span>
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-teal-500/20 text-teal-300 border border-teal-500/30">
-                    Submitted Dec
-                  </span>
-                </div>
+                    {/* Box 2: following year budget request, from the budget workflow */}
+                    <div className="bg-white/5 border border-white/10 rounded-xl p-4 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-black uppercase tracking-wider text-teal-300">
+                          Following Year Budget ({nextFy} MTEF)
+                        </span>
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-teal-500/20 text-teal-300 border border-teal-500/30">
+                          {nextProfile ? nextProfile.status.replace(/_/g, ' ') : 'Not submitted'}
+                        </span>
+                      </div>
 
-                <div className="space-y-1.5 text-xs text-slate-300">
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-400">Statutory Deadline:</span>
-                    <strong className="text-white">31 December 2024</strong>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-400">Actual Submission:</span>
-                    <strong className="text-emerald-300">12 December 2024 (On Time)</strong>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-400">Requested Following Year Baseline:</span>
-                    <strong className="text-white">R {((entity.budgetAllocationZAR * 1.05) / 1_000_000).toFixed(2)}M ZAR</strong>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-400">Accounting Officer Endorsement:</span>
-                    <strong className="text-white">{entity.headOfEntity} (Signed)</strong>
-                  </div>
-                </div>
-
-                <div className="pt-1">
-                  <button
-                    onClick={() => {
-                      alert(`December Budget Submission Dossier for ${entity.name} downloaded.`);
-                    }}
-                    className="w-full py-2 px-3 rounded-lg bg-white/10 hover:bg-white/15 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer border border-white/10"
-                  >
-                    <Download className="w-3.5 h-3.5 text-emerald-300" />
-                    <span>Download December Budget Dossier (PDF &amp; Spreadsheets)</span>
-                  </button>
-                </div>
-              </div>
+                      <div className="space-y-1.5 text-xs text-slate-300">
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-400">Statutory Deadline:</span>
+                          <strong className="text-white">31 December {start}</strong>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-400">Submission on record:</span>
+                          <strong className={nextProfile ? 'text-emerald-300' : 'text-amber-300'}>{nextProfile ? nextProfile.requestDate : 'None recorded'}</strong>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-400">Requested Following Year Baseline:</span>
+                          <strong className="text-white">{nextProfile ? formatZAR(nextProfile.requestedAmount) : '-'}</strong>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-400">Accounting Officer:</span>
+                          <strong className="text-white">{entity.headOfEntity}</strong>
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                );
+              })()}
             </div>
           </div>
 
@@ -458,7 +454,7 @@ export const EntityWorkspace: React.FC<EntityWorkspaceProps> = ({
                       </div>
 
                       <div className="text-xs text-slate-600 mt-1">
-                        Due Date: <strong className="text-slate-800">{new Date(report.dueDate).toLocaleDateString()}</strong> • Submitted by: {report.submittedBy || 'Pending Submission'}
+                        Due Date: <strong className="text-slate-800">{fmtDate(report.dueDate)}</strong> • Submitted by: {report.submittedBy || 'Pending Submission'}
                       </div>
                     </div>
 
@@ -560,90 +556,9 @@ export const EntityWorkspace: React.FC<EntityWorkspaceProps> = ({
         </div>
       )}
 
-      {/* TAB 1B: BUDGET & FINANCIAL UTILISATION */}
-      {activeTab === 'financials' && (
-        <EntityFinancialView
-          entityId={entity.id}
-          financialYear="2026/27"
-          readOnly={false}
-        />
-      )}
-
-      {/* TAB 2: AGREED KPIS & ANNUAL TARGETS */}
-      {activeTab === 'kpis' && (
-        <div className="bg-white rounded-xl p-6 border border-slate-200 shadow-sm space-y-6">
-          <div className="flex items-center justify-between pb-4 border-b border-slate-100">
-            <div>
-              <h2 className="text-base font-bold text-slate-900">
-                Institutional Performance Scorecard & Milestones
-              </h2>
-              <p className="text-xs text-slate-500">
-                Agreed in the gazetted Annual Performance Plan (APP) with quarterly milestones.
-              </p>
-            </div>
-          </div>
-
-          <div className="space-y-4">
-            {entityKPIs.map(kpi => (
-              <div key={kpi.id} className="p-5 rounded-xl border border-slate-200 bg-slate-50/50 space-y-3">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                  <div>
-                    <span className="text-[11px] font-semibold text-emerald-800 uppercase tracking-wider bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
-                      {kpi.programmeName}
-                    </span>
-                    <h3 className="font-bold text-slate-900 text-sm mt-1">{kpi.name}</h3>
-                    <p className="text-xs text-slate-600 mt-0.5">{kpi.description}</p>
-                  </div>
-
-                  <span className={`px-2.5 py-1 rounded text-xs font-bold self-start sm:self-center ${
-                    kpi.status === 'ON_TRACK'
-                      ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
-                      : kpi.status === 'AT_RISK'
-                      ? 'bg-amber-100 text-amber-800 border border-amber-300'
-                      : 'bg-rose-100 text-rose-800 border border-rose-300'
-                  }`}>
-                    {kpi.status.replace(/_/g, ' ')} ({kpi.percentageAchieved}% achieved)
-                  </span>
-                </div>
-
-                {/* Progress Bar */}
-                <div className="space-y-1">
-                  <div className="flex justify-between text-xs font-mono text-slate-600">
-                    <span>Baseline: {kpi.baseline}</span>
-                    <span>Actual to Date: <strong>{kpi.currentValue} {kpi.unitOfMeasure}</strong></span>
-                    <span>Annual Target: {kpi.annualTarget}</span>
-                  </div>
-                  <div className="w-full bg-slate-200 h-2.5 rounded-full overflow-hidden">
-                    <div 
-                      className={`h-full rounded-full transition-all ${
-                        kpi.status === 'ON_TRACK' ? 'bg-emerald-600' : kpi.status === 'AT_RISK' ? 'bg-amber-500' : 'bg-rose-600'
-                      }`}
-                      style={{ width: `${Math.min(100, (kpi.currentValue / kpi.annualTarget) * 100)}%` }}
-                    ></div>
-                  </div>
-                </div>
-
-                {/* Historical 3-Year Audited Benchmarks */}
-                <div className="pt-3 border-t border-slate-200 text-xs">
-                  <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">
-                    Historical Year-on-Year Trend:
-                  </div>
-                  <div className="flex flex-wrap items-center gap-3">
-                    {kpi.historicalPerformance.map((h, i) => (
-                      <div key={i} className="px-3 py-1 bg-white rounded border border-slate-200 font-mono text-[11px]">
-                        <span className="text-slate-500">{h.year}:</span> <strong className="text-slate-800">{h.achieved}/{h.target}</strong> ({Math.round((h.achieved / h.target) * 100)}%)
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* TAB 3: DOCUMENT REPOSITORY & VERIFICATION */}
-      {activeTab === 'documents' && (
+      {/* COMPLIANCE: statutory standing, evidence, verification, archive and directives */}
+      {activeTab === 'compliance' && (
+        <EntityComplianceTab entity={entity} financialYear={workspaceYear} isDsac={isDSACReviewer}>
         <div className="space-y-6">
           {/* Sub-navigation between Automated Verification Dossier and Multi-Version Archive */}
           <div className="flex items-center gap-2 p-1.5 bg-slate-100 rounded-xl max-w-fit">
@@ -670,16 +585,108 @@ export const EntityWorkspace: React.FC<EntityWorkspaceProps> = ({
               <History className="w-4 h-4 text-slate-600" />
               <span>Multi-Version Ledger Archive ({entityDocs.length})</span>
             </button>
+
+            <button
+              onClick={() => setDocSubTab('directives')}
+              className={`px-4 py-2 text-xs font-bold rounded-lg transition-all flex items-center gap-2 ${
+                docSubTab === 'directives'
+                  ? 'bg-white text-indigo-900 shadow-xs border border-slate-200'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+              <span>Directives &amp; Tasks ({entityTasks.length})</span>
+            </button>
           </div>
 
-          {docSubTab === 'verification' ? (
+          {docSubTab === 'verification' && (
             <DocumentVerificationDossier
               entityId={entity.id}
-              quarter="Q3"
-              financialYear="2025/2026"
+              quarter={isFinancialYearClosed(normalizeFinancialYear(workspaceYear)) ? 'Q4' : getCurrentReportingPeriod().quarter}
+              financialYear={toLongFinancialYear(workspaceYear)}
               isDSACReviewer={isDSACReviewer}
             />
-          ) : (
+          )}
+
+          {docSubTab === 'directives' && (
+        <div className="bg-white rounded-xl p-6 border border-slate-200 shadow-sm space-y-6">
+          <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+            <div>
+              <h2 className="text-base font-bold text-slate-900">
+                Assigned Corrective Directives & Tasks
+              </h2>
+              <p className="text-xs text-slate-500">
+                Action-oriented oversight: formal tasks issued downward from DSAC or tracked internally by entity management.
+              </p>
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            {entityTasks.map(task => (
+              <div 
+                key={task.id}
+                className={`p-4 rounded-xl border transition-all ${
+                  task.status === 'COMPLETED'
+                    ? 'bg-slate-50 border-slate-200 opacity-80'
+                    : task.status === 'OVERDUE'
+                    ? 'bg-rose-50/50 border-rose-300'
+                    : 'bg-amber-50/40 border-amber-200'
+                }`}
+              >
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+                        task.priority === 'CRITICAL' ? 'bg-rose-600 text-white' : 'bg-amber-600 text-white'
+                      }`}>
+                        {task.priority} Priority
+                      </span>
+                      <span className="text-xs font-semibold text-slate-500">
+                        {task.direction === 'DSAC_TO_ENTITY' ? 'DSAC Ministerial Directive' : 'Entity Internal Action'}
+                      </span>
+                    </div>
+
+                    <h3 className="font-bold text-slate-900 text-sm mt-1">{task.title}</h3>
+                    <p className="text-xs text-slate-600 mt-0.5">{task.description}</p>
+                    
+                    <div className="text-[11px] text-slate-500 mt-2">
+                      Assigned To: <strong className="text-slate-800">{task.assignedToName}</strong> • Due: <strong className="text-slate-800 font-mono">{fmtDate(task.dueDate)}</strong>
+                    </div>
+
+                    {task.resolutionNotes && (
+                      <div className="mt-2 p-2 bg-emerald-50 border border-emerald-200 rounded text-xs text-emerald-900">
+                        <strong>Resolution Evidence:</strong> {task.resolutionNotes} (Resolved on {fmtDate(task.completedAt)})
+                      </div>
+                    )}
+                  </div>
+
+                  <div>
+                    {task.status !== 'COMPLETED' ? (
+                      <button
+                        onClick={() => {
+                          setResolvingTask(task);
+                          setTaskResolutionNotes('');
+                        }}
+                        className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-xs font-bold shadow-sm transition-colors flex items-center gap-1.5"
+                      >
+                        <Check className="w-3.5 h-3.5" />
+                        <span>Mark Resolved</span>
+                      </button>
+                    ) : (
+                      <span className="px-2.5 py-1 bg-emerald-100 text-emerald-800 font-bold text-xs rounded-full flex items-center gap-1">
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        <span>Completed</span>
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+          )}
+
+          {docSubTab === 'repository' && (
           <div className="bg-white rounded-xl p-6 border border-slate-200 shadow-sm">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-slate-100 gap-3">
               <div>
@@ -760,7 +767,7 @@ export const EntityWorkspace: React.FC<EntityWorkspaceProps> = ({
                             <span className="text-slate-400 text-[11px]">({(ver.fileSizeBytes / 1_000_000).toFixed(1)} MB)</span>
                           </div>
                           <div className="text-[11px] text-slate-500 italic">
-                            "{ver.changeSummary}" • {new Date(ver.uploadedAt).toLocaleDateString()} by {ver.uploadedBy}
+                            "{ver.changeSummary}" • {fmtDate(ver.uploadedAt)} by {ver.uploadedBy}
                           </div>
                         </div>
                       ))}
@@ -772,85 +779,7 @@ export const EntityWorkspace: React.FC<EntityWorkspaceProps> = ({
           </div>
           )}
         </div>
-      )}
-
-      {/* TAB 4: CORRECTIVE TASKS */}
-      {activeTab === 'tasks' && (
-        <div className="bg-white rounded-xl p-6 border border-slate-200 shadow-sm space-y-6">
-          <div className="flex items-center justify-between pb-4 border-b border-slate-100">
-            <div>
-              <h2 className="text-base font-bold text-slate-900">
-                Assigned Corrective Directives & Tasks
-              </h2>
-              <p className="text-xs text-slate-500">
-                Action-oriented oversight: formal tasks issued downward from DSAC or tracked internally by entity management.
-              </p>
-            </div>
-          </div>
-
-          <div className="space-y-3">
-            {entityTasks.map(task => (
-              <div 
-                key={task.id}
-                className={`p-4 rounded-xl border transition-all ${
-                  task.status === 'COMPLETED'
-                    ? 'bg-slate-50 border-slate-200 opacity-80'
-                    : task.status === 'OVERDUE'
-                    ? 'bg-rose-50/50 border-rose-300'
-                    : 'bg-amber-50/40 border-amber-200'
-                }`}
-              >
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
-                        task.priority === 'CRITICAL' ? 'bg-rose-600 text-white' : 'bg-amber-600 text-white'
-                      }`}>
-                        {task.priority} Priority
-                      </span>
-                      <span className="text-xs font-semibold text-slate-500">
-                        {task.direction === 'DSAC_TO_ENTITY' ? 'DSAC Ministerial Directive' : 'Entity Internal Action'}
-                      </span>
-                    </div>
-
-                    <h3 className="font-bold text-slate-900 text-sm mt-1">{task.title}</h3>
-                    <p className="text-xs text-slate-600 mt-0.5">{task.description}</p>
-                    
-                    <div className="text-[11px] text-slate-500 mt-2">
-                      Assigned To: <strong className="text-slate-800">{task.assignedToName}</strong> • Due: <strong className="text-slate-800 font-mono">{new Date(task.dueDate).toLocaleDateString()}</strong>
-                    </div>
-
-                    {task.resolutionNotes && (
-                      <div className="mt-2 p-2 bg-emerald-50 border border-emerald-200 rounded text-xs text-emerald-900">
-                        <strong>Resolution Evidence:</strong> {task.resolutionNotes} (Resolved on {new Date(task.completedAt!).toLocaleDateString()})
-                      </div>
-                    )}
-                  </div>
-
-                  <div>
-                    {task.status !== 'COMPLETED' ? (
-                      <button
-                        onClick={() => {
-                          setResolvingTask(task);
-                          setTaskResolutionNotes('');
-                        }}
-                        className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-xs font-bold shadow-sm transition-colors flex items-center gap-1.5"
-                      >
-                        <Check className="w-3.5 h-3.5" />
-                        <span>Mark Resolved</span>
-                      </button>
-                    ) : (
-                      <span className="px-2.5 py-1 bg-emerald-100 text-emerald-800 font-bold text-xs rounded-full flex items-center gap-1">
-                        <CheckCircle2 className="w-3.5 h-3.5" />
-                        <span>Completed</span>
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
+        </EntityComplianceTab>
       )}
 
       {/* MODAL: DSAC Review Action (Approve or Correction Required) */}
@@ -1005,7 +934,7 @@ export const EntityWorkspace: React.FC<EntityWorkspaceProps> = ({
                 <input
                   required
                   type="text"
-                  placeholder="e.g. Operational Plan 2025/2026"
+                  placeholder={`e.g. Operational Plan ${toLongFinancialYear(getCurrentReportingPeriod().financialYear)}`}
                   value={newDocTitle}
                   onChange={(e) => setNewDocTitle(e.target.value)}
                   className="w-full p-2.5 rounded-lg border border-slate-300 text-slate-900 focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"

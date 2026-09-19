@@ -50,33 +50,59 @@ import {
   EntityFinancialSummary, 
   DepartmentFinancialKPIs,
   FinancialQuarter,
-  FinancialTransaction 
+  DisbursementRecord,
+  BudgetLine,
+  REPORTED_RETURN_STATUSES
 } from '../types/financial';
-import { 
-  INITIAL_EXPENSE_CATEGORIES, 
-  INITIAL_BUDGET_PROFILES, 
-  INITIAL_QUARTERLY_SUBMISSIONS 
-} from '../data/initialFinancialData';
-import { 
-  calculateEntityFinancialSummary, 
-  calculateDepartmentFinancialKPIs, 
-  formatZAR 
-} from './financialService';
+import { INITIAL_EXPENSE_CATEGORIES } from '../data/initialFinancialData';
+import { getStorageAdapter } from './storageAdapter';
+import { PublicUser, StateData } from '../types/sync';
 import {
-  generateInitialTransactions,
-  filterTransactions,
-  sumTransactions
-} from './financialTransactionService';
+  SEEDED_BUDGET_PROFILES,
+  SEEDED_QUARTERLY_SUBMISSIONS,
+  SEEDED_DISBURSEMENTS,
+  STANDARD_CATEGORY_IDS,
+  STANDARD_CATEGORY_WEIGHTS,
+  repairBudgetProfile
+} from '../data/financialSeed';
+import {
+  calculateEntityFinancialSummary,
+  calculateDepartmentFinancialKPIs,
+  formatZAR,
+  isPortfolioMember,
+  returnTotal
+} from './financialService';
 import {
   calculateEntityPerformanceSummary,
   calculateDepartmentPerformanceAggregation,
   calculateDepartmentFinancialAggregation,
-  normalizeFinancialYear,
-  normalizeQuarter,
   EntityPerformanceSummary,
   DepartmentPerformanceAggregation,
   DepartmentFinancialAggregation
 } from './calculationEngine';
+import {
+  KPI_DATA_YEAR,
+  calculateKpiItemProgress,
+  classifyKpiProgress,
+  kpiCumulativeThrough,
+  normalizeKpiRecord,
+  normalizeKpiRecords
+} from './kpiProgress';
+import {
+  QuarterSelection,
+  QUARTER_ORDER,
+  allocateProportionally,
+  getCurrentReportingPeriod,
+  normalizeFinancialYear,
+  normalizeQuarter,
+  pct1,
+  quarterDueDate,
+  quarterIndex,
+  sameFinancialYear,
+  toLongFinancialYear
+} from './reportingPeriod';
+import { checkPasswordStrength, hashPassword, verifyPassword } from './passwordHash';
+import { DEMO_MODE, DEMO_PASSWORD } from '../config/demoMode';
 
 const STORAGE_KEYS = {
   CURRENT_USER: 'govtrack_current_user',
@@ -94,8 +120,22 @@ const STORAGE_KEYS = {
   BUDGET_PROFILES: 'govtrack_budget_profiles',
   QUARTERLY_FINANCIAL_SUBMISSIONS: 'govtrack_quarterly_financial_submissions',
   SUPPORT_REQUESTS: 'govtrack_support_requests',
-  FINANCIAL_TRANSACTIONS: 'govtrack_financial_transactions',
+  DISBURSEMENTS: 'govtrack_disbursements',
+  DATA_VERSION: 'govtrack_data_version',
 };
+
+/**
+ * Bump whenever the shape or meaning of stored data changes. A mismatch discards stale browser data and reloads
+ * the seed baseline (users are migrated, not discarded). v2 = single-source finance model + hashed passwords.
+ */
+const DATA_VERSION = '2';
+
+const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
+
+/** Roles allowed to approve, release, review and otherwise act with DSAC financial authority. */
+const DSAC_AUTHORITY_ROLES: UserRole[] = ['DSAC_ADMIN', 'DSAC_MANAGEMENT'];
+const MAX_LOGIN_ATTEMPTS = 5;
+const LOGIN_LOCKOUT_MS = 5 * 60 * 1000;
 
 export const INITIAL_SUPPORT_REQUESTS: SupportRequest[] = [
   {
@@ -282,13 +322,12 @@ export const DEFAULT_DOCUMENT_REQUIREMENTS: DocumentRequirement[] = [
   }
 ];
 
-// Safe JSON parse from localStorage with fallback
+// Safe JSON parse from the configured storage (browser localStorage by default) with fallback
 function loadFromStorage<T>(key: string, fallback: T): T {
-  if (typeof window === 'undefined' || typeof localStorage === 'undefined') {
-    return fallback;
-  }
+  const storage = getStorageAdapter();
+  if (!storage) return fallback;
   try {
-    const item = localStorage.getItem(key);
+    const item = storage.getItem(key);
     return item ? JSON.parse(item) : fallback;
   } catch {
     return fallback;
@@ -296,14 +335,23 @@ function loadFromStorage<T>(key: string, fallback: T): T {
 }
 
 function saveToStorage<T>(key: string, data: T): void {
-  if (typeof window === 'undefined' || typeof localStorage === 'undefined') {
-    return;
-  }
+  const storage = getStorageAdapter();
+  if (!storage) return;
   try {
-    localStorage.setItem(key, JSON.stringify(data));
+    storage.setItem(key, JSON.stringify(data));
   } catch (e) {
-    console.error(`Failed to save to localStorage for key ${key}:`, e);
+    console.error(`Failed to save to storage for key ${key}:`, e);
   }
+}
+
+async function readFileAsDataUrl(file: File): Promise<string | undefined> {
+  if (typeof FileReader === 'undefined') return undefined;
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : undefined);
+    reader.onerror = () => reject(new Error(`Unable to read uploaded file "${file.name}".`));
+    reader.readAsDataURL(file);
+  });
 }
 
 export class GovTrackStore {
@@ -312,102 +360,96 @@ export class GovTrackStore {
 
   currentUser: User | null;
   registeredUsers: User[];
-  entities: PublicEntity[];
-  kpis: KPIRecord[];
-  reports: QuarterlyReport[];
-  documents: EntityDocument[];
-  documentRequirements: DocumentRequirement[];
-  tasks: CorrectiveTask[];
-  riskAlerts: RiskAlert[];
-  deadlines: RegulatoryDeadline[];
-  auditLogs: AuditLogEntry[];
-  expenseCategories: ExpenseCategory[];
-  budgetProfiles: EntityBudgetProfile[];
-  quarterlyFinancialSubmissions: QuarterlyFinancialSubmission[];
-  supportRequests: SupportRequest[];
-  financialTransactions: FinancialTransaction[];
+  entities!: PublicEntity[];
+  kpis!: KPIRecord[];
+  reports!: QuarterlyReport[];
+  documents!: EntityDocument[];
+  documentRequirements!: DocumentRequirement[];
+  tasks!: CorrectiveTask[];
+  riskAlerts!: RiskAlert[];
+  deadlines!: RegulatoryDeadline[];
+  auditLogs!: AuditLogEntry[];
+  expenseCategories!: ExpenseCategory[];
+  budgetProfiles!: EntityBudgetProfile[];
+  quarterlyFinancialSubmissions!: QuarterlyFinancialSubmission[];
+  supportRequests!: SupportRequest[];
+  disbursements!: DisbursementRecord[];
+  private failedLogins = new Map<string, { count: number; lockedUntil: number }>();
 
   private constructor() {
-    let loadedUsers = loadFromStorage<User[]>(STORAGE_KEYS.REGISTERED_USERS, INITIAL_USERS);
-    const hasSicelo = loadedUsers.some(u => u.email.toLowerCase() === 'sakhilesicelo94@gmail.com');
-    if (!hasSicelo) {
-      loadedUsers = [INITIAL_USERS[0], ...loadedUsers.filter(u => u.email.toLowerCase() !== 'n.sithole@dsac.gov.za')];
-    }
-    // Ensure Lerato Phiri & Thandi Mokoena exist
-    INITIAL_USERS.forEach(initUser => {
-      if (!loadedUsers.some(u => u.email.toLowerCase() === initUser.email.toLowerCase())) {
-        loadedUsers.push(initUser);
+    const versionOk = loadFromStorage<string>(STORAGE_KEYS.DATA_VERSION, '') === DATA_VERSION;
+
+    this.registeredUsers = this.loadUsers(versionOk);
+
+    // A visitor is NEVER signed in by default (the old build auto-selected the first user, i.e. the DSAC
+    // administrator, on a fresh browser). A stored session is honoured only if it still maps to a registered account.
+    const session = loadFromStorage<{ id?: string } | null>(STORAGE_KEYS.CURRENT_USER, null);
+    this.currentUser = (session?.id && this.registeredUsers.find(u => u.id === session.id)) || null;
+
+    this.loadDomainData(!versionOk);
+    this.persistAll();
+  }
+
+  /** Session pointer persisted to the browser: an id only, never the account record or its hash. */
+  private sessionRecord(): { id: string } | null {
+    return this.currentUser ? { id: this.currentUser.id } : null;
+  }
+
+  private loadUsers(versionOk: boolean): User[] {
+    const demoUsers: User[] = DEMO_MODE
+      ? INITIAL_USERS.map(u => ({ ...u, passwordHash: hashPassword(DEMO_PASSWORD) }))
+      : [];
+
+    const stored = loadFromStorage<User[]>(STORAGE_KEYS.REGISTERED_USERS, []);
+    // Migrate accounts saved by earlier builds: plain-text password -> salted hash, then drop the plain text.
+    const migrated: User[] = stored
+      .map(u => {
+        const { password, ...rest } = u;
+        return { ...rest, passwordHash: rest.passwordHash || (password ? hashPassword(password) : undefined) } as User;
+      })
+      .filter(u => !!u.passwordHash);
+
+    const base = migrated;
+    const known = new Set(base.map(u => u.email.toLowerCase()));
+    demoUsers.forEach(u => {
+      if (!known.has(u.email.toLowerCase())) base.push(u);
+    });
+    return base;
+  }
+
+  /**
+   * Loads every domain collection (from browser storage, or from the seed baseline when `useSeed`) and then
+   * rebuilds all derived state. Seeds are always deep-cloned: the previous code handed the module-level seed
+   * arrays to the store, so edits mutated the "baseline" and a reseed did not restore it.
+   */
+  private loadDomainData(useSeed: boolean): void {
+    const pick = <T,>(key: string, seed: T): T => (useSeed ? clone(seed) : loadFromStorage<T>(key, clone(seed)));
+    const mergeById = <T extends { id: string }>(list: T[], seed: T[]): T[] => {
+      if (!useSeed) {
+        seed.forEach(s => {
+          if (!list.some(x => x.id === s.id)) list.push(clone(s));
+        });
       }
-    });
+      return list;
+    };
 
-    this.registeredUsers = loadedUsers.map(u => {
-      const isSicelo = u.email.toLowerCase() === 'sakhilesicelo94@gmail.com';
-      return {
-        ...u,
-        role: isSicelo ? ('DSAC_ADMIN' as UserRole) : u.role,
-        password: isSicelo ? 'Mkhize@550' : (u.password || 'Password123!'),
-        entityName: isSicelo ? 'DSAC National Headquarters' : (u.entityName || (u.role === 'ENTITY_OFFICER' ? 'Statutory Public Entity' : 'DSAC National Headquarters')),
-      };
-    });
-    saveToStorage(STORAGE_KEYS.REGISTERED_USERS, this.registeredUsers);
-
-    let loadedCurrent = loadFromStorage<User | null>(STORAGE_KEYS.CURRENT_USER, INITIAL_USERS[0]);
-    if (!loadedCurrent || loadedCurrent.email.toLowerCase() === 'n.sithole@dsac.gov.za') {
-      loadedCurrent = this.registeredUsers.find(u => u.email.toLowerCase() === 'sakhilesicelo94@gmail.com') || INITIAL_USERS[0];
-    }
-    if (loadedCurrent && loadedCurrent.email.toLowerCase() === 'sakhilesicelo94@gmail.com') {
-      loadedCurrent.password = 'Mkhize@550';
-      loadedCurrent.role = 'DSAC_ADMIN';
-    }
-    saveToStorage(STORAGE_KEYS.CURRENT_USER, loadedCurrent);
-    this.currentUser = loadedCurrent;
-
-    let loadedEntities = loadFromStorage<PublicEntity[]>(STORAGE_KEYS.ENTITIES, INITIAL_ENTITIES);
-    INITIAL_ENTITIES.forEach(initEnt => {
-      if (!loadedEntities.some(e => e.id === initEnt.id)) {
-        loadedEntities.push(initEnt);
-      }
-    });
-    this.entities = loadedEntities.map(e => ({
+    this.entities = mergeById(pick<PublicEntity[]>(STORAGE_KEYS.ENTITIES, INITIAL_ENTITIES), INITIAL_ENTITIES).map(e => ({
       ...e,
-      trancheAmountZAR: e.trancheAmountZAR || Math.round((e.budgetAllocationZAR || 40000000) / 4),
+      registrationStatus: e.registrationStatus ?? 'ACTIVE',
       trancheStatus: e.trancheStatus || (e.overdueReportsCount > 0 || e.riskLevel === 'CRITICAL' ? 'WITHHELD' : 'RELEASED'),
       statutoryDefaultStage: e.statutoryDefaultStage !== undefined ? e.statutoryDefaultStage : (e.overdueReportsCount > 0 ? 2 : 0),
       statutoryDefaultReason: e.statutoryDefaultReason || (e.overdueReportsCount > 0 ? 'Statutory Q3 Performance Return and certified PoE overdue past 30-day PFMA Section 38(1)(j) deadline.' : undefined),
-      statutoryDefaultNoticeDate: e.statutoryDefaultNoticeDate || (e.overdueReportsCount > 0 ? '2026-02-01T08:00:00.000Z' : undefined)
+      statutoryDefaultNoticeDate: e.statutoryDefaultNoticeDate || (e.overdueReportsCount > 0 ? '2026-02-01T08:00:00.000Z' : undefined),
     }));
-    saveToStorage(STORAGE_KEYS.ENTITIES, this.entities);
 
-    let loadedKpis = loadFromStorage<KPIRecord[]>(STORAGE_KEYS.KPIS, INITIAL_KPIS);
-    if (!loadedKpis || loadedKpis.length < 30) {
-      loadedKpis = INITIAL_KPIS;
-    } else {
-      INITIAL_KPIS.forEach(initK => {
-        if (!loadedKpis.some(k => k.id === initK.id)) {
-          loadedKpis.push(initK);
-        }
-      });
-    }
-    this.kpis = loadedKpis;
-    saveToStorage(STORAGE_KEYS.KPIS, this.kpis);
+    this.kpis = normalizeKpiRecords(mergeById(pick<KPIRecord[]>(STORAGE_KEYS.KPIS, INITIAL_KPIS), INITIAL_KPIS));
+    this.reports = mergeById(pick<QuarterlyReport[]>(STORAGE_KEYS.REPORTS, INITIAL_REPORTS), INITIAL_REPORTS);
 
-    let loadedReports = loadFromStorage<QuarterlyReport[]>(STORAGE_KEYS.REPORTS, INITIAL_REPORTS);
-    if (!loadedReports || loadedReports.length < 30) {
-      loadedReports = INITIAL_REPORTS;
-    } else {
-      INITIAL_REPORTS.forEach(initR => {
-        if (!loadedReports.some(r => r.id === initR.id)) {
-          loadedReports.push(initR);
-        }
-      });
-    }
-    this.reports = loadedReports;
-    saveToStorage(STORAGE_KEYS.REPORTS, this.reports);
-    let loadedDocs = loadFromStorage<EntityDocument[]>(STORAGE_KEYS.DOCUMENTS, INITIAL_DOCUMENTS);
+    const docs = pick<EntityDocument[]>(STORAGE_KEYS.DOCUMENTS, INITIAL_DOCUMENTS);
     INITIAL_DOCUMENTS.forEach(initDoc => {
-      const existing = loadedDocs.find(d => d.id === initDoc.id);
+      const existing = docs.find(d => d.id === initDoc.id);
       if (!existing) {
-        loadedDocs.push(initDoc);
+        docs.push(clone(initDoc));
       } else {
         // Guarantee file properties are synchronized
         existing.fileName = existing.fileName || initDoc.fileName || existing.versions?.[0]?.fileName || existing.title;
@@ -417,77 +459,98 @@ export class GovTrackStore {
         existing.uploadedBy = existing.uploadedBy || initDoc.uploadedBy || existing.versions?.[0]?.uploadedBy;
       }
     });
-    this.documents = loadedDocs.map(d => ({
+    this.documents = docs.map(d => ({
       ...d,
       fileName: d.fileName || d.versions?.[0]?.fileName || d.title,
       fileSize: d.fileSize || (d.fileSizeBytes ? (d.fileSizeBytes < 1000000 ? `${Math.round(d.fileSizeBytes / 1024)} KB` : `${(d.fileSizeBytes / (1024 * 1024)).toFixed(1)} MB`) : '3.5 MB'),
       uploadedAt: d.uploadedAt || d.versions?.[0]?.uploadedAt || '2025-07-14T10:00:00.000Z',
       uploadedBy: d.uploadedBy || d.versions?.[0]?.uploadedBy || 'Lerato Phiri (Organisation Admin)',
     }));
-    saveToStorage(STORAGE_KEYS.DOCUMENTS, this.documents);
 
-    this.documentRequirements = loadFromStorage<DocumentRequirement[]>(
-      STORAGE_KEYS.DOCUMENT_REQUIREMENTS,
-      DEFAULT_DOCUMENT_REQUIREMENTS
-    );
-    saveToStorage(STORAGE_KEYS.DOCUMENT_REQUIREMENTS, this.documentRequirements);
+    this.documentRequirements = pick<DocumentRequirement[]>(STORAGE_KEYS.DOCUMENT_REQUIREMENTS, DEFAULT_DOCUMENT_REQUIREMENTS);
+    this.tasks = pick<CorrectiveTask[]>(STORAGE_KEYS.TASKS, INITIAL_TASKS);
+    this.riskAlerts = pick<RiskAlert[]>(STORAGE_KEYS.RISKS, INITIAL_RISK_ALERTS);
+    this.deadlines = pick<RegulatoryDeadline[]>(STORAGE_KEYS.DEADLINES, INITIAL_DEADLINES);
+    this.auditLogs = pick<AuditLogEntry[]>(STORAGE_KEYS.AUDIT_LOGS, INITIAL_AUDIT_LOGS);
+    this.expenseCategories = mergeById(pick<ExpenseCategory[]>(STORAGE_KEYS.EXPENSE_CATEGORIES, INITIAL_EXPENSE_CATEGORIES), INITIAL_EXPENSE_CATEGORIES);
 
-    this.tasks = loadFromStorage<CorrectiveTask[]>(STORAGE_KEYS.TASKS, INITIAL_TASKS);
-    this.riskAlerts = loadFromStorage<RiskAlert[]>(STORAGE_KEYS.RISKS, INITIAL_RISK_ALERTS);
-    this.deadlines = loadFromStorage<RegulatoryDeadline[]>(STORAGE_KEYS.DEADLINES, INITIAL_DEADLINES);
-    this.auditLogs = loadFromStorage<AuditLogEntry[]>(STORAGE_KEYS.AUDIT_LOGS, INITIAL_AUDIT_LOGS);
+    // Finance: the three sources of truth. Loaded records are repaired so nothing enters un-footed.
+    this.budgetProfiles = mergeById(pick<EntityBudgetProfile[]>(STORAGE_KEYS.BUDGET_PROFILES, SEEDED_BUDGET_PROFILES), SEEDED_BUDGET_PROFILES)
+      .map(repairBudgetProfile);
+    this.quarterlyFinancialSubmissions = mergeById(
+      pick<QuarterlyFinancialSubmission[]>(STORAGE_KEYS.QUARTERLY_FINANCIAL_SUBMISSIONS, SEEDED_QUARTERLY_SUBMISSIONS),
+      SEEDED_QUARTERLY_SUBMISSIONS
+    ).map(s => ({ ...s, totalQuarterlyActual: returnTotal(s) }));
+    this.disbursements = mergeById(pick<DisbursementRecord[]>(STORAGE_KEYS.DISBURSEMENTS, SEEDED_DISBURSEMENTS), SEEDED_DISBURSEMENTS);
 
-    let loadedExpenseCategories = loadFromStorage<ExpenseCategory[]>(STORAGE_KEYS.EXPENSE_CATEGORIES, INITIAL_EXPENSE_CATEGORIES);
-    INITIAL_EXPENSE_CATEGORIES.forEach(initCat => {
-      if (!loadedExpenseCategories.some(c => c.id === initCat.id)) {
-        loadedExpenseCategories.push(initCat);
-      }
-    });
-    this.expenseCategories = loadedExpenseCategories;
-    saveToStorage(STORAGE_KEYS.EXPENSE_CATEGORIES, this.expenseCategories);
+    this.supportRequests = mergeById(pick<SupportRequest[]>(STORAGE_KEYS.SUPPORT_REQUESTS, INITIAL_SUPPORT_REQUESTS), INITIAL_SUPPORT_REQUESTS);
 
-    let loadedBudgetProfiles = loadFromStorage<EntityBudgetProfile[]>(STORAGE_KEYS.BUDGET_PROFILES, INITIAL_BUDGET_PROFILES);
-    INITIAL_BUDGET_PROFILES.forEach(initBp => {
-      if (!loadedBudgetProfiles.some(bp => bp.id === initBp.id)) {
-        loadedBudgetProfiles.push(initBp);
-      }
-    });
-    this.budgetProfiles = loadedBudgetProfiles;
-    saveToStorage(STORAGE_KEYS.BUDGET_PROFILES, this.budgetProfiles);
+    this.refreshDerivedState();
+  }
 
-    let loadedQuarterlySubmissions = loadFromStorage<QuarterlyFinancialSubmission[]>(
-      STORAGE_KEYS.QUARTERLY_FINANCIAL_SUBMISSIONS, 
-      INITIAL_QUARTERLY_SUBMISSIONS
-    );
-    INITIAL_QUARTERLY_SUBMISSIONS.forEach(initQs => {
-      if (!loadedQuarterlySubmissions.some(qs => qs.id === initQs.id)) {
-        loadedQuarterlySubmissions.push(initQs);
-      }
-    });
-    this.quarterlyFinancialSubmissions = loadedQuarterlySubmissions;
-    saveToStorage(STORAGE_KEYS.QUARTERLY_FINANCIAL_SUBMISSIONS, this.quarterlyFinancialSubmissions);
+  /** Rebuilds every denormalised value from the sources of truth. Safe to call at any time. */
+  private refreshDerivedState(): void {
+    this.entities.forEach(e => this.syncEntityFinancialCache(e.id));
+    this.reconcileReportMirrors();
+    this.entities.forEach(e => this.recalculateEntityRisk(e.id));
+  }
 
-    let loadedSupportRequests = loadFromStorage<SupportRequest[]>(
-      STORAGE_KEYS.SUPPORT_REQUESTS,
-      INITIAL_SUPPORT_REQUESTS
-    );
-    INITIAL_SUPPORT_REQUESTS.forEach(initReq => {
-      if (!loadedSupportRequests.some(r => r.id === initReq.id)) {
-        loadedSupportRequests.push(initReq);
-      }
-    });
-    this.supportRequests = loadedSupportRequests;
-    saveToStorage(STORAGE_KEYS.SUPPORT_REQUESTS, this.supportRequests);
+  /** Blocks DSAC-only financial and statutory actions for everyone else, and records the attempt. */
+  private requireDsacAuthority(action: string): boolean {
+    const role = this.currentUser?.role;
+    if (role && DSAC_AUTHORITY_ROLES.includes(role)) return true;
+    this.addAuditLog('ACCESS_DENIED', `Blocked "${action}": the signed-in role (${role || 'not signed in'}) does not hold DSAC authority.`);
+    return false;
+  }
 
-    let loadedTransactions = loadFromStorage<FinancialTransaction[]>(
-      STORAGE_KEYS.FINANCIAL_TRANSACTIONS, 
-      []
-    );
-    if (!loadedTransactions || loadedTransactions.length === 0) {
-      loadedTransactions = generateInitialTransactions(this.entities, this.quarterlyFinancialSubmissions);
-    }
-    this.financialTransactions = loadedTransactions;
-    saveToStorage(STORAGE_KEYS.FINANCIAL_TRANSACTIONS, this.financialTransactions);
+  /**
+   * True when the signed-in user may act on this organisation's records: any DSAC official, or the entity officer
+   * bound to that organisation. Anyone else is refused and the attempt is written to the audit trail.
+   */
+  private canActForEntity(entityId: string, action: string): boolean {
+    const user = this.currentUser;
+    if (user && (DSAC_AUTHORITY_ROLES.includes(user.role) || (user.role === 'ENTITY_OFFICER' && user.entityId === entityId))) return true;
+    const entity = this.entities.find(e => e.id === entityId);
+    this.addAuditLog('ACCESS_DENIED', `Blocked "${action}": the signed-in user may not act on ${entity?.name || 'this organisation'}'s records.`, entity?.name);
+    return false;
+  }
+
+  /**
+   * Refreshes the read-cache fields on an entity (approved / disbursed / reported for the current reporting
+   * period) from the budget profile, the disbursement ledger and the lodged returns. These fields are never
+   * written anywhere else, so they cannot drift from the sources of truth.
+   */
+  private syncEntityFinancialCache(entityId: string): void {
+    const entity = this.entities.find(e => e.id === entityId);
+    if (!entity) return;
+    const { financialYear, quarter } = getCurrentReportingPeriod();
+    const s = this.getEntityFinancialSummary(entityId, financialYear, quarter);
+    entity.budgetAllocationZAR = s.approvedAmount;
+    entity.transferredAmountZAR = s.disbursedToDate;
+    entity.reportedExpenditureZAR = s.ytdActual;
+    const next = this.getNextTranche(entityId, financialYear);
+    entity.trancheAmountZAR = next ? next.amountZAR : 0;
+  }
+
+  /**
+   * A quarterly performance report carries a copy of the quarter's expenditure and cash received. That copy is
+   * derived from the finance return and the ledger so the two can never disagree.
+   */
+  private reconcileReportMirrors(entityId?: string): void {
+    this.reports
+      .filter(r => !entityId || r.entityId === entityId)
+      .forEach(r => {
+        const fy = normalizeFinancialYear(r.financialYear);
+        const ret = this.quarterlyFinancialSubmissions.find(
+          s => s.entityId === r.entityId && s.quarter === r.quarter && normalizeFinancialYear(s.financialYear) === fy && REPORTED_RETURN_STATUSES.includes(s.status)
+        );
+        if (ret) r.fundsSpentThisQuarterZAR = returnTotal(ret);
+        else if (r.submissionStatus === 'OVERDUE' || r.submissionStatus === 'DRAFT') r.fundsSpentThisQuarterZAR = 0;
+        const qi = quarterIndex(r.quarter);
+        r.totalFundsReceivedToDateZAR = this.disbursements
+          .filter(d => d.entityId === r.entityId && d.status === 'RELEASED' && normalizeFinancialYear(d.financialYear) === fy && quarterIndex(d.tranche) <= qi)
+          .reduce((a, d) => a + d.amountZAR, 0);
+      });
   }
 
   public static getInstance(): GovTrackStore {
@@ -508,7 +571,8 @@ export class GovTrackStore {
 
   // --- PERSISTENCE HELPERS ---
   public persistAll(): void {
-    saveToStorage(STORAGE_KEYS.CURRENT_USER, this.currentUser);
+    saveToStorage(STORAGE_KEYS.DATA_VERSION, DATA_VERSION);
+    saveToStorage(STORAGE_KEYS.CURRENT_USER, this.sessionRecord());
     saveToStorage(STORAGE_KEYS.REGISTERED_USERS, this.registeredUsers);
     saveToStorage(STORAGE_KEYS.ENTITIES, this.entities);
     saveToStorage(STORAGE_KEYS.KPIS, this.kpis);
@@ -522,25 +586,84 @@ export class GovTrackStore {
     saveToStorage(STORAGE_KEYS.EXPENSE_CATEGORIES, this.expenseCategories);
     saveToStorage(STORAGE_KEYS.BUDGET_PROFILES, this.budgetProfiles);
     saveToStorage(STORAGE_KEYS.QUARTERLY_FINANCIAL_SUBMISSIONS, this.quarterlyFinancialSubmissions);
+    saveToStorage(STORAGE_KEYS.DISBURSEMENTS, this.disbursements);
     saveToStorage(STORAGE_KEYS.SUPPORT_REQUESTS, this.supportRequests);
-    saveToStorage(STORAGE_KEYS.FINANCIAL_TRANSACTIONS, this.financialTransactions);
+    this.notify();
+  }
+
+  // --- STATE SYNC (used by the API server and by the browser in connected mode) ---
+  /**
+   * The collections a user is entitled to see. A DSAC official sees everything. An entity officer sees only their
+   * own organisation's records (plus the reference data every organisation needs), so another organisation's
+   * money, returns and documents never reach their browser. Users are returned without password hashes.
+   */
+  exportStateFor(user: User): StateData & { user: PublicUser; users: PublicUser[] } {
+    const isDsac = DSAC_AUTHORITY_ROLES.includes(user.role);
+    const entityId = user.entityId;
+    const own = <T extends { entityId?: string }>(xs: T[]): T[] => (isDsac ? xs : xs.filter(x => x.entityId === entityId));
+    const ownEntity = this.entities.find(e => e.id === entityId);
+    const publicUser = (u: User): PublicUser => {
+      const { passwordHash, password, ...rest } = u;
+      return rest;
+    };
+    const data = {
+      entities: isDsac ? this.entities : this.entities.filter(e => e.id === entityId),
+      kpis: own(this.kpis),
+      reports: own(this.reports),
+      documents: own(this.documents),
+      documentRequirements: this.documentRequirements,
+      tasks: own(this.tasks),
+      riskAlerts: own(this.riskAlerts),
+      deadlines: this.deadlines,
+      auditLogs: isDsac ? this.auditLogs : this.auditLogs.filter(a => !!ownEntity && a.entityName === ownEntity.name),
+      expenseCategories: this.expenseCategories,
+      budgetProfiles: own(this.budgetProfiles),
+      quarterlyFinancialSubmissions: own(this.quarterlyFinancialSubmissions),
+      supportRequests: own(this.supportRequests),
+      disbursements: own(this.disbursements),
+      user: publicUser(user),
+      users: (isDsac ? this.registeredUsers : this.registeredUsers.filter(u => u.id === user.id)).map(publicUser),
+    };
+    // Detach from the live store: the caller gets a copy it can serialise or keep.
+    return JSON.parse(JSON.stringify(data));
+  }
+
+  /**
+   * Replaces this store's collections with a snapshot from the server (connected mode). The browser is a cache of
+   * the server's data, so nothing is written to browser storage, and derived values are rebuilt locally exactly as
+   * the server rebuilt them.
+   */
+  applyRemoteState(snapshot: StateData & { user: PublicUser; users: PublicUser[] }): void {
+    this.entities = snapshot.entities;
+    this.kpis = snapshot.kpis;
+    this.reports = snapshot.reports;
+    this.documents = snapshot.documents;
+    this.documentRequirements = snapshot.documentRequirements;
+    this.tasks = snapshot.tasks;
+    this.riskAlerts = snapshot.riskAlerts;
+    this.deadlines = snapshot.deadlines;
+    this.auditLogs = snapshot.auditLogs;
+    this.expenseCategories = snapshot.expenseCategories;
+    this.budgetProfiles = snapshot.budgetProfiles;
+    this.quarterlyFinancialSubmissions = snapshot.quarterlyFinancialSubmissions;
+    this.supportRequests = snapshot.supportRequests;
+    this.disbursements = snapshot.disbursements;
+    this.registeredUsers = snapshot.users as User[];
+    this.currentUser = (this.registeredUsers.find(u => u.id === snapshot.user.id) ?? snapshot.user) as User;
+    this.refreshDerivedState();
+    this.notify();
+  }
+
+  /** Connected mode: the server ended the session, so clear the local identity and data. */
+  applyRemoteSignOut(): void {
+    this.currentUser = null;
     this.notify();
   }
 
   // --- RE-SYNCHRONIZE DEPARTMENTAL BASELINE ---
   reseedOfficialBaseline(): void {
-    this.entities = JSON.parse(JSON.stringify(INITIAL_ENTITIES));
-    this.kpis = JSON.parse(JSON.stringify(INITIAL_KPIS));
-    this.reports = JSON.parse(JSON.stringify(INITIAL_REPORTS));
-    this.documents = JSON.parse(JSON.stringify(INITIAL_DOCUMENTS));
-    this.tasks = JSON.parse(JSON.stringify(INITIAL_TASKS));
-    this.riskAlerts = JSON.parse(JSON.stringify(INITIAL_RISK_ALERTS));
-    this.deadlines = JSON.parse(JSON.stringify(INITIAL_DEADLINES));
-    this.expenseCategories = JSON.parse(JSON.stringify(INITIAL_EXPENSE_CATEGORIES));
-    this.budgetProfiles = JSON.parse(JSON.stringify(INITIAL_BUDGET_PROFILES));
-    this.quarterlyFinancialSubmissions = JSON.parse(JSON.stringify(INITIAL_QUARTERLY_SUBMISSIONS));
-    this.supportRequests = JSON.parse(JSON.stringify(INITIAL_SUPPORT_REQUESTS));
-    this.financialTransactions = generateInitialTransactions(this.entities, this.quarterlyFinancialSubmissions);
+    if (!this.requireDsacAuthority('Reseed departmental baseline')) return;
+    this.loadDomainData(true);
     this.addAuditLog(
       'SYSTEM_BASELINE_SYNC',
       'Departmental statutory baseline datasets synchronized with gazetted PFMA Vote 37 appropriations.'
@@ -548,72 +671,56 @@ export class GovTrackStore {
     this.persistAll();
   }
 
+  /**
+   * Edits an organisation's profile. Only DSAC officials and that organisation's own officer may do this, and only
+   * the descriptive fields below change. Risk, compliance score, audit outcome, funding status, registration status
+   * and every money field are derived or are DSAC decisions, so a caller cannot overwrite them here (the previous
+   * version merged the whole record, so an organisation could have marked itself low-risk with funds released).
+   */
   updateEntity(updated: PublicEntity): void {
     const idx = this.entities.findIndex(e => e.id === updated.id);
-    if (idx !== -1) {
-      this.entities[idx] = { ...this.entities[idx], ...updated };
-      this.addAuditLog('ENTITY_RECORD_UPDATED', `Governance record updated for ${updated.name}`, updated.name);
-      this.persistAll();
-    }
+    if (idx === -1) return;
+    if (!this.canActForEntity(updated.id, 'Update organisation profile')) return;
+    const current = this.entities[idx];
+    this.entities[idx] = {
+      ...current,
+      headOfEntity: updated.headOfEntity ?? current.headOfEntity,
+      reportingOfficerName: updated.reportingOfficerName ?? current.reportingOfficerName,
+      contactEmail: updated.contactEmail ?? current.contactEmail,
+      demographics: updated.demographics ?? current.demographics,
+      jobStats: updated.jobStats ?? current.jobStats,
+    };
+    this.addAuditLog('ENTITY_RECORD_UPDATED', `Profile of ${current.name} was updated.`, current.name);
+    this.persistAll();
   }
 
-  // --- REAL AUTHENTICATION & SESSION MANAGEMENT ---
   login(email: string, password?: string): { success: boolean; message?: string } {
     const cleanEmail = email.trim().toLowerCase();
+    const now = Date.now();
 
-    // Specific credential check for DSAC Administrator sakhilesicelo94@gmail.com
-    if (cleanEmail === 'sakhilesicelo94@gmail.com') {
-      if (password !== undefined && password.trim() !== 'Mkhize@550') {
-        return {
-          success: false,
-          message: 'Invalid official password. Please enter the designated DSAC security password (Mkhize@550).'
-        };
-      }
-      let sicelo = this.registeredUsers.find(u => u.email.toLowerCase() === 'sakhilesicelo94@gmail.com');
-      if (!sicelo) {
-        sicelo = {
-          id: 'user-dsac-admin',
-          name: 'Sicelo Sakhile Mkhize',
-          email: 'sakhilesicelo94@gmail.com',
-          role: 'DSAC_ADMIN',
-          designation: 'Chief Director: Public Entities Oversight & Governance',
-          entityName: 'DSAC National Headquarters',
-          password: 'Mkhize@550',
-        };
-        this.registeredUsers.unshift(sicelo);
-        saveToStorage(STORAGE_KEYS.REGISTERED_USERS, this.registeredUsers);
-      } else {
-        sicelo.password = 'Mkhize@550';
-        sicelo.role = 'DSAC_ADMIN';
-      }
-      this.currentUser = sicelo;
-      saveToStorage(STORAGE_KEYS.CURRENT_USER, this.currentUser);
-      this.addAuditLog('USER_LOGIN', `DSAC Administrator authenticated: ${sicelo.name} (${sicelo.designation})`);
-      this.notify();
-      return { success: true };
+    const lock = this.failedLogins.get(cleanEmail);
+    if (lock && lock.lockedUntil > now) {
+      const mins = Math.ceil((lock.lockedUntil - now) / 60000);
+      return { success: false, message: `Too many failed attempts. Please try again in ${mins} minute${mins === 1 ? '' : 's'}.` };
+    }
+    // A password is ALWAYS required. (The previous build skipped the check whenever it was omitted.)
+    if (!password) return { success: false, message: 'Please enter your password.' };
+
+    const user = this.registeredUsers.find(u => u.email.toLowerCase() === cleanEmail);
+    if (!user || !verifyPassword(password, user.passwordHash)) {
+      const previous = this.failedLogins.get(cleanEmail);
+      const base = previous && previous.lockedUntil > 0 && previous.lockedUntil <= now ? 0 : (previous?.count ?? 0);
+      const count = base + 1;
+      this.failedLogins.set(cleanEmail, { count, lockedUntil: count >= MAX_LOGIN_ATTEMPTS ? now + LOGIN_LOCKOUT_MS : 0 });
+      this.addAuditLog('LOGIN_FAILED', `Failed sign-in attempt for ${cleanEmail}.`);
+      // One generic message for unknown user and wrong password, and never a hint about the expected password.
+      return { success: false, message: 'Invalid email or password.' };
     }
 
-    const existing = this.registeredUsers.find(u => u.email.toLowerCase() === cleanEmail);
-    if (!existing) {
-      return { 
-        success: false, 
-        message: 'No official credentials found for this email address. Please verify your address or register an official account.' 
-      };
-    }
-
-    if (password !== undefined) {
-      const userPassword = existing.password || 'Password123!';
-      if (password.trim() !== userPassword) {
-        return {
-          success: false,
-          message: 'Invalid official password entered. Please enter your correct security password.'
-        };
-      }
-    }
-
-    this.currentUser = existing;
-    saveToStorage(STORAGE_KEYS.CURRENT_USER, this.currentUser);
-    this.addAuditLog('USER_LOGIN', `Official user authenticated: ${existing.name} (${existing.designation})`);
+    this.failedLogins.delete(cleanEmail);
+    this.currentUser = user;
+    saveToStorage(STORAGE_KEYS.CURRENT_USER, this.sessionRecord());
+    this.addAuditLog('USER_LOGIN', `Official user authenticated: ${user.name} (${user.designation})`);
     this.notify();
     return { success: true };
   }
@@ -628,13 +735,18 @@ export class GovTrackStore {
     password?: string;
   }): { success: boolean; message?: string } {
     const cleanEmail = newUserData.email.trim().toLowerCase();
-    const exists = this.registeredUsers.some(u => u.email.toLowerCase() === cleanEmail);
-    if (exists) {
-      return { 
-        success: false, 
-        message: 'An official account with this government email already exists. Please sign in.' 
+
+    if (DSAC_AUTHORITY_ROLES.includes(newUserData.role) && !DEMO_MODE) {
+      return { success: false, message: 'DSAC official accounts are provisioned by the Department and cannot be self-registered.' };
+    }
+    if (this.registeredUsers.some(u => u.email.toLowerCase() === cleanEmail)) {
+      return {
+        success: false,
+        message: 'An official account with this government email already exists. Please sign in.'
       };
     }
+    const strength = checkPasswordStrength(newUserData.password?.trim() || '');
+    if (!strength.ok) return { success: false, message: strength.message };
 
     const newUser: User = {
       id: `user-${Date.now()}`,
@@ -644,14 +756,14 @@ export class GovTrackStore {
       designation: newUserData.designation.trim() || (newUserData.role === 'DSAC_ADMIN' ? 'Oversight Administrator' : 'Reporting Officer'),
       entityId: newUserData.entityId,
       entityName: newUserData.entityName,
-      password: newUserData.password?.trim() || 'Password123!',
+      passwordHash: hashPassword(newUserData.password!.trim()),
     };
 
     this.registeredUsers = [newUser, ...this.registeredUsers];
     this.currentUser = newUser;
     saveToStorage(STORAGE_KEYS.REGISTERED_USERS, this.registeredUsers);
-    saveToStorage(STORAGE_KEYS.CURRENT_USER, this.currentUser);
-    
+    saveToStorage(STORAGE_KEYS.CURRENT_USER, this.sessionRecord());
+
     this.addAuditLog(
       'USER_REGISTRATION',
       `Official user account registered: ${newUser.name} as ${newUser.designation} (${newUser.entityName || 'DSAC National'})`
@@ -669,20 +781,55 @@ export class GovTrackStore {
     this.notify();
   }
 
+  /**
+   * Creates an account without a signed-in caller. The API server uses this once at start-up to provision the first
+   * DSAC administrator from environment variables. It is deliberately NOT on the server's remote command list, so
+   * no client can call it. The password must pass the same strength rules as any other.
+   */
+  provisionAccount(params: { name: string; email: string; role: UserRole; designation: string; password: string; entityId?: string; entityName?: string }): { success: boolean; message?: string } {
+    const email = params.email.trim().toLowerCase();
+    if (this.registeredUsers.some(u => u.email.toLowerCase() === email)) return { success: false, message: 'An account with this email address already exists.' };
+    const strength = checkPasswordStrength(params.password.trim());
+    if (!strength.ok) return { success: false, message: strength.message };
+    this.registeredUsers.push({
+      id: `user-${Date.now()}`,
+      name: params.name.trim(),
+      email,
+      role: params.role,
+      designation: params.designation.trim(),
+      entityId: params.entityId,
+      entityName: params.entityName,
+      passwordHash: hashPassword(params.password.trim()),
+    });
+    this.addAuditLog('USER_REGISTRATION', `Account provisioned for ${params.name.trim()} (${params.designation.trim()}).`, params.entityName);
+    this.persistAll();
+    return { success: true };
+  }
+
+  /** Demonstration-only persona switcher. Disabled outside demo mode. */
   switchUserRole(role: UserRole): void {
+    if (!DEMO_MODE) {
+      this.addAuditLog('ACCESS_DENIED', 'Role switching is only available in demonstration mode.');
+      return;
+    }
     const user = this.registeredUsers.find(u => u.role === role) || this.registeredUsers[0];
     if (user) {
       this.currentUser = user;
       this.addAuditLog('USER_LOGIN', `Active session switched to ${user.name} (${user.designation})`);
-      saveToStorage(STORAGE_KEYS.CURRENT_USER, this.currentUser);
+      saveToStorage(STORAGE_KEYS.CURRENT_USER, this.sessionRecord());
       this.notify();
     }
   }
 
+  /** Demonstration-only. Real sessions are only ever created by login() / signUp(). */
   setCurrentUser(user: User): void {
-    this.currentUser = user;
+    if (!DEMO_MODE || !this.registeredUsers.some(u => u.id === user.id)) {
+      this.addAuditLog('ACCESS_DENIED', 'Direct session assignment is only available in demonstration mode.');
+      return;
+    }
+    this.currentUser = this.registeredUsers.find(u => u.id === user.id)!;
     this.addAuditLog('USER_LOGIN', `User authenticated as ${user.name} (${user.role})`);
-    saveToStorage(STORAGE_KEYS.CURRENT_USER, this.currentUser);
+    saveToStorage(STORAGE_KEYS.CURRENT_USER, this.sessionRecord());
     this.notify();
   }
 
@@ -706,33 +853,58 @@ export class GovTrackStore {
   }
 
   // --- REPORT WORKFLOW (THE CORE GOVERNMENT LIFECYCLE) ---
+  /**
+   * Submits a quarterly PERFORMANCE report. The spend typed here is a claim recorded on the report only.
+   * The authoritative expenditure figure is the finance return (submitQuarterlyFinancialReturn); this method
+   * never touches entity or portfolio money, so a resubmission can no longer double count.
+   */
   submitReport(reportId: string, items: ReportItem[], spentThisQuarterZAR: number): void {
     const report = this.reports.find(r => r.id === reportId);
     if (!report) return;
 
-    const actor = this.currentUser ? `${this.currentUser.name} (${this.currentUser.designation})` : 'Authorized Reporting Officer';
-
-    report.submissionStatus = 'SUBMITTED';
-    report.submittedAt = new Date().toISOString();
-    report.submittedBy = actor;
-    report.fundsSpentThisQuarterZAR = spentThisQuarterZAR;
-    report.items = items;
-
-    // Update entity reported expenditure
-    const entity = this.entities.find(e => e.id === report.entityId);
-    if (entity) {
-      entity.reportedExpenditureZAR += spentThisQuarterZAR;
-      // Re-evaluate risk
-      this.recalculateEntityRisk(entity.id);
+    if (report.submissionStatus === 'APPROVED' || report.submissionStatus === 'UNDER_REVIEW') {
+      this.addAuditLog('ACCESS_DENIED', `Ignored resubmission of the ${report.quarter} report for ${report.entityName}: it is ${report.submissionStatus} and locked.`, report.entityName);
+      return;
     }
 
-    this.addAuditLog('REPORT_SUBMITTED', `Submitted ${report.quarter} Performance Report for ${report.entityName}. Expenditure claimed: R ${(spentThisQuarterZAR / 1_000_000).toFixed(2)}M.`, report.entityName);
+    const actor = this.currentUser ? `${this.currentUser.name} (${this.currentUser.designation})` : 'Authorized Reporting Officer';
+    const claimed = Number.isFinite(spentThisQuarterZAR) && spentThisQuarterZAR > 0 ? Math.round(spentThisQuarterZAR) : 0;
+
+    report.submissionStatus = report.submissionStatus === 'CORRECTION_REQUIRED' ? 'RESUBMITTED' : 'SUBMITTED';
+    report.submittedAt = new Date().toISOString();
+    report.submittedBy = actor;
+    report.items = items;
+    report.fundsSpentThisQuarterZAR = claimed;
+    // If a finance return exists for this quarter its figure replaces the claim, so the two cannot disagree.
+    this.reconcileReportMirrors(report.entityId);
+
+    const fy = normalizeFinancialYear(report.financialYear);
+    const ret = this.quarterlyFinancialSubmissions.find(
+      s => s.entityId === report.entityId && s.quarter === report.quarter && normalizeFinancialYear(s.financialYear) === fy && REPORTED_RETURN_STATUSES.includes(s.status)
+    );
+    const reconciliation = ret
+      ? (Math.abs(returnTotal(ret) - claimed) > 1
+          ? ` The claim of ${formatZAR(claimed)} differs from the lodged finance return of ${formatZAR(returnTotal(ret))}; the finance return is used.`
+          : '')
+      : ' No finance return has been lodged for this quarter, so the claim is not counted in portfolio expenditure until it is.';
+
+    this.recalculateEntityRisk(report.entityId);
+    this.addAuditLog('REPORT_SUBMITTED', `Submitted ${report.quarter} Performance Report for ${report.entityName}. Expenditure claimed: ${formatZAR(claimed)}.${reconciliation}`, report.entityName);
     this.persistAll();
   }
 
   reviewReport(reportId: string, decision: 'APPROVE' | 'REQUEST_CORRECTION', notes: string): void {
+    if (!this.requireDsacAuthority('Review quarterly report')) return;
     const report = this.reports.find(r => r.id === reportId);
     if (!report) return;
+
+    // Only a report that is actually awaiting review can be decided. (Previously any report, including an
+    // already-approved one, could be "approved" again, and each approval decremented the overdue counter.)
+    const reviewable: QuarterlyReport['submissionStatus'][] = ['SUBMITTED', 'RESUBMITTED', 'UNDER_REVIEW'];
+    if (!reviewable.includes(report.submissionStatus)) {
+      this.addAuditLog('ACCESS_DENIED', `Ignored review of the ${report.quarter} report for ${report.entityName}: it is ${report.submissionStatus}, not awaiting review.`, report.entityName);
+      return;
+    }
 
     const actorName = this.currentUser ? this.currentUser.name : 'DSAC Reviewer';
     const actorRole = this.currentUser ? this.currentUser.role : 'DSAC_ADMIN';
@@ -744,19 +916,27 @@ export class GovTrackStore {
       report.reviewedBy = actorDesc;
       report.reviewNotes = notes;
 
-      // Auto-lift statutory non-submission hold and issue clearance certificate
+      // The overdue counter is RECOMPUTED from report statuses (not decremented), then the statutory hold is
+      // lifted only if nothing is overdue and the hold was a non-submission hold (stage 1-2). Stage 3-4
+      // (censure / AGSA referral) always needs an explicit, authorised liftTrancheWithholding().
+      this.recalculateEntityRisk(report.entityId);
       const entity = this.entities.find(e => e.id === report.entityId);
-      if (entity) {
-        entity.overdueReportsCount = Math.max(0, (entity.overdueReportsCount || 1) - 1);
-        if (entity.overdueReportsCount === 0) {
-          entity.trancheStatus = 'RELEASED';
-          entity.statutoryDefaultStage = 0;
-          entity.statutoryDefaultReason = undefined;
-          entity.statutoryDefaultNoticeDate = undefined;
-        }
+      let released = false;
+      if (
+        entity &&
+        entity.overdueReportsCount === 0 &&
+        (entity.trancheStatus === 'WITHHELD' || entity.trancheStatus === 'CONDITIONAL_HOLD') &&
+        (entity.statutoryDefaultStage ?? 0) <= 2
+      ) {
+        entity.trancheStatus = 'RELEASED';
+        entity.statutoryDefaultStage = 0;
+        entity.statutoryDefaultReason = undefined;
+        entity.statutoryDefaultNoticeDate = undefined;
+        this.setNextTrancheStatus(entity.id, 'SCHEDULED');
+        released = true;
       }
 
-      this.addAuditLog('REPORT_APPROVED', `Approved ${report.quarter} Report for ${report.entityName}. Statutory Tranche Clearance issued. Decision notes: ${notes}`, report.entityName);
+      this.addAuditLog('REPORT_APPROVED', `Approved ${report.quarter} Report for ${report.entityName}.${released ? ' No overdue returns remain: statutory tranche hold lifted.' : ''} Decision notes: ${notes}`, report.entityName);
     } else {
       report.submissionStatus = 'CORRECTION_REQUIRED';
       report.reviewedAt = new Date().toISOString();
@@ -791,6 +971,7 @@ export class GovTrackStore {
 
   // --- STATUTORY NON-SUBMISSION & PFMA SECTION 38(1)(j) ENFORCEMENT ---
   enforceTrancheWithholding(entityId: string, reason: string): void {
+    if (!this.requireDsacAuthority('Withhold statutory tranche')) return;
     const entity = this.entities.find(e => e.id === entityId);
     if (!entity) return;
 
@@ -801,6 +982,7 @@ export class GovTrackStore {
     entity.statutoryDefaultReason = reason;
     entity.riskLevel = 'CRITICAL';
     entity.riskScore = Math.max(entity.riskScore, 88);
+    this.setNextTrancheStatus(entityId, 'WITHHELD');
 
     // Create high-priority corrective task
     const task: CorrectiveTask = {
@@ -808,7 +990,7 @@ export class GovTrackStore {
       entityId: entity.id,
       entityName: entity.name,
       title: `PFMA Sec 38(1)(j) Grant Suspension: Cure Statutory Non-Submission`,
-      description: `Formal ministerial withholding enforced on Vote 40 operational subsidy. Reason: "${reason}". Submit outstanding statutory returns and certified PoE to restore disbursement eligibility.`,
+      description: `Formal ministerial withholding enforced on Vote 37 operational subsidy. Reason: "${reason}". Submit outstanding statutory returns and certified PoE to restore disbursement eligibility.`,
       assignedToName: entity.headOfEntity,
       createdByName: actor,
       createdByRole: 'DSAC_ADMIN',
@@ -829,6 +1011,7 @@ export class GovTrackStore {
   }
 
   liftTrancheWithholding(entityId: string, notes: string): void {
+    if (!this.requireDsacAuthority('Lift statutory tranche withholding')) return;
     const entity = this.entities.find(e => e.id === entityId);
     if (!entity) return;
 
@@ -837,6 +1020,7 @@ export class GovTrackStore {
     entity.statutoryDefaultReason = undefined;
     entity.statutoryDefaultNoticeDate = undefined;
     entity.riskLevel = entity.riskScore > 65 ? 'HIGH' : entity.riskScore > 40 ? 'MEDIUM' : 'LOW';
+    this.setNextTrancheStatus(entityId, 'SCHEDULED');
 
     this.addAuditLog(
       'TRANCHE_RELEASED',
@@ -849,21 +1033,30 @@ export class GovTrackStore {
   requestComplianceExtension(entityId: string, days: number, motive: string): void {
     const entity = this.entities.find(e => e.id === entityId);
     if (!entity) return;
+    const role = this.currentUser?.role;
+    const ownEntity = role === 'ENTITY_OFFICER' && this.currentUser?.entityId === entityId;
+    if (!ownEntity && !(role && DSAC_AUTHORITY_ROLES.includes(role))) {
+      this.addAuditLog('ACCESS_DENIED', `Blocked compliance extension for ${entity.name}: caller is not that entity's officer or DSAC.`, entity.name);
+      return;
+    }
 
-    const expiryDate = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
+    const boundedDays = Math.min(30, Math.max(1, Math.round(Number.isFinite(days) ? days : 7)));
+    const expiryDate = new Date(Date.now() + boundedDays * 24 * 60 * 60 * 1000).toISOString();
     entity.extensionGrantedUntil = expiryDate;
     entity.extensionRequestedReason = motive;
     entity.trancheStatus = 'CONDITIONAL_HOLD';
+    this.setNextTrancheStatus(entityId, 'WITHHELD');
 
     this.addAuditLog(
       'EXTENSION_REQUESTED',
-      `Statutory compliance extension granted for ${days} days until ${expiryDate.split('T')[0]}. Motive: "${motive}".`,
+      `Statutory compliance extension of ${boundedDays} days until ${expiryDate.split('T')[0]}. Motive: "${motive}".`,
       entity.name
     );
     this.persistAll();
   }
 
   issueStatutoryNotice(entityId: string, stage: 1 | 2 | 3 | 4, reason: string): void {
+    if (!this.requireDsacAuthority('Issue statutory notice')) return;
     const entity = this.entities.find(e => e.id === entityId);
     if (!entity) return;
 
@@ -887,9 +1080,14 @@ export class GovTrackStore {
   }
 
   // --- KPI PROGRESS UPDATE ---
+  /**
+   * Records the result for ONE quarter (`quarter` defaults to the current reporting quarter). Cumulative
+   * performance, percentage achieved and status are then re-derived from the quarterly facts by the single
+   * KPI rule set, so they can never disagree with each other or with the report line items.
+   */
   updateKPIValue(
-    kpiId: string, 
-    actualValue: number, 
+    kpiId: string,
+    actualValue: number,
     reason?: string,
     quarter?: 'Q1' | 'Q2' | 'Q3' | 'Q4',
     correctiveAction?: string
@@ -897,43 +1095,36 @@ export class GovTrackStore {
     const kpi = this.kpis.find(k => k.id === kpiId);
     if (!kpi) return;
 
-    if (quarter === 'Q1') {
-      kpi.q1Actual = actualValue;
-    } else if (quarter === 'Q2') {
-      kpi.q2Actual = actualValue;
-    } else if (quarter === 'Q3') {
-      kpi.q3Actual = actualValue;
-    } else if (quarter === 'Q4') {
-      kpi.q4Actual = actualValue;
+    const role = this.currentUser?.role;
+    if (!role || (role === 'ENTITY_OFFICER' && this.currentUser?.entityId !== kpi.entityId)) {
+      this.addAuditLog('ACCESS_DENIED', `Blocked KPI update on "${kpi.name}": caller may not report for ${kpi.entityName}.`, kpi.entityName);
+      return;
+    }
+    if (!Number.isFinite(actualValue) || actualValue < 0) {
+      this.addAuditLog('ACCESS_DENIED', `Rejected KPI value "${actualValue}" for "${kpi.name}": results must be non-negative numbers.`, kpi.entityName);
+      return;
     }
 
-    // Cumulative actual: sum of recorded quarter actuals, or fallback to actualValue
-    const quarterSum = (kpi.q1Actual || 0) + (kpi.q2Actual || 0) + (kpi.q3Actual || 0) + (kpi.q4Actual || 0);
-    kpi.currentValue = quarterSum > 0 ? quarterSum : actualValue;
-    kpi.percentageAchieved = kpi.annualTarget > 0 
-      ? Math.min(100, Math.round((kpi.currentValue / kpi.annualTarget) * 1000) / 10)
-      : 100;
-    
-    // Status evaluation
-    if (kpi.currentValue >= kpi.annualTarget) {
-      kpi.status = 'COMPLETED';
-    } else if (kpi.currentValue >= kpi.expectedValue * 0.9) {
-      kpi.status = 'ON_TRACK';
-    } else if (kpi.currentValue >= kpi.expectedValue * 0.7) {
-      kpi.status = 'AT_RISK';
-    } else {
-      kpi.status = 'MISSED';
-    }
+    const q = quarter ?? getCurrentReportingPeriod().quarter;
+    const previous = q === 'Q1' ? kpi.q1Actual : q === 'Q2' ? kpi.q2Actual : q === 'Q3' ? kpi.q3Actual : kpi.q4Actual;
+    if (q === 'Q1') kpi.q1Actual = actualValue;
+    else if (q === 'Q2') kpi.q2Actual = actualValue;
+    else if (q === 'Q3') kpi.q3Actual = actualValue;
+    else kpi.q4Actual = actualValue;
 
-    // Synchronize to quarterly reports if report item exists
+    Object.assign(kpi, normalizeKpiRecord(kpi));
+
+    // Keep the matching report's line item in step, on the same cumulative basis as its target.
     this.reports.forEach(r => {
-      if (r.entityId === kpi.entityId && (!quarter || r.quarter === quarter)) {
+      if (r.entityId === kpi.entityId && r.quarter === q && sameFinancialYear(r.financialYear, KPI_DATA_YEAR)) {
         const item = r.items.find(it => it.kpiId === kpi.id);
         if (item) {
-          item.actualAchieved = actualValue;
+          const cumulative = kpiCumulativeThrough(kpi, q);
+          item.targetToDate = cumulative.target;
+          item.actualAchieved = cumulative.actual;
           item.status = kpi.status;
-          item.variancePercentage = item.targetToDate > 0 
-            ? Math.round(((actualValue - item.targetToDate) / item.targetToDate) * 100)
+          item.variancePercentage = cumulative.target > 0
+            ? Math.round(((cumulative.actual - cumulative.target) / cumulative.target) * 1000) / 10
             : 0;
           if (reason) item.varianceReason = reason;
           if (correctiveAction) item.correctiveAction = correctiveAction;
@@ -942,7 +1133,11 @@ export class GovTrackStore {
     });
 
     this.recalculateEntityRisk(kpi.entityId);
-    this.addAuditLog('REPORT_CREATED', `Updated KPI "${kpi.name}" (${quarter || 'Actual'}) to ${actualValue} ${kpi.unitOfMeasure} (${kpi.percentageAchieved}% achieved). ${reason ? `Reason: ${reason}` : ''}`, kpi.entityName);
+    this.addAuditLog(
+      'KPI_ACTUAL_UPDATED',
+      `Updated KPI "${kpi.name}" ${q} result ${previous === undefined ? '(first entry)' : `from ${previous}`} to ${actualValue} ${kpi.unitOfMeasure}; year-to-date ${kpi.currentValue} (${kpi.percentageAchieved}% of annual target). ${reason ? `Reason: ${reason}` : ''}`,
+      kpi.entityName
+    );
     this.persistAll();
   }
 
@@ -1034,26 +1229,35 @@ export class GovTrackStore {
     accountingOfficerAffirmation?: boolean;
     accountingOfficerName?: string;
   }): QuarterlyFinancialSubmission {
-    const finYear = data.financialYear || '2025/26';
+    const fy = normalizeFinancialYear(data.financialYear, getCurrentReportingPeriod().financialYear);
+    const profile = this.getBudgetProfileForEntity(data.entityId, fy);
+    const t = profile?.expectedSpendingTrajectory || { q1Percent: 25, q2Percent: 50, q3Percent: 75, q4Percent: 100 };
+    const points = [t.q1Percent, t.q2Percent, t.q3Percent, t.q4Percent];
+    const qi = quarterIndex(data.quarter);
+    const share = (points[qi - 1] - (qi > 1 ? points[qi - 2] : 0)) / 100;
     const totalActual = data.lines.reduce((sum, l) => sum + (l.quarterlyActual || 0), 0);
 
-    const submission = this.submitQuarterlyFinancialReturn({
+    return this.submitQuarterlyFinancialReturn({
       entityId: data.entityId,
       entityName: data.entityName,
-      financialYear: finYear,
+      financialYear: fy,
       quarter: data.quarter,
       totalQuarterlyActual: totalActual,
-      accountingOfficerAffirmation: data.accountingOfficerAffirmation ?? true,
+      // The certification is a legal declaration and must be given explicitly (it used to default to true).
+      accountingOfficerAffirmation: data.accountingOfficerAffirmation === true,
       accountingOfficerName: data.accountingOfficerName || this.currentUser?.name,
-      lines: data.lines.map(l => ({
-        categoryId: l.categoryId,
-        categoryName: l.categoryName,
-        actualAmount: l.quarterlyActual,
-        plannedAmount: Math.round((l.annualBudget || 0) * 0.25),
-      })),
+      lines: data.lines.map(l => {
+        const budgetLine = profile?.lines.find(b => b.categoryId === l.categoryId);
+        const budget = budgetLine?.annualBudget ?? l.annualBudget ?? 0;
+        return {
+          categoryId: l.categoryId,
+          categoryName: l.categoryName,
+          actualAmount: l.quarterlyActual,
+          plannedAmount: Math.round(budget * share),
+          budgetLineId: budgetLine?.id,
+        };
+      }),
     });
-
-    return submission;
   }
 
   // --- DOCUMENT VERSIONING ---
@@ -1091,7 +1295,9 @@ export class GovTrackStore {
     fileName: string,
     fileSizeBytes: number,
     initialSummary: string,
-    downloadUrl?: string
+    downloadUrl?: string,
+    mimeType?: string,
+    contentDataUrl?: string
   ): EntityDocument {
     const entity = this.entities.find(e => e.id === entityId);
     const uploader = this.currentUser ? `${this.currentUser.name} (${this.currentUser.designation})` : 'Authorized Official';
@@ -1107,6 +1313,7 @@ export class GovTrackStore {
       fileName,
       fileSize: `${(fileSizeBytes / (1024 * 1024)).toFixed(1)} MB`,
       fileSizeBytes,
+      mimeType,
       uploadedAt: new Date().toISOString(),
       uploadedBy: uploader,
       verificationSummary: initialSummary,
@@ -1119,6 +1326,8 @@ export class GovTrackStore {
           fileSizeBytes,
           changeSummary: initialSummary,
           downloadUrl,
+          mimeType,
+          contentDataUrl,
         },
       ],
       comments: [],
@@ -1156,7 +1365,7 @@ export class GovTrackStore {
     }
 
     // Automatically create a verification task for DSAC National Oversight
-    this.createTask({
+    this.addTask({
       entityId,
       entityName: entity ? entity.name : 'Institutional Entity',
       title: `Verify Statutory Evidence: ${fileName} (${entity?.shortCode || entity?.name})`,
@@ -1178,23 +1387,40 @@ export class GovTrackStore {
     title: string, 
     category: EntityDocument['category'], 
     fileName: string, 
-    initialSummary: string
+    initialSummary: string,
+    file?: { size: number; type: string; dataUrl: string }
   ): EntityDocument {
-    return this.createNewDocument(
+    const document = this.createNewDocument(
       entityId, 
       title, 
       category, 
       '2026/27', 
       fileName, 
-      2.4 * 1024 * 1024, 
-      initialSummary
+      file?.size ?? 2.4 * 1024 * 1024, 
+      initialSummary,
+      undefined,
+      file?.type,
+      file?.dataUrl
     );
+    return document;
   }
 
   downloadDocument(docId: string): void {
     const doc = this.documents.find(d => d.id === docId);
     if (!doc) return;
     const content = `Republic of South Africa - Department of Sport, Arts and Culture\nStatutory Document: ${doc.title}\nInstitution: ${doc.entityName}\nClassification: ${doc.category}\nVersion: ${doc.currentVersion}\nFile: ${doc.fileName}\nVerification Status: ${doc.approvalStatus}\nUploaded: ${doc.uploadedAt}\nUploaded By: ${doc.uploadedBy}\nSummary: ${doc.verificationSummary}`;
+    const version = doc.versions.find(item => item.versionNumber === doc.currentVersion) ?? doc.versions[doc.versions.length - 1];
+    if (version?.contentDataUrl) {
+      const a = document.createElement('a');
+      // Data URLs preserve the original uploaded bytes and MIME type.
+      a.href = version.contentDataUrl;
+      a.download = doc.fileName || version.fileName;
+      a.rel = 'noopener';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      return;
+    }
     const blob = new Blob([content], { type: 'text/plain;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -1205,7 +1431,14 @@ export class GovTrackStore {
     document.body.removeChild(a);
   }
 
+  /**
+   * DSAC decision on an evidence document. Verifying a document says only that THIS document is acceptable. It no
+   * longer approves the entity's reports (the previous build approved every SUBMITTED report of the entity as a
+   * side effect, bypassing report review) and no longer adds an invented +2 to the compliance score, which is a
+   * derived value.
+   */
   verifyDocument(docId: string, decision: 'APPROVED' | 'REQUIRES_AMENDMENT', notes?: string): void {
+    if (!this.requireDsacAuthority('Verify statutory document')) return;
     const doc = this.documents.find(d => d.id === docId);
     if (!doc) return;
 
@@ -1214,22 +1447,6 @@ export class GovTrackStore {
     if (decision === 'APPROVED') {
       doc.approvedAt = new Date().toISOString();
       doc.approvedBy = reviewer;
-      
-      // Also mark linked reports as approved
-      const linkedReports = this.reports.filter(r => r.portfolioOfEvidenceDocId === docId || (r.entityId === doc.entityId && r.submissionStatus === 'SUBMITTED'));
-      linkedReports.forEach(r => {
-        r.submissionStatus = 'APPROVED';
-        r.reviewedAt = new Date().toISOString();
-        r.reviewedBy = reviewer;
-        r.reviewedByName = reviewer;
-      });
-
-      // Boost entity compliance score upon statutory evidence verification
-      const ent = this.entities.find(e => e.id === doc.entityId);
-      if (ent) {
-        ent.overallComplianceScore = Math.min(100, ent.overallComplianceScore + 2);
-        this.recalculateEntityRisk(ent.id);
-      }
     }
 
     if (notes) {
@@ -1243,6 +1460,7 @@ export class GovTrackStore {
       });
     }
 
+    this.recalculateEntityRisk(doc.entityId);
     this.addAuditLog(
       decision === 'APPROVED' ? 'REPORT_VERIFIED' : 'REPORT_REVISION_REQUESTED',
       `Statutory document "${doc.title}" was ${decision === 'APPROVED' ? 'formally approved and verified' : 'flagged for amendment'}. Reviewer: ${reviewer}. ${notes ? `Note: ${notes}` : ''}`,
@@ -1254,6 +1472,12 @@ export class GovTrackStore {
   deleteEntityDocument(docId: string): void {
     const doc = this.documents.find(d => d.id === docId);
     if (!doc) return;
+    const role = this.currentUser?.role;
+    const ownDocument = role === 'ENTITY_OFFICER' && this.currentUser?.entityId === doc.entityId;
+    if (!ownDocument && !(role && DSAC_AUTHORITY_ROLES.includes(role))) {
+      this.addAuditLog('ACCESS_DENIED', `Blocked archiving of "${doc.title}": caller may not change ${doc.entityName}'s documents.`, doc.entityName);
+      return;
+    }
     this.documents = this.documents.filter(d => d.id !== docId);
     this.addAuditLog('DOCUMENT_DELETED', `Archived statutory document "${doc.title}"`, doc.entityName);
     this.persistAll();
@@ -1288,9 +1512,9 @@ export class GovTrackStore {
   }
 
   getEntityDocumentChecklist(
-    entityId: string, 
-    quarter: 'Q1' | 'Q2' | 'Q3' | 'Q4' = 'Q3', 
-    financialYear = '2025/2026'
+    entityId: string,
+    quarter: 'Q1' | 'Q2' | 'Q3' | 'Q4' = getCurrentReportingPeriod().quarter,
+    financialYear = toLongFinancialYear(getCurrentReportingPeriod().financialYear)
   ): DocumentVerificationChecklist {
     const entity = this.entities.find(e => e.id === entityId);
     const requirements = this.getDocumentRequirements(quarter);
@@ -1308,7 +1532,7 @@ export class GovTrackStore {
           (req.requiredDocumentType === 'FINANCIAL_STATEMENT' && d.category === 'FINANCIAL_REPORT') ||
           (req.requiredDocumentType === 'PROOF_OF_EXPENDITURE' && d.category === 'FINANCIAL_REPORT');
 
-        const periodMatches = (!d.quarter || d.quarter === quarter) && (!d.financialYear || d.financialYear === financialYear);
+        const periodMatches = (!d.quarter || d.quarter === quarter) && (!d.financialYear || sameFinancialYear(d.financialYear, financialYear));
         return (matchesRequirement || matchesType || matchesLegacyCategory) && periodMatches;
       });
 
@@ -1372,6 +1596,7 @@ export class GovTrackStore {
     uploaderName?: string;
     uploaderRole?: UserRole;
     changeSummary?: string;
+    contentDataUrl?: string;
   }): Promise<{ document: EntityDocument; result: DocumentVerificationResult }> {
     const entity = this.entities.find(e => e.id === params.entityId);
     const requirement = this.documentRequirements.find(r => r.id === params.requirementId);
@@ -1380,8 +1605,8 @@ export class GovTrackStore {
     }
 
     const uploader = params.uploaderName || (this.currentUser ? `${this.currentUser.name} (${this.currentUser.designation})` : 'Authorized Submitting Officer');
-    const quarter = params.quarter || 'Q3';
-    const financialYear = params.financialYear || '2025/2026';
+    const quarter = params.quarter || getCurrentReportingPeriod().quarter;
+    const financialYear = params.financialYear || toLongFinancialYear(getCurrentReportingPeriod().financialYear);
 
     // 1. Audit log: Upload initiated
     this.addAuditLog(
@@ -1397,6 +1622,9 @@ export class GovTrackStore {
 
     // 2. Compute file hash
     const fileHash = await calculateFileHash(params.file instanceof File ? params.file : (params.simulatedContent || params.file.name));
+    const storedContentDataUrl = params.contentDataUrl || (
+      params.file instanceof File ? await readFileAsDataUrl(params.file) : undefined
+    );
 
     // 3. File-level validation
     const fileValidation = validateFileLevel(params.file, fileHash);
@@ -1439,6 +1667,8 @@ export class GovTrackStore {
       textContentSample: text.substring(0, 300),
       rejectionReason: result.status === 'REJECTED' ? result.reasons.join(' ') : undefined,
       changeSummary: params.changeSummary || (doc ? `Version ${doc.currentVersion + 1} resubmission` : 'Initial requirement submission'),
+      mimeType: params.file.type,
+      contentDataUrl: storedContentDataUrl,
     };
 
     if (doc) {
@@ -1451,6 +1681,8 @@ export class GovTrackStore {
         fileName: params.file.name,
         fileSizeBytes: params.file.size,
         changeSummary: versionRecord.changeSummary || 'Replacement submission',
+        mimeType: params.file.type,
+        contentDataUrl: storedContentDataUrl,
       });
       doc.detailedVersions = doc.detailedVersions || [];
       doc.detailedVersions.push(versionRecord);
@@ -1499,6 +1731,7 @@ export class GovTrackStore {
         fileSize: `${(params.file.size / (1024 * 1024)).toFixed(1)} MB`,
         fileSizeBytes: params.file.size,
         fileHash,
+        mimeType: params.file.type,
         uploadedAt: new Date().toISOString(),
         uploadedBy: uploader,
         verificationSummary: result.reasons[0] || 'Automated verification check',
@@ -1510,6 +1743,8 @@ export class GovTrackStore {
             fileName: params.file.name,
             fileSizeBytes: params.file.size,
             changeSummary: 'Initial requirement submission',
+            mimeType: params.file.type,
+            contentDataUrl: storedContentDataUrl,
           },
         ],
         detailedVersions: [versionRecord],
@@ -1540,7 +1775,7 @@ export class GovTrackStore {
 
     // If rejected, create an automated corrective task
     if (result.status === 'REJECTED') {
-      this.createTask({
+      this.addTask({
         entityId: params.entityId,
         entityName: entity ? entity.name : 'Institutional Entity',
         title: `Re-submit Required Evidence: ${requirement.title} (${quarter})`,
@@ -1658,7 +1893,7 @@ export class GovTrackStore {
       message: `[AMENDMENT DIRECTIVE] Replacement document required: ${params.reason}`,
     });
 
-    this.createTask({
+    this.addTask({
       entityId: doc.entityId,
       entityName: doc.entityName,
       title: `Upload Replacement Dossier: ${doc.title}`,
@@ -1680,6 +1915,12 @@ export class GovTrackStore {
     this.persistAll();
   }
 
+  /**
+   * Submits a quarterly performance report together with a spend claim. The claim is recorded on the report
+   * only: the authoritative expenditure is the finance return. (The previous build added the claim to the
+   * entity's cumulative spend on every call, matched the report by quarter alone so a new year overwrote the old
+   * one, hard-coded the due date to 2025-10-31 and decremented the overdue counter regardless of what was overdue.)
+   */
   submitQuarterlyReport(params: {
     entityId: string;
     quarter: 'Q1' | 'Q2' | 'Q3' | 'Q4';
@@ -1691,22 +1932,29 @@ export class GovTrackStore {
   }): QuarterlyReport {
     const entity = this.entities.find(e => e.id === params.entityId);
     const actor = this.currentUser ? `${this.currentUser.name} (${this.currentUser.designation})` : 'Authorized Reporting Officer';
-    
-    let report = this.reports.find(r => r.entityId === params.entityId && r.quarter === params.quarter);
+    const fy = normalizeFinancialYear(params.financialYear);
+    const claimed = Number.isFinite(params.expenditureClaimedZAR) && params.expenditureClaimedZAR > 0 ? Math.round(params.expenditureClaimedZAR) : 0;
+
+    let report = this.reports.find(r => r.entityId === params.entityId && r.quarter === params.quarter && sameFinancialYear(r.financialYear, fy));
+    if (report && (report.submissionStatus === 'APPROVED' || report.submissionStatus === 'UNDER_REVIEW')) {
+      this.addAuditLog('ACCESS_DENIED', `Ignored resubmission of the ${params.quarter} report for ${report.entityName}: it is ${report.submissionStatus} and locked.`, report.entityName);
+      return report;
+    }
+
     if (!report) {
       report = {
         id: `rep-${params.quarter.toLowerCase()}-${Date.now()}`,
         entityId: params.entityId,
         entityName: entity ? entity.name : 'Institutional Entity',
         quarter: params.quarter,
-        financialYear: params.financialYear,
+        financialYear: toLongFinancialYear(fy),
         submissionStatus: 'SUBMITTED',
-        dueDate: '2025-10-31',
+        dueDate: quarterDueDate(fy, params.quarter),
         submittedAt: new Date().toISOString(),
         submittedBy: actor,
         submittedByName: actor,
-        fundsSpentThisQuarterZAR: params.expenditureClaimedZAR,
-        totalFundsReceivedToDateZAR: entity?.transferredAmountZAR || 3500000,
+        fundsSpentThisQuarterZAR: claimed,
+        totalFundsReceivedToDateZAR: 0,
         items: params.items || [],
         portfolioOfEvidenceDocId: params.poeDocId,
         varianceExplanations: params.declarationNotes,
@@ -1714,27 +1962,25 @@ export class GovTrackStore {
       };
       this.reports = [report, ...this.reports];
     } else {
-      report.submissionStatus = 'SUBMITTED';
+      report.submissionStatus = report.submissionStatus === 'CORRECTION_REQUIRED' ? 'RESUBMITTED' : 'SUBMITTED';
       report.submittedAt = new Date().toISOString();
       report.submittedBy = actor;
       report.submittedByName = actor;
-      report.fundsSpentThisQuarterZAR = params.expenditureClaimedZAR;
+      report.fundsSpentThisQuarterZAR = claimed;
       if (params.items && params.items.length > 0) report.items = params.items;
       if (params.poeDocId) report.portfolioOfEvidenceDocId = params.poeDocId;
       report.varianceExplanations = params.declarationNotes;
     }
 
-    if (entity) {
-      entity.reportedExpenditureZAR = (entity.reportedExpenditureZAR || 0) + params.expenditureClaimedZAR;
-      if (entity.overdueReportsCount > 0) entity.overdueReportsCount = Math.max(0, entity.overdueReportsCount - 1);
-      this.recalculateEntityRisk(entity.id);
-    }
+    // The finance return (when present) replaces the claim; cash received always comes from the ledger.
+    this.reconcileReportMirrors(params.entityId);
+    if (entity) this.recalculateEntityRisk(entity.id);
 
-    this.createTask({
+    this.addTask({
       entityId: params.entityId,
       entityName: entity ? entity.name : 'Institutional Entity',
       title: `Verify ${params.quarter} Performance Report: ${entity?.shortCode || entity?.name}`,
-      description: `Formal quarterly report submitted with claimed expenditure of R ${(params.expenditureClaimedZAR / 1_000_000).toFixed(2)}M. Inspect Portfolio of Evidence and verify achievements.`,
+      description: `Formal quarterly report submitted with claimed expenditure of ${formatZAR(claimed)}. Inspect Portfolio of Evidence and verify achievements.`,
       assignedToName: 'DSAC Oversight Directorate',
       priority: 'HIGH',
       status: 'OPEN',
@@ -1744,7 +1990,7 @@ export class GovTrackStore {
 
     this.addAuditLog(
       'REPORT_SUBMITTED',
-      `Submitted ${params.quarter} Performance Report for ${entity?.name}. Claimed expenditure: R ${(params.expenditureClaimedZAR / 1_000_000).toFixed(2)}M.`,
+      `Submitted ${params.quarter} Performance Report for ${entity?.name}. Claimed expenditure: ${formatZAR(claimed)}.`,
       entity?.name
     );
     this.persistAll();
@@ -1753,7 +1999,8 @@ export class GovTrackStore {
 
   addDocumentComment(docId: string, message: string): void {
     const doc = this.documents.find(d => d.id === docId);
-    if (!doc) return;
+    if (!doc || !message.trim()) return;
+    if (!this.canActForEntity(doc.entityId, 'Comment on document')) return;
 
     doc.comments.push({
       id: `cmt-${Date.now()}`,
@@ -1769,10 +2016,11 @@ export class GovTrackStore {
   }
 
   // --- TASK MANAGEMENT ---
-  createTask(task: Omit<CorrectiveTask, 'id' | 'createdAt' | 'createdByName' | 'createdByRole'>): void {
+  /** A task the system raises itself as a side effect of a workflow (a rejected upload, a returned report). */
+  private addTask(task: Omit<CorrectiveTask, 'id' | 'createdAt' | 'createdByName' | 'createdByRole'>): void {
     const newTask: CorrectiveTask = {
       ...task,
-      id: `task-${Date.now()}`,
+      id: `task-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       createdAt: new Date().toISOString(),
       createdByName: this.currentUser ? this.currentUser.name : 'DSAC Administrator',
       createdByRole: this.currentUser ? this.currentUser.role : 'DSAC_ADMIN',
@@ -1783,21 +2031,38 @@ export class GovTrackStore {
     this.persistAll();
   }
 
+  /**
+   * A task raised by a person. DSAC officials may raise any task. An entity officer may raise tasks for their own
+   * organisation only, and never a DSAC directive (a directive must come from DSAC).
+   */
+  createTask(task: Omit<CorrectiveTask, 'id' | 'createdAt' | 'createdByName' | 'createdByRole'>): void {
+    if (!this.canActForEntity(task.entityId, 'Create task')) return;
+    const isDsac = !!this.currentUser && DSAC_AUTHORITY_ROLES.includes(this.currentUser.role);
+    if (!isDsac && task.direction === 'DSAC_TO_ENTITY') {
+      this.addAuditLog('ACCESS_DENIED', 'Blocked "Create task": only DSAC officials can issue a DSAC directive.', task.entityName);
+      return;
+    }
+    this.addTask(task);
+  }
+
   resolveTask(taskId: string, resolutionNotes: string): void {
     const task = this.tasks.find(t => t.id === taskId);
-    if (!task) return;
+    const notes = resolutionNotes.trim();
+    if (!task || task.status === 'COMPLETED' || !notes) return;
+    if (!this.canActForEntity(task.entityId, 'Resolve task')) return;
 
     task.status = 'COMPLETED';
     task.completedAt = new Date().toISOString();
-    task.resolutionNotes = resolutionNotes;
+    task.resolutionNotes = notes;
 
-    this.addAuditLog('TASK_RESOLVED', `Resolved Corrective Task "${task.title}". Notes: ${resolutionNotes}`, task.entityName);
+    this.addAuditLog('TASK_RESOLVED', `Resolved Corrective Task "${task.title}". Notes: ${notes}`, task.entityName);
     this.persistAll();
   }
 
   updateTaskStatus(taskId: string, status: CorrectiveTask['status']): void {
     const task = this.tasks.find(t => t.id === taskId);
     if (!task) return;
+    if (!this.canActForEntity(task.entityId, 'Update task status')) return;
     task.status = status;
     this.notify();
     saveToStorage(STORAGE_KEYS.TASKS, this.tasks);
@@ -1806,7 +2071,7 @@ export class GovTrackStore {
   // --- DETERMINISTIC EARLY WARNING ENGINE ---
   recalculateEntityRisk(entityId: string): void {
     const entity = this.entities.find(e => e.id === entityId);
-    if (!entity) return;
+    if (!entity || entity.registrationStatus === 'PENDING_VERIFICATION') return;
 
     const entityKPIs = this.kpis.filter(k => k.entityId === entityId);
     const entityReports = this.reports.filter(r => r.entityId === entityId);
@@ -1824,22 +2089,13 @@ export class GovTrackStore {
     }
 
     // 2. Financial vs Output Variance (PFMA delivery lag)
-    const fundingUtilisationRate = (entity.reportedExpenditureZAR / Math.max(1, entity.transferredAmountZAR));
-    const varianceGap = Math.max(0, fundingUtilisationRate - avgAchievementRatio);
+    const fundingUtilisationRate = entity.transferredAmountZAR > 0 ? entity.reportedExpenditureZAR / entity.transferredAmountZAR : 0;
+    const varianceGap = Math.min(1, Math.max(0, fundingUtilisationRate - avgAchievementRatio));
 
     // 3. Overdue reports and non-compliance
     const overdueCount = entityReports.filter(r => r.submissionStatus === 'OVERDUE').length;
     const correctionCount = entityReports.filter(r => r.submissionStatus === 'CORRECTION_REQUIRED').length;
     entity.overdueReportsCount = overdueCount;
-
-    // 4. AGSA Audit Outcome Penalty
-    let auditScoreDeduction = 0;
-    if (entity.auditOutcome === 'DISCLAIMER') auditScoreDeduction = 40;
-    else if (entity.auditOutcome === 'QUALIFIED') auditScoreDeduction = 25;
-    else if (entity.auditOutcome === 'UNQUALIFIED_WITH_FINDINGS') auditScoreDeduction = 15;
-
-    // 5. Unresolved statutory tasks penalty
-    const openTaskPenalty = Math.min(15, entityTasks.length * 5);
 
     // Deterministic Risk Score calculation (0 to 100)
     let calculatedRisk = 0;
@@ -1896,8 +2152,8 @@ export class GovTrackStore {
       avgAchievementRatio = sum / entityKPIs.length;
     }
 
-    const fundingUtilisationRate = (entity.reportedExpenditureZAR / Math.max(1, entity.transferredAmountZAR));
-    const varianceGap = Math.max(0, fundingUtilisationRate - avgAchievementRatio);
+    const fundingUtilisationRate = entity.transferredAmountZAR > 0 ? entity.reportedExpenditureZAR / entity.transferredAmountZAR : 0;
+    const varianceGap = Math.min(1, Math.max(0, fundingUtilisationRate - avgAchievementRatio));
     const overdueCount = entityReports.filter(r => r.submissionStatus === 'OVERDUE').length;
     const correctionCount = entityReports.filter(r => r.submissionStatus === 'CORRECTION_REQUIRED').length;
 
@@ -1990,33 +2246,50 @@ export class GovTrackStore {
   }
 
   // --- EXECUTIVE PERFORMANCE PULSE AGGREGATION ---
+  /**
+   * Portfolio headline numbers. Every money and KPI figure is read from the same read-model the finance and
+   * performance screens use (getDepartmentFinancialAggregation / getDepartmentPerformanceAggregation) for the
+   * current reporting period, so the dashboards cannot disagree with each other or with the entity pages.
+   */
   getPerformancePulse() {
-    const totalEntities = this.entities.length;
-    const publicEntitiesCount = this.entities.filter(e => e.type === 'PUBLIC_ENTITY').length;
-    const nposCount = this.entities.filter(e => e.type === 'NPO').length;
+    const { financialYear, quarter } = getCurrentReportingPeriod();
+    const members = this.entities.filter(isPortfolioMember);
+    const memberIds = new Set(members.map(m => m.id));
 
-    const onTrackCount = this.entities.filter(e => e.riskLevel === 'LOW').length;
-    const monitoringCount = this.entities.filter(e => e.riskLevel === 'MEDIUM').length;
-    const highRiskCount = this.entities.filter(e => e.riskLevel === 'HIGH').length;
-    const criticalRiskCount = this.entities.filter(e => e.riskLevel === 'CRITICAL').length;
+    const totalEntities = members.length;
+    const publicEntitiesCount = members.filter(e => e.type === 'PUBLIC_ENTITY').length;
+    const nposCount = members.filter(e => e.type === 'NPO').length;
+    const pendingRegistrationsCount = this.entities.length - totalEntities;
+
+    const onTrackCount = members.filter(e => e.riskLevel === 'LOW').length;
+    const monitoringCount = members.filter(e => e.riskLevel === 'MEDIUM').length;
+    const highRiskCount = members.filter(e => e.riskLevel === 'HIGH').length;
+    const criticalRiskCount = members.filter(e => e.riskLevel === 'CRITICAL').length;
     const interventionCount = highRiskCount + criticalRiskCount;
 
-    const totalAllocation = this.entities.reduce((acc, e) => acc + (e.budgetAllocationZAR || 0), 0);
-    const totalTransferred = this.entities.reduce((acc, e) => acc + (e.transferredAmountZAR || 0), 0);
-    const totalExpended = this.entities.reduce((acc, e) => acc + (e.reportedExpenditureZAR || 0), 0);
-    const remainingDisbursement = Math.max(0, totalAllocation - totalTransferred);
+    // --- Money: from the engine, never from the read-cache fields on the entity ---
+    const fin = this.getDepartmentFinancialAggregation(financialYear, quarter);
+    const totalAllocation = fin.totalApprovedBudget;
+    const totalTransferred = fin.totalTransferredToDate;
+    const totalExpended = fin.totalReportedExpenditure;
+    const totalVerifiedExpenditure = fin.totalVerifiedExpenditure;
+    // What is left to DISBURSE (approved - disbursed). The engine also exposes remainingBudget (left to SPEND).
+    const remainingDisbursement = fin.remainingDisbursement;
+    const remainingBudget = fin.remainingBudget;
+    const unspentDisbursed = fin.unspentDisbursed;
+    const transferRate = fin.transferRate; // disbursed / approved
+    const expenditureRate = fin.expenditureRate; // Transfer Absorption: reported / disbursed
+    const burnRate = fin.utilPercent; // Budget Utilisation: reported / approved
+    const entitiesWithOutstandingReturns = fin.entitiesWithOutstandingReturns;
 
-    const transferRate = totalAllocation > 0 ? (totalTransferred / totalAllocation) * 100 : 0;
-    const expenditureRate = totalTransferred > 0 ? (totalExpended / totalTransferred) * 100 : 0;
-    const burnRate = totalAllocation > 0 ? (totalExpended / totalAllocation) * 100 : 0;
+    const totalYouthJobs = members.reduce((acc, e) => acc + (e.jobStats?.youthJobsCreated || 0), 0);
+    const totalPermanentJobs = members.reduce((acc, e) => acc + (e.jobStats?.permanentJobs || 0), 0);
+    const totalCreativePractitioners = members.reduce((acc, e) => acc + (e.jobStats?.creativeSectorPractitionersSupported || 0), 0);
 
-    const totalYouthJobs = this.entities.reduce((acc, e) => acc + (e.jobStats?.youthJobsCreated || 0), 0);
-    const totalPermanentJobs = this.entities.reduce((acc, e) => acc + (e.jobStats?.permanentJobs || 0), 0);
-    const totalCreativePractitioners = this.entities.reduce((acc, e) => acc + (e.jobStats?.creativeSectorPractitionersSupported || 0), 0);
-
-    const cleanAuditCount = this.entities.filter(e => e.auditOutcome === 'CLEAN_AUDIT').length;
-    const cleanAuditRate = totalEntities > 0 ? Math.round((cleanAuditCount / totalEntities) * 1000) / 10 : 0;
-    const averageCompliance = Math.round(this.entities.reduce((acc, e) => acc + e.overallComplianceScore, 0) / Math.max(1, totalEntities));
+    const audited = members.filter(e => e.auditOutcome !== 'NOT_YET_AUDITED');
+    const cleanAuditCount = audited.filter(e => e.auditOutcome === 'CLEAN_AUDIT').length;
+    const cleanAuditRate = audited.length > 0 ? Math.round((cleanAuditCount / audited.length) * 1000) / 10 : 0;
+    const averageCompliance = Math.round(members.reduce((acc, e) => acc + e.overallComplianceScore, 0) / Math.max(1, totalEntities));
 
     const totalDocumentsCount = this.documents.length;
     const verifiedDocumentsCount = this.documents.filter(d => d.verificationStatus === 'VERIFIED' || d.approvalStatus === 'APPROVED').length;
@@ -2029,38 +2302,46 @@ export class GovTrackStore {
         .filter(d => d.verificationStatus === 'REJECTED' || d.approvalStatus === 'REQUIRES_AMENDMENT')
         .map(d => d.entityId)
     ).size;
-    const documentComplianceRate = totalDocumentsCount > 0 
-      ? Math.round((verifiedDocumentsCount / totalDocumentsCount) * 1000) / 10 
+    const documentComplianceRate = totalDocumentsCount > 0
+      ? Math.round((verifiedDocumentsCount / totalDocumentsCount) * 1000) / 10
       : 100;
 
-    // Reports calculations
-    const totalReports = this.reports.length;
-    const reportsApprovedCount = this.reports.filter(r => r.submissionStatus === 'APPROVED').length;
-    const reportsSubmittedCount = this.reports.filter(r => r.submissionStatus === 'SUBMITTED' || r.submissionStatus === 'RESUBMITTED').length;
-    const reportsUnderReviewCount = this.reports.filter(r => r.submissionStatus === 'UNDER_REVIEW').length;
-    const reportsCorrectionRequiredCount = this.reports.filter(r => r.submissionStatus === 'CORRECTION_REQUIRED').length;
-    const overdueReportsCount = this.reports.filter(r => r.submissionStatus === 'OVERDUE').length;
+    // --- Reports (all periods) ---
+    const memberReports = this.reports.filter(r => memberIds.has(r.entityId));
+    const totalReports = memberReports.length;
+    const reportsApprovedCount = memberReports.filter(r => r.submissionStatus === 'APPROVED').length;
+    const reportsSubmittedCount = memberReports.filter(r => r.submissionStatus === 'SUBMITTED' || r.submissionStatus === 'RESUBMITTED').length;
+    const reportsUnderReviewCount = memberReports.filter(r => r.submissionStatus === 'UNDER_REVIEW').length;
+    const reportsCorrectionRequiredCount = memberReports.filter(r => r.submissionStatus === 'CORRECTION_REQUIRED').length;
+    const overdueReportsCount = memberReports.filter(r => r.submissionStatus === 'OVERDUE').length;
     const pendingReviewCount = reportsSubmittedCount + reportsUnderReviewCount;
 
-    // Active Q3 submission stats across all 32 entities
-    const q3Reports = this.reports.filter(r => r.quarter === 'Q3');
-    const q3SubmittedOrApproved = q3Reports.filter(r => r.submissionStatus === 'APPROVED' || r.submissionStatus === 'SUBMITTED' || r.submissionStatus === 'UNDER_REVIEW' || r.submissionStatus === 'RESUBMITTED');
-    const q3SubmittedCount = q3SubmittedOrApproved.length;
-    const q3OutstandingCount = Math.max(0, totalEntities - q3SubmittedCount);
+    // --- Reports for the CURRENT reporting period (quarter comes from the period service, not a literal) ---
+    const periodReports = memberReports.filter(r => sameFinancialYear(r.financialYear, financialYear) && r.quarter === quarter);
+    const lodgedStatuses: QuarterlyReport['submissionStatus'][] = ['APPROVED', 'SUBMITTED', 'UNDER_REVIEW', 'RESUBMITTED'];
+    const currentQuarterSubmittedCount = periodReports.filter(r => lodgedStatuses.includes(r.submissionStatus)).length;
+    const currentQuarterOutstandingCount = Math.max(0, totalEntities - currentQuarterSubmittedCount);
+    const currentQuarterOverdueCount = periodReports.filter(r => r.submissionStatus === 'OVERDUE').length;
+    const currentQuarterReturnedCount = periodReports.filter(r => r.submissionStatus === 'CORRECTION_REQUIRED').length;
 
     const openTasksCount = this.tasks.filter(t => t.status === 'OPEN' || t.status === 'IN_PROGRESS' || t.status === 'OVERDUE').length;
 
-    // KPI aggregations
-    const totalKpis = this.kpis.length;
-    const kpisOnTrack = this.kpis.filter(k => k.status === 'ON_TRACK' || k.status === 'COMPLETED').length;
-    const kpisAtRisk = this.kpis.filter(k => k.status === 'AT_RISK').length;
-    const kpisMissed = this.kpis.filter(k => k.status === 'MISSED').length;
-    const averageKpiAchievement = totalKpis > 0 ? Math.round((this.kpis.reduce((acc, k) => acc + k.percentageAchieved, 0) / totalKpis) * 10) / 10 : 0;
+    // --- KPIs: one rule set, year-to-date at the current period ---
+    const kpiItems = members.flatMap(m => this.kpis.filter(k => k.entityId === m.id).map(k => calculateKpiItemProgress(k, financialYear, quarter)));
+    const totalKpis = kpiItems.length;
+    const kpisOnTrack = kpiItems.filter(i => i.kpiStatus === 'COMPLETED' || i.kpiStatus === 'ON_TRACK').length;
+    const kpisAtRisk = kpiItems.filter(i => i.kpiStatus === 'AT_RISK').length;
+    const kpisMissed = kpiItems.filter(i => i.kpiStatus === 'MISSED').length;
+    const kpisNotStarted = kpiItems.filter(i => i.kpiStatus === 'NOT_STARTED').length;
+    const perf = this.getDepartmentPerformanceAggregation(financialYear, quarter, 'ALL');
+    const averageKpiAchievement = perf.overallDeliveryPercent;
 
     return {
+      reportingPeriod: { financialYear, quarter },
       totalEntities,
       publicEntitiesCount,
       nposCount,
+      pendingRegistrationsCount,
       onTrackCount,
       monitoringCount,
       highRiskCount,
@@ -2070,10 +2351,14 @@ export class GovTrackStore {
       totalAllocation,
       totalTransferred,
       totalExpended,
+      totalVerifiedExpenditure,
       remainingDisbursement,
+      remainingBudget,
+      unspentDisbursed,
       transferRate,
       expenditureRate,
       burnRate,
+      entitiesWithOutstandingReturns,
       totalYouthJobs,
       totalPermanentJobs,
       totalCreativePractitioners,
@@ -2095,15 +2380,21 @@ export class GovTrackStore {
       reportsCorrectionRequiredCount,
       overdueReportsCount,
       pendingReviewCount,
-      q3SubmittedCount,
-      q3OutstandingCount,
-      reportsSubmittedCount: q3SubmittedCount,
-      reportsOutstandingCount: q3OutstandingCount,
+      currentQuarterSubmittedCount,
+      currentQuarterOutstandingCount,
+      currentQuarterOverdueCount,
+      currentQuarterReturnedCount,
+      // Legacy names kept for existing screens. They now describe the CURRENT reporting quarter.
+      q3SubmittedCount: currentQuarterSubmittedCount,
+      q3OutstandingCount: currentQuarterOutstandingCount,
+      reportsSubmittedCount: currentQuarterSubmittedCount,
+      reportsOutstandingCount: currentQuarterOutstandingCount,
       openTasksCount,
       totalKpis,
       kpisOnTrack,
       kpisAtRisk,
       kpisMissed,
+      kpisNotStarted,
       averageKpiAchievement,
     };
   }
@@ -2125,86 +2416,111 @@ export class GovTrackStore {
     if (this.registeredUsers.some(u => u.email.toLowerCase() === cleanEmail)) {
       return { success: false, message: 'An account with this email address already exists. Please log in.' };
     }
+    const strength = checkPasswordStrength(params.password?.trim() || '');
+    if (!strength.ok) return { success: false, message: strength.message };
 
-    // Check if entity exists or create new
-    let entity = this.entities.find(e => e.name.toLowerCase() === params.entityName.trim().toLowerCase());
-    if (!entity) {
-      const entityId = `ent-${params.entityName.trim().toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 20)}-${Date.now().toString().slice(-4)}`;
-      const shortCode = params.entityName
-        .split(' ')
-        .map(w => w[0])
-        .join('')
-        .toUpperCase()
-        .slice(0, 5) || 'NPO';
-
-      const newEntity: PublicEntity = {
-        id: entityId,
-        name: params.entityName.trim(),
-        shortCode,
-        type: params.entityType,
-        cluster: params.cluster,
-        budgetAllocationZAR: params.allocatedBudgetZAR || 5_000_000,
-        transferredAmountZAR: (params.allocatedBudgetZAR || 5_000_000) * 0.5,
-        reportedExpenditureZAR: (params.allocatedBudgetZAR || 5_000_000) * 0.35,
-        auditOutcome: 'CLEAN_AUDIT',
-        auditYear: '2024/25',
-        overallComplianceScore: 88,
-        riskLevel: 'LOW',
-        riskScore: 18,
-        activeDeadlinesCount: 2,
-        overdueReportsCount: 0,
-        headOfEntity: params.accountingOfficer.trim(),
-        contactEmail: cleanEmail,
-        reportingOfficerName: params.accountingOfficer.trim(),
-        demographics: {
-          african: 80,
-          coloured: 10,
-          indian: 5,
-          white: 5,
-          female: 60,
-          male: 40,
-          youth: 45,
-          personsWithDisabilities: 4,
-          totalStaff: 28,
-        },
-        jobStats: {
-          permanentJobs: 14,
-          temporaryJobs: 32,
-          youthJobsCreated: 24,
-          creativeSectorPractitionersSupported: 65,
-          targetJobsAnnual: 50,
-        },
+    const name = params.entityName.trim();
+    // Registering against an organisation that already exists would hand its data to whoever registers first.
+    if (this.entities.some(e => e.name.toLowerCase() === name.toLowerCase())) {
+      return {
+        success: false,
+        message: 'An organisation with this name is already registered. Ask your organisation\'s administrator to add you as a user.',
       };
-
-      this.entities = [newEntity, ...this.entities];
-      entity = newEntity;
-      saveToStorage(STORAGE_KEYS.ENTITIES, this.entities);
     }
 
-    // Create User
+    const declared = Number.isFinite(params.allocatedBudgetZAR) && (params.allocatedBudgetZAR as number) > 0
+      ? Math.round(params.allocatedBudgetZAR as number)
+      : 0;
+
+    const entityId = `ent-${name.toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 20)}-${Date.now().toString().slice(-4)}`;
+    const shortCode = name
+      .split(' ')
+      .map(w => w[0])
+      .join('')
+      .toUpperCase()
+      .slice(0, 5) || 'NPO';
+
+    // A self-registered organisation is NOT part of the monitored portfolio until DSAC verifies it. It starts with
+    // zero approved, disbursed and reported money (the previous build invented 50% disbursed and 35% spent from
+    // the figure the applicant typed), no audit outcome and no demographics.
+    const newEntity: PublicEntity = {
+      id: entityId,
+      name,
+      shortCode,
+      type: params.entityType,
+      cluster: params.cluster,
+      budgetAllocationZAR: 0,
+      transferredAmountZAR: 0,
+      reportedExpenditureZAR: 0,
+      registrationStatus: 'PENDING_VERIFICATION',
+      declaredBudgetZAR: declared,
+      auditOutcome: 'NOT_YET_AUDITED',
+      auditYear: '-',
+      overallComplianceScore: 0,
+      riskLevel: 'LOW',
+      riskScore: 0,
+      activeDeadlinesCount: 0,
+      overdueReportsCount: 0,
+      headOfEntity: params.accountingOfficer.trim(),
+      contactEmail: cleanEmail,
+      reportingOfficerName: params.accountingOfficer.trim(),
+      demographics: { african: 0, coloured: 0, indian: 0, white: 0, female: 0, male: 0, youth: 0, personsWithDisabilities: 0, totalStaff: 0 },
+      jobStats: { permanentJobs: 0, temporaryJobs: 0, youthJobsCreated: 0, creativeSectorPractitionersSupported: 0, targetJobsAnnual: 0 },
+      trancheStatus: 'UNDER_REVIEW',
+      trancheAmountZAR: 0,
+      statutoryDefaultStage: 0,
+    };
+
+    this.entities = [newEntity, ...this.entities];
+
     const newUser: User = {
       id: `user-${Date.now()}`,
       name: params.accountingOfficer.trim(),
       email: cleanEmail,
       role: 'ENTITY_OFFICER',
       designation: params.designation?.trim() || 'Organisation Administrator',
-      entityId: entity.id,
-      entityName: entity.name,
-      password: params.password?.trim() || 'Password123!',
+      entityId: newEntity.id,
+      entityName: newEntity.name,
+      passwordHash: hashPassword(params.password!.trim()),
     };
-
     this.registeredUsers = [newUser, ...this.registeredUsers];
     this.currentUser = newUser;
-    saveToStorage(STORAGE_KEYS.REGISTERED_USERS, this.registeredUsers);
-    saveToStorage(STORAGE_KEYS.CURRENT_USER, this.currentUser);
+
+    // The stated budget becomes a REQUEST for DSAC to review, not an approved allocation.
+    if (declared > 0) {
+      try {
+        this.submitBudgetRequest({
+          entityId: newEntity.id,
+          entityName: newEntity.name,
+          financialYear: getCurrentReportingPeriod().financialYear,
+          requestedAmount: declared,
+          justification: 'Budget stated at self-registration; awaiting DSAC verification of the organisation.',
+          lines: this.standardBudgetLines(declared).map(l => ({ categoryId: l.categoryId, categoryName: l.categoryName, requestedAmount: l.requestedAmount })),
+        });
+      } catch {
+        // A malformed stated budget must not block registration; DSAC can capture the request later.
+      }
+    }
 
     this.addAuditLog(
       'USER_REGISTRATION',
-      `New Entity registered: ${entity.name} (${entity.type}) by ${newUser.name} (${newUser.email})`,
-      entity.name
+      `New Entity registered (pending DSAC verification): ${newEntity.name} (${newEntity.type}) by ${newUser.name} (${newUser.email})`,
+      newEntity.name
     );
-    this.notify();
-    return { success: true, entity, user: newUser };
+    this.persistAll();
+    return { success: true, entity: newEntity, user: newUser };
+  }
+
+  /** Standard chart-of-accounts split used when a budget line breakdown has not been supplied. */
+  private standardBudgetLines(total: number): { categoryId: string; categoryName: string; requestedAmount: number }[] {
+    const ids = STANDARD_CATEGORY_IDS.filter((_, i) => STANDARD_CATEGORY_WEIGHTS[i] > 0);
+    const weights = STANDARD_CATEGORY_WEIGHTS.filter(w => w > 0);
+    const parts = allocateProportionally(total, weights);
+    return ids.map((id, i) => ({
+      categoryId: id,
+      categoryName: this.expenseCategories.find(c => c.id === id)?.name || id,
+      requestedAmount: parts[i],
+    }));
   }
 
   // ==========================================
@@ -2216,6 +2532,7 @@ export class GovTrackStore {
   }
 
   createExpenseCategory(name: string, code: string, description: string): ExpenseCategory {
+    if (!this.requireDsacAuthority('Create expense category')) throw new Error('Only DSAC officials can change the chart of accounts.');
     const newCat: ExpenseCategory = {
       id: `cat-custom-${Date.now()}`,
       name: name.trim(),
@@ -2235,6 +2552,7 @@ export class GovTrackStore {
   }
 
   toggleExpenseCategory(categoryId: string, active: boolean): void {
+    if (!this.requireDsacAuthority('Change expense category')) return;
     const cat = this.expenseCategories.find(c => c.id === categoryId);
     if (!cat) return;
     cat.active = active;
@@ -2250,12 +2568,17 @@ export class GovTrackStore {
     return this.budgetProfiles;
   }
 
-  getBudgetProfileForEntity(entityId: string, financialYear = '2026/27'): EntityBudgetProfile | undefined {
+  getBudgetProfileForEntity(entityId: string, financialYear = getCurrentReportingPeriod().financialYear): EntityBudgetProfile | undefined {
     return this.budgetProfiles.find(
-      bp => bp.entityId === entityId && bp.financialYear === financialYear
+      bp => bp.entityId === entityId && sameFinancialYear(bp.financialYear, financialYear)
     );
   }
 
+  /**
+   * Lodges (or revises) a budget request. Every request must foot: the expense lines must add up to the amount
+   * requested. Re-submitting over an approved profile records a REVISION REQUEST: the existing approval and its
+   * line allocations stand until DSAC decides (the previous build wiped them).
+   */
   submitBudgetRequest(data: {
     entityId: string;
     entityName: string;
@@ -2271,57 +2594,72 @@ export class GovTrackStore {
     supportingDocumentId?: string;
     supportingDocumentName?: string;
   }): EntityBudgetProfile {
-    const existingIndex = this.budgetProfiles.findIndex(
-      bp => bp.entityId === data.entityId && bp.financialYear === data.financialYear
-    );
+    const role = this.currentUser?.role;
+    if (!role || (role === 'ENTITY_OFFICER' && this.currentUser?.entityId !== data.entityId)) {
+      throw new Error('You are not authorised to submit a budget request for this organisation.');
+    }
 
-    const profileId = existingIndex !== -1 
-      ? this.budgetProfiles[existingIndex].id 
-      : `bp-${Date.now()}`;
+    const fy = normalizeFinancialYear(data.financialYear);
+    const requested = Math.round(Number(data.requestedAmount));
+    if (!Number.isFinite(requested) || requested <= 0) throw new Error('The requested amount must be greater than zero.');
 
-    const newLines = data.lines.map((l, i) => ({
-      id: `bl-${profileId}-${i + 1}`,
+    const cleanLines = data.lines
+      .map(l => ({ ...l, requestedAmount: Math.round(Number(l.requestedAmount) || 0) }))
+      .filter(l => l.requestedAmount > 0);
+    if (cleanLines.length === 0) throw new Error('Add at least one expense line to the budget request.');
+    const lineSum = cleanLines.reduce((a, l) => a + l.requestedAmount, 0);
+    if (lineSum !== requested) {
+      throw new Error(`The expense lines total ${formatZAR(lineSum)} but the request is for ${formatZAR(requested)}. The lines must add up to the request.`);
+    }
+
+    const existing = this.budgetProfiles.find(bp => bp.entityId === data.entityId && sameFinancialYear(bp.financialYear, fy));
+    const profileId = existing ? existing.id : `bp-${Date.now()}`;
+    const now = new Date().toISOString();
+
+    // Merge lines: requested amounts come from the request; approved allocations already granted are kept.
+    const merged: BudgetLine[] = cleanLines.map((l, i) => ({
+      id: existing?.lines.find(x => x.categoryId === l.categoryId)?.id || `bl-${profileId}-${i + 1}`,
       budgetId: profileId,
       categoryId: l.categoryId,
       categoryName: l.categoryName,
       requestedAmount: l.requestedAmount,
-      annualBudget: 0,
+      annualBudget: existing?.lines.find(x => x.categoryId === l.categoryId)?.annualBudget ?? 0,
       notes: l.notes,
     }));
+    (existing?.lines || []).forEach(prev => {
+      if (!merged.some(m => m.categoryId === prev.categoryId)) merged.push({ ...prev, requestedAmount: 0 });
+    });
 
+    const approvedSoFar = existing?.approvedAmount ?? 0;
     const newProfile: EntityBudgetProfile = {
+      ...(existing || {}),
       id: profileId,
       entityId: data.entityId,
       entityName: data.entityName,
-      financialYear: data.financialYear,
-      requestedAmount: data.requestedAmount,
-      approvedAmount: 0,
-      fundingGap: data.requestedAmount,
+      financialYear: fy,
+      requestedAmount: requested,
+      approvedAmount: approvedSoFar,
+      fundingGap: Math.max(0, requested - approvedSoFar),
       status: 'SUBMITTED',
-      requestDate: new Date().toISOString().split('T')[0],
+      requestDate: now.split('T')[0],
       justification: data.justification,
-      supportingDocumentId: data.supportingDocumentId,
-      supportingDocumentName: data.supportingDocumentName,
-      expectedSpendingTrajectory: {
-        q1Percent: 25,
-        q2Percent: 50,
-        q3Percent: 75,
-        q4Percent: 100,
-      },
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      lines: newLines,
+      supportingDocumentId: data.supportingDocumentId ?? existing?.supportingDocumentId,
+      supportingDocumentName: data.supportingDocumentName ?? existing?.supportingDocumentName,
+      expectedSpendingTrajectory: existing?.expectedSpendingTrajectory || { q1Percent: 25, q2Percent: 50, q3Percent: 75, q4Percent: 100 },
+      createdAt: existing?.createdAt || now,
+      updatedAt: now,
+      lines: merged,
     };
 
-    if (existingIndex !== -1) {
-      this.budgetProfiles[existingIndex] = newProfile;
+    if (existing) {
+      this.budgetProfiles = this.budgetProfiles.map(bp => (bp.id === profileId ? newProfile : bp));
     } else {
       this.budgetProfiles = [newProfile, ...this.budgetProfiles];
     }
 
     this.addAuditLog(
       'BUDGET_REQUEST_CREATED',
-      `Budget request of ${formatZAR(data.requestedAmount)} logged for ${data.entityName} (${data.financialYear}). Justification: ${data.justification.slice(0, 80)}...`,
+      `${existing && approvedSoFar > 0 ? 'Revision request' : 'Budget request'} of ${formatZAR(requested)} logged for ${data.entityName} (${fy})${approvedSoFar > 0 ? `; the existing approval of ${formatZAR(approvedSoFar)} stands until DSAC decides` : ''}. Justification: ${data.justification.slice(0, 80)}...`,
       data.entityName
     );
 
@@ -2329,107 +2667,167 @@ export class GovTrackStore {
     return newProfile;
   }
 
+  /**
+   * DSAC decision on a budget request. An approval (full or partial) sets the approved amount and allocates it
+   * across the expense lines so the lines ALWAYS add up to the approved amount (largest-remainder rounding).
+   * It affects only the financial year of the profile: approving next year's budget no longer overwrites this
+   * year's allocation.
+   */
   reviewBudgetRequest(
     profileId: string,
     approvedAmount: number,
     status: BudgetRequestStatus,
     comments?: string,
     lineApprovals?: { categoryId: string; annualBudget: number }[]
-  ): void {
+  ): { success: boolean; message?: string } {
+    if (!this.requireDsacAuthority('Decide budget request')) {
+      return { success: false, message: 'Only DSAC officials can decide on budget requests.' };
+    }
     const profile = this.budgetProfiles.find(bp => bp.id === profileId);
-    if (!profile) return;
+    if (!profile) return { success: false, message: 'Budget request not found.' };
 
     const reviewer = this.currentUser ? this.currentUser.name : 'DSAC National Reviewer';
+    const approving = status === 'APPROVED' || status === 'PARTIALLY_APPROVED';
 
-    profile.status = status;
+    if (approving) {
+      const amount = Math.round(Number(approvedAmount));
+      if (!Number.isFinite(amount) || amount <= 0) return { success: false, message: 'The approved amount must be greater than zero.' };
+      if (amount > profile.requestedAmount) {
+        return { success: false, message: `The approved amount ${formatZAR(amount)} exceeds the amount requested ${formatZAR(profile.requestedAmount)}.` };
+      }
+
+      let allocated: number[];
+      if (lineApprovals && lineApprovals.length > 0) {
+        const total = lineApprovals.reduce((a, l) => a + Math.round(l.annualBudget), 0);
+        if (total !== amount) {
+          return { success: false, message: `The line approvals total ${formatZAR(total)} but the approved amount is ${formatZAR(amount)}. They must be equal.` };
+        }
+        allocated = profile.lines.map(l => Math.round(lineApprovals.find(la => la.categoryId === l.categoryId)?.annualBudget ?? 0));
+      } else if (profile.lines.length > 0) {
+        const weights = profile.lines.map(l => l.requestedAmount);
+        allocated = allocateProportionally(amount, weights.some(w => w > 0) ? weights : profile.lines.map(() => 1));
+      } else {
+        allocated = [];
+      }
+
+      profile.lines = profile.lines.length > 0
+        ? profile.lines.map((l, i) => ({ ...l, annualBudget: allocated[i] }))
+        : this.standardBudgetLines(amount).map((l, i) => ({
+            id: `bl-${profile.id}-${i + 1}`,
+            budgetId: profile.id,
+            categoryId: l.categoryId,
+            categoryName: l.categoryName,
+            requestedAmount: l.requestedAmount,
+            annualBudget: l.requestedAmount,
+          }));
+
+      profile.approvedAmount = amount;
+      profile.fundingGap = Math.max(0, profile.requestedAmount - amount);
+      profile.approvalDate = new Date().toISOString().split('T')[0];
+      profile.status = amount < profile.requestedAmount ? 'PARTIALLY_APPROVED' : 'APPROVED';
+    } else if (status === 'REJECTED' && profile.approvedAmount > 0) {
+      // A declined REVISION leaves the existing approval standing.
+      profile.status = 'APPROVED';
+      comments = `Revision request declined; the existing approval of ${formatZAR(profile.approvedAmount)} stands. ${comments || ''}`.trim();
+    } else {
+      profile.status = status;
+    }
+
     profile.reviewedBy = this.currentUser?.id;
     profile.reviewedByName = reviewer;
     profile.reviewDate = new Date().toISOString().split('T')[0];
     profile.comments = comments;
     profile.updatedAt = new Date().toISOString();
 
-    if (status === 'APPROVED') {
-      profile.approvedAmount = approvedAmount;
-      profile.fundingGap = profile.requestedAmount - approvedAmount;
-      profile.approvalDate = new Date().toISOString().split('T')[0];
+    this.syncEntityFinancialCache(profile.entityId);
+    this.recalculateFinancialRisks(profile.entityId);
 
-      // Update line amounts if provided, or distribute proportionally
-      if (lineApprovals && lineApprovals.length > 0) {
-        profile.lines = profile.lines.map(line => {
-          const match = lineApprovals.find(la => la.categoryId === line.categoryId);
-          return {
-            ...line,
-            annualBudget: match ? match.annualBudget : line.annualBudget,
-          };
-        });
-      } else if (profile.lines.length > 0 && profile.requestedAmount > 0) {
-        const ratio = approvedAmount / profile.requestedAmount;
-        profile.lines = profile.lines.map(line => ({
-          ...line,
-          annualBudget: line.requestedAmount * ratio,
-        }));
-      }
-
-      // Synchronize entity budgetAllocationZAR
-      const entity = this.entities.find(e => e.id === profile.entityId);
-      if (entity) {
-        entity.budgetAllocationZAR = approvedAmount;
-      }
-
-      this.addAuditLog(
-        'BUDGET_APPROVED',
-        `Approved Annual Budget of ${formatZAR(approvedAmount)} (Funding gap: ${formatZAR(profile.fundingGap)}) for ${profile.entityName} (${profile.financialYear}). Decision notes: ${comments || 'Approved by DSAC CFO'}`,
-        profile.entityName
-      );
-    } else {
-      this.addAuditLog(
-        'BUDGET_UPDATED',
-        `Budget Request ${status} for ${profile.entityName}. Reason: ${comments || 'Awaiting revisions'}`,
-        profile.entityName
-      );
-    }
+    this.addAuditLog(
+      approving ? 'BUDGET_APPROVED' : 'BUDGET_UPDATED',
+      approving
+        ? `${profile.status === 'PARTIALLY_APPROVED' ? 'Partially approved' : 'Approved'} annual budget of ${formatZAR(profile.approvedAmount)} of ${formatZAR(profile.requestedAmount)} requested (funding gap ${formatZAR(profile.fundingGap)}) for ${profile.entityName} (${profile.financialYear}). Decision notes: ${comments || 'Approved by DSAC CFO'}`
+        : `Budget Request ${status} for ${profile.entityName} (${profile.financialYear}). Reason: ${comments || 'Awaiting revisions'}`,
+      profile.entityName
+    );
 
     this.persistAll();
+    return { success: true };
   }
 
+  /**
+   * Imports gazetted allocations for ONE financial year. Duplicates in the file are collapsed (last row wins) and
+   * counted once; expense lines are re-allocated so they add up to the imported amount.
+   */
   uploadTreasuryAllocations(
     allocations: { entityId?: string; shortCode?: string; amount: number }[],
     financialYear: string,
     sourceFileName: string
-  ): { updatedCount: number; totalZAR: number } {
-    let updatedCount = 0;
-    let totalZAR = 0;
+  ): { updatedCount: number; totalZAR: number; skipped: string[] } {
+    if (!this.requireDsacAuthority('Import Treasury allocations')) return { updatedCount: 0, totalZAR: 0, skipped: ['Only DSAC officials can import allocations.'] };
+
+    const fy = normalizeFinancialYear(financialYear);
+    const skipped: string[] = [];
+    const byEntity = new Map<string, number>();
 
     allocations.forEach(alloc => {
-      const entity = this.entities.find(e => 
+      const entity = this.entities.find(e =>
         (alloc.entityId && e.id === alloc.entityId) ||
         (alloc.shortCode && e.shortCode.toLowerCase() === alloc.shortCode.toLowerCase())
       );
+      const amount = Math.round(Number(alloc.amount));
+      if (!entity) { skipped.push(`${alloc.entityId || alloc.shortCode || '(blank)'}: organisation not found`); return; }
+      if (!Number.isFinite(amount) || amount <= 0) { skipped.push(`${entity.shortCode}: invalid amount`); return; }
+      byEntity.set(entity.id, amount);
+    });
 
-      if (entity && alloc.amount > 0) {
-        entity.budgetAllocationZAR = alloc.amount;
-        
-        // Also synchronize existing budgetProfile for this year if exists
-        const profile = this.budgetProfiles.find(p => p.entityId === entity.id && p.financialYear === financialYear);
-        if (profile) {
-          profile.approvedAmount = alloc.amount;
-          profile.status = 'APPROVED';
-          profile.fundingGap = Math.max(0, profile.requestedAmount - alloc.amount);
-        }
-
-        updatedCount++;
-        totalZAR += alloc.amount;
+    let totalZAR = 0;
+    byEntity.forEach((amount, entityId) => {
+      const entity = this.entities.find(e => e.id === entityId)!;
+      let profile = this.budgetProfiles.find(p => p.entityId === entityId && sameFinancialYear(p.financialYear, fy));
+      if (profile) {
+        const weights = profile.lines.map(l => l.annualBudget || l.requestedAmount);
+        const parts = profile.lines.length > 0 ? allocateProportionally(amount, weights.some(w => w > 0) ? weights : weights.map(() => 1)) : [];
+        profile.lines = profile.lines.length > 0
+          ? profile.lines.map((l, i) => ({ ...l, annualBudget: parts[i] }))
+          : this.standardBudgetLines(amount).map((l, i) => ({ id: `bl-${profile!.id}-${i + 1}`, budgetId: profile!.id, categoryId: l.categoryId, categoryName: l.categoryName, requestedAmount: l.requestedAmount, annualBudget: l.requestedAmount }));
+        profile.approvedAmount = amount;
+        profile.status = 'APPROVED';
+        profile.fundingGap = Math.max(0, profile.requestedAmount - amount);
+        profile.updatedAt = new Date().toISOString();
+      } else {
+        const id = `bp-${Date.now()}-${entityId}`;
+        const std = this.standardBudgetLines(amount);
+        profile = {
+          id,
+          entityId,
+          entityName: entity.name,
+          financialYear: fy,
+          requestedAmount: amount,
+          approvedAmount: amount,
+          fundingGap: 0,
+          status: 'APPROVED',
+          requestDate: new Date().toISOString().split('T')[0],
+          approvalDate: new Date().toISOString().split('T')[0],
+          justification: `Imported from ${sourceFileName}.`,
+          expectedSpendingTrajectory: { q1Percent: 25, q2Percent: 50, q3Percent: 75, q4Percent: 100 },
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          lines: std.map((l, i) => ({ id: `bl-${id}-${i + 1}`, budgetId: id, categoryId: l.categoryId, categoryName: l.categoryName, requestedAmount: l.requestedAmount, annualBudget: l.requestedAmount })),
+        };
+        this.budgetProfiles = [profile, ...this.budgetProfiles];
       }
+      totalZAR += amount;
+      this.syncEntityFinancialCache(entityId);
     });
 
     this.addAuditLog(
       'BUDGET_APPROVED',
-      `Imported National Treasury Vote 37 budget allocations from "${sourceFileName}" for FY ${financialYear}. ${updatedCount} institutions updated totaling ${formatZAR(totalZAR)}.`,
+      `Imported National Treasury Vote 37 budget allocations from "${sourceFileName}" for FY ${fy}. ${byEntity.size} institutions updated totaling ${formatZAR(totalZAR)}.${skipped.length ? ` ${skipped.length} row(s) skipped.` : ''}`,
       'National Treasury Import'
     );
 
     this.persistAll();
-    return { updatedCount, totalZAR };
+    return { updatedCount: byEntity.size, totalZAR, skipped };
   }
 
   getQuarterlyFinancialSubmissions(): QuarterlyFinancialSubmission[] {
@@ -2438,13 +2836,81 @@ export class GovTrackStore {
 
   getQuarterlyFinancialSubmissionsForEntity(
     entityId: string,
-    financialYear = '2026/27'
+    financialYear = getCurrentReportingPeriod().financialYear
   ): QuarterlyFinancialSubmission[] {
     return this.quarterlyFinancialSubmissions.filter(
-      qs => qs.entityId === entityId && qs.financialYear === financialYear
+      qs => qs.entityId === entityId && sameFinancialYear(qs.financialYear, financialYear)
     );
   }
 
+  // --- DISBURSEMENT LEDGER ---
+  getDisbursements(entityId?: string, financialYear?: string): DisbursementRecord[] {
+    return this.disbursements.filter(
+      d => (!entityId || d.entityId === entityId) && (!financialYear || sameFinancialYear(d.financialYear, financialYear))
+    );
+  }
+
+  /** The next tranche still to be paid (scheduled or withheld) for a financial year. */
+  getNextTranche(entityId: string, financialYear = getCurrentReportingPeriod().financialYear): DisbursementRecord | undefined {
+    return this.disbursements
+      .filter(d => d.entityId === entityId && sameFinancialYear(d.financialYear, financialYear) && d.status !== 'RELEASED')
+      .sort((a, b) => quarterIndex(a.tranche) - quarterIndex(b.tranche))[0];
+  }
+
+  private setNextTrancheStatus(entityId: string, status: 'SCHEDULED' | 'WITHHELD'): void {
+    const next = this.getNextTranche(entityId);
+    if (next) next.status = status;
+    this.syncEntityFinancialCache(entityId);
+  }
+
+  /**
+   * Releases a funding tranche. Disbursed is the sum of released ledger entries, so this is the ONLY way the
+   * amount disbursed can rise. Tranches must go in order, cannot be released while a statutory hold applies and
+   * can never take the total disbursed above the approved budget.
+   */
+  releaseTranche(entityId: string, financialYear: string, tranche: FinancialQuarter, note?: string): { success: boolean; message?: string } {
+    if (!this.requireDsacAuthority('Release funding tranche')) return { success: false, message: 'Only DSAC officials can release a tranche.' };
+    const entity = this.entities.find(e => e.id === entityId);
+    if (!entity) return { success: false, message: 'Organisation not found.' };
+    const fy = normalizeFinancialYear(financialYear);
+
+    const rec = this.disbursements.find(d => d.entityId === entityId && sameFinancialYear(d.financialYear, fy) && d.tranche === tranche);
+    if (!rec) return { success: false, message: `No ${tranche} tranche is scheduled for ${fy}.` };
+    if (rec.status === 'RELEASED') return { success: false, message: `The ${tranche} tranche has already been released.` };
+    if (this.disbursements.some(d => d.entityId === entityId && sameFinancialYear(d.financialYear, fy) && quarterIndex(d.tranche) < quarterIndex(tranche) && d.status !== 'RELEASED')) {
+      return { success: false, message: 'Earlier tranches must be released first.' };
+    }
+    if (rec.status === 'WITHHELD' || entity.trancheStatus === 'WITHHELD' || entity.trancheStatus === 'CONDITIONAL_HOLD') {
+      return { success: false, message: 'This tranche is withheld under PFMA Section 38(1)(j). Lift the statutory hold first.' };
+    }
+    const profile = this.getBudgetProfileForEntity(entityId, fy);
+    const releasedSoFar = this.disbursements.filter(d => d.entityId === entityId && sameFinancialYear(d.financialYear, fy) && d.status === 'RELEASED').reduce((a, d) => a + d.amountZAR, 0);
+    if (!profile || releasedSoFar + rec.amountZAR > profile.approvedAmount) {
+      return { success: false, message: 'Releasing this tranche would take total disbursements above the approved budget.' };
+    }
+
+    rec.status = 'RELEASED';
+    rec.releasedAt = new Date().toISOString();
+    rec.releasedByName = this.currentUser?.name;
+    if (note) rec.note = note;
+
+    this.syncEntityFinancialCache(entityId);
+    this.reconcileReportMirrors(entityId);
+    this.addAuditLog('TRANCHE_DISBURSED', `Released ${tranche} tranche of ${formatZAR(rec.amountZAR)} to ${entity.name} for ${fy}.${note ? ` Note: ${note}` : ''}`, entity.name);
+    this.persistAll();
+    return { success: true };
+  }
+
+  /**
+   * Lodges a quarterly expenditure return. This is the ONLY way expenditure enters the system.
+   *  - The quarter total is always the sum of its expense lines.
+   *  - A return without the Accounting Officer's certification is kept as a DRAFT and does not count.
+   *  - A certified return is SUBMITTED for DSAC review (it counts as reported, not yet verified). The previous
+   *    build hard-coded every return to APPROVED, so entities approved their own figures and the DSAC review
+   *    queue could never fill.
+   *  - An accepted (APPROVED) return is locked; DSAC must reopen it. A resubmission keeps a revision history.
+   * Throws an Error with a user-readable message when the return is invalid.
+   */
   submitQuarterlyFinancialReturn(data: {
     entityId: string;
     entityName: string;
@@ -2462,17 +2928,33 @@ export class GovTrackStore {
     accountingOfficerAffirmation: boolean;
     accountingOfficerName?: string;
   }): QuarterlyFinancialSubmission {
-    const existingIndex = this.quarterlyFinancialSubmissions.findIndex(
-      qs => qs.entityId === data.entityId &&
-            qs.financialYear === data.financialYear &&
-            qs.quarter === data.quarter
+    const role = this.currentUser?.role;
+    if (!role || (role === 'ENTITY_OFFICER' && this.currentUser?.entityId !== data.entityId)) {
+      throw new Error('You are not authorised to lodge a return for this organisation.');
+    }
+
+    const fy = normalizeFinancialYear(data.financialYear);
+    const cleanLines = data.lines.map(l => {
+      const amount = Number(l.actualAmount);
+      if (!Number.isFinite(amount) || amount < 0) {
+        throw new Error(`Invalid amount for ${l.categoryName}: expenditure must be a non-negative number.`);
+      }
+      return { ...l, actualAmount: Math.round(amount) };
+    });
+
+    const existing = this.quarterlyFinancialSubmissions.find(
+      qs => qs.entityId === data.entityId && sameFinancialYear(qs.financialYear, fy) && qs.quarter === data.quarter
     );
+    if (existing?.status === 'APPROVED') {
+      throw new Error(`The ${data.quarter} return for ${fy} has been accepted by DSAC and is locked. Ask DSAC to reopen it if a correction is needed.`);
+    }
+    if (existing?.status === 'UNDER_REVIEW') {
+      throw new Error(`The ${data.quarter} return for ${fy} is under DSAC review and cannot be changed until DSAC responds.`);
+    }
 
-    const submissionId = existingIndex !== -1 
-      ? this.quarterlyFinancialSubmissions[existingIndex].id 
-      : `qs-${Date.now()}`;
-
-    const newLines = data.lines.map((l, i) => ({
+    const submissionId = existing ? existing.id : `qs-${Date.now()}`;
+    const now = new Date().toISOString();
+    const lines = cleanLines.map((l, i) => ({
       id: `qsl-${submissionId}-${i + 1}`,
       quarterlySubmissionId: submissionId,
       budgetLineId: l.budgetLineId,
@@ -2481,105 +2963,74 @@ export class GovTrackStore {
       actualAmount: l.actualAmount,
       plannedAmount: l.plannedAmount,
     }));
+    const total = lines.reduce((a, l) => a + l.actualAmount, 0);
+    const affirmed = !!data.accountingOfficerAffirmation;
 
     const newSubmission: QuarterlyFinancialSubmission = {
       id: submissionId,
       entityId: data.entityId,
       entityName: data.entityName,
-      financialYear: data.financialYear,
+      financialYear: fy,
       quarter: data.quarter,
-      status: 'APPROVED', // Default to authoritative approval upon certified sign-off or SUBMITTED
-      submittedAt: new Date().toISOString(),
+      status: affirmed ? 'SUBMITTED' : 'DRAFT',
+      submittedAt: affirmed ? now : undefined,
       submittedByName: data.accountingOfficerName || this.currentUser?.name || 'Reporting Officer',
-      totalQuarterlyActual: data.totalQuarterlyActual,
+      totalQuarterlyActual: total,
       supportingDocumentIds: data.supportingDocumentIds || [],
-      accountingOfficerAffirmation: data.accountingOfficerAffirmation,
+      accountingOfficerAffirmation: affirmed,
       accountingOfficerName: data.accountingOfficerName,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      lines: newLines,
+      createdAt: existing?.createdAt || now,
+      updatedAt: now,
+      lines,
+      revision: (existing?.revision ?? 0) + (existing ? 1 : 0),
+      revisionHistory: existing
+        ? [...(existing.revisionHistory || []), { at: existing.updatedAt, totalQuarterlyActual: returnTotal(existing), status: existing.status }]
+        : [],
     };
 
-    if (existingIndex !== -1) {
-      this.quarterlyFinancialSubmissions[existingIndex] = newSubmission;
+    if (existing) {
+      this.quarterlyFinancialSubmissions = this.quarterlyFinancialSubmissions.map(qs => (qs.id === submissionId ? newSubmission : qs));
     } else {
       this.quarterlyFinancialSubmissions = [newSubmission, ...this.quarterlyFinancialSubmissions];
     }
 
-    // Update entity reported expenditure
-    const entity = this.entities.find(e => e.id === data.entityId);
-    if (entity) {
-      const allSubmissions = this.quarterlyFinancialSubmissions.filter(
-        qs => qs.entityId === data.entityId && qs.financialYear === data.financialYear
-      );
-      entity.reportedExpenditureZAR = allSubmissions.reduce(
-        (acc, s) => acc + s.totalQuarterlyActual, 0
-      );
-    }
+    const profile = this.getBudgetProfileForEntity(data.entityId, fy);
+    const unbudgeted = lines.filter(l => l.actualAmount > 0 && !(profile?.lines || []).some(b => b.categoryId === l.categoryId && b.annualBudget > 0));
 
-    // Synchronize transactions with unrounded precision
-    this.financialTransactions = this.financialTransactions.filter(
-      tx => tx.id !== `tx-exp-${submissionId}` && !tx.id.startsWith(`tx-exp-${submissionId}-`)
-    );
-
-    if (newLines.length > 0) {
-      newLines.forEach((line, idx) => {
-        this.financialTransactions.push({
-          id: `tx-exp-${submissionId}-${idx + 1}`,
-          entityId: data.entityId,
-          entityName: data.entityName,
-          financialYear: data.financialYear,
-          quarter: data.quarter,
-          type: 'EXPENDITURE',
-          amount: line.actualAmount,
-          transactionDate: new Date().toISOString().slice(0, 10),
-          referenceNumber: `GL-EXP-${data.financialYear.replace('/', '')}-${data.quarter}-${(entity?.shortCode || 'ENT')}-${idx + 1}`,
-          description: `${line.categoryName || 'Operating Expenditure'} (Quarterly Return)`,
-          categoryId: line.categoryId,
-          categoryName: line.categoryName,
-          status: 'VERIFIED',
-          verifiedBy: data.accountingOfficerName || this.currentUser?.name || 'Reporting Officer',
-          createdAt: new Date().toISOString(),
-        });
-      });
-    } else {
-      this.financialTransactions.push({
-        id: `tx-exp-${submissionId}`,
-        entityId: data.entityId,
-        entityName: data.entityName,
-        financialYear: data.financialYear,
-        quarter: data.quarter,
-        type: 'EXPENDITURE',
-        amount: data.totalQuarterlyActual,
-        transactionDate: new Date().toISOString().slice(0, 10),
-        referenceNumber: `GL-EXP-${data.financialYear.replace('/', '')}-${data.quarter}-${(entity?.shortCode || 'ENT')}`,
-        description: 'Statutory Quarterly Operating Expenditure',
-        status: 'VERIFIED',
-        verifiedBy: data.accountingOfficerName || this.currentUser?.name || 'Reporting Officer',
-        createdAt: new Date().toISOString(),
-      });
-    }
+    this.syncEntityFinancialCache(data.entityId);
+    this.reconcileReportMirrors(data.entityId);
 
     this.addAuditLog(
       'QUARTERLY_EXPENDITURE_SUBMITTED',
-      `Submitted ${data.quarter} verified actual expenditure of ${formatZAR(data.totalQuarterlyActual)} for ${data.entityName}. Affirmation certified by ${data.accountingOfficerName || 'Accounting Officer'}.`,
+      `${affirmed ? 'Submitted' : 'Saved as draft'} ${data.quarter} expenditure of ${formatZAR(total)} for ${data.entityName} (${fy})${existing ? `, replacing ${formatZAR(returnTotal(existing))} (${existing.status})` : ''}. ${affirmed ? `Affirmation certified by ${data.accountingOfficerName || 'Accounting Officer'}; awaiting DSAC verification.` : 'Not certified, so not counted in reported totals.'}${unbudgeted.length ? ` WARNING: spend on lines with no approved budget: ${unbudgeted.map(l => `${l.categoryName} ${formatZAR(l.actualAmount)}`).join(', ')}.` : ''}`,
       data.entityName
     );
 
     // Re-evaluate risk rules for financial parameters
-    this.recalculateFinancialRisks(data.entityId, data.financialYear);
+    this.recalculateFinancialRisks(data.entityId, fy);
 
     this.persistAll();
     return newSubmission;
   }
 
+  /** Reviewer decision on a lodged return. Only returns awaiting review can be accepted. */
   reviewQuarterlyFinancialReturn(
     submissionId: string,
     decision: 'APPROVE' | 'REQUEST_CORRECTION',
     notes: string
   ): void {
+    if (!this.requireDsacAuthority('Review quarterly financial return')) return;
     const submission = this.quarterlyFinancialSubmissions.find(s => s.id === submissionId);
     if (!submission) return;
+
+    const awaiting = submission.status === 'SUBMITTED' || submission.status === 'UNDER_REVIEW';
+    if (decision === 'APPROVE' && !awaiting) {
+      this.addAuditLog('ACCESS_DENIED', `Ignored approval of the ${submission.quarter} return for ${submission.entityName}: it is ${submission.status}, not awaiting review.`, submission.entityName);
+      return;
+    }
+    if (decision === 'REQUEST_CORRECTION' && !awaiting && submission.status !== 'APPROVED') {
+      return;
+    }
 
     const reviewer = this.currentUser ? `${this.currentUser.name} (${this.currentUser.designation})` : 'DSAC Oversight Reviewer';
 
@@ -2591,7 +3042,7 @@ export class GovTrackStore {
 
       this.addAuditLog(
         'FINANCIAL_REPORT_APPROVED',
-        `Approved ${submission.quarter} financial actual return of ${formatZAR(submission.totalQuarterlyActual)} for ${submission.entityName}. Verification note: ${notes}`,
+        `Approved ${submission.quarter} financial actual return of ${formatZAR(returnTotal(submission))} for ${submission.entityName}. Verification note: ${notes}`,
         submission.entityName
       );
     } else {
@@ -2620,19 +3071,21 @@ export class GovTrackStore {
 
       this.addAuditLog(
         'FINANCIAL_REPORT_CORRECTION_REQUESTED',
-        `Requested corrections for ${submission.quarter} expenditure return for ${submission.entityName}. Finding: ${notes}`,
+        `Requested corrections for ${submission.quarter} expenditure return for ${submission.entityName}. Finding: ${notes}. The return is excluded from reported totals until resubmitted.`,
         submission.entityName
       );
     }
 
+    this.syncEntityFinancialCache(submission.entityId);
+    this.reconcileReportMirrors(submission.entityId);
     this.recalculateFinancialRisks(submission.entityId, submission.financialYear);
     this.persistAll();
   }
 
   getEntityFinancialSummary(
     entityId: string,
-    financialYear = '2026/27',
-    selectedQuarter: FinancialQuarter | 'FULL_YEAR' = 'Q3'
+    financialYear = getCurrentReportingPeriod().financialYear,
+    selectedQuarter: QuarterSelection = getCurrentReportingPeriod().quarter
   ): EntityFinancialSummary {
     const entityMeta = this.entities.find(e => e.id === entityId);
     return calculateEntityFinancialSummary(
@@ -2644,13 +3097,13 @@ export class GovTrackStore {
       this.expenseCategories,
       entityMeta,
       this.kpis,
-      this.financialTransactions
+      this.disbursements
     );
   }
 
   getDepartmentFinancialKPIs(
-    financialYear = '2026/27',
-    selectedQuarter: FinancialQuarter | 'FULL_YEAR' = 'Q3'
+    financialYear = getCurrentReportingPeriod().financialYear,
+    selectedQuarter: QuarterSelection = getCurrentReportingPeriod().quarter
   ): DepartmentFinancialKPIs {
     return calculateDepartmentFinancialKPIs(
       financialYear,
@@ -2660,14 +3113,14 @@ export class GovTrackStore {
       this.entities,
       this.expenseCategories,
       this.kpis,
-      this.financialTransactions
+      this.disbursements
     );
   }
 
   getEntityPerformanceSummary(
     entityId: string,
-    financialYear = '2025/26',
-    quarter: FinancialQuarter | 'FULL_YEAR' = 'FULL_YEAR'
+    financialYear = getCurrentReportingPeriod().financialYear,
+    quarter: QuarterSelection = 'FULL_YEAR'
   ): EntityPerformanceSummary {
     const entityMeta = this.entities.find(e => e.id === entityId);
     return calculateEntityPerformanceSummary(
@@ -2680,8 +3133,8 @@ export class GovTrackStore {
   }
 
   getDepartmentPerformanceAggregation(
-    financialYear = '2025/26',
-    quarter: FinancialQuarter | 'FULL_YEAR' = 'Q3',
+    financialYear = getCurrentReportingPeriod().financialYear,
+    quarter: QuarterSelection = getCurrentReportingPeriod().quarter,
     typeFilter: 'ALL' | 'PUBLIC_ENTITY' | 'NPO' = 'ALL'
   ): DepartmentPerformanceAggregation {
     return calculateDepartmentPerformanceAggregation(
@@ -2694,8 +3147,8 @@ export class GovTrackStore {
   }
 
   getDepartmentFinancialAggregation(
-    financialYear = '2025/26',
-    quarter: FinancialQuarter | 'FULL_YEAR' = 'Q3',
+    financialYear = getCurrentReportingPeriod().financialYear,
+    quarter: QuarterSelection = getCurrentReportingPeriod().quarter,
     typeFilter: 'ALL' | 'PUBLIC_ENTITY' | 'NPO' = 'ALL'
   ): DepartmentFinancialAggregation {
     return calculateDepartmentFinancialAggregation(
@@ -2704,85 +3157,66 @@ export class GovTrackStore {
       this.quarterlyFinancialSubmissions,
       this.expenseCategories,
       this.kpis,
+      this.disbursements,
       financialYear,
       quarter,
-      typeFilter,
-      this.financialTransactions
+      typeFilter
     );
   }
 
-  getFinancialTransactions(
-    entityId?: string, 
-    financialYear?: string, 
-    quarter?: FinancialQuarter | 'FULL_YEAR'
-  ): FinancialTransaction[] {
-    let txs = this.financialTransactions;
-    if (entityId) {
-      txs = txs.filter(t => t.entityId === entityId);
-    }
-    if (financialYear) {
-      txs = txs.filter(t => t.financialYear === financialYear);
-    }
-    if (quarter && (quarter as string) !== 'FULL_YEAR') {
-      txs = txs.filter(t => t.quarter === quarter || (t.quarter as string) === 'FULL_YEAR');
-    }
-    return txs;
+  private daysToNextStatutoryDeadline(): number {
+    const now = Date.now();
+    const upcoming = this.deadlines
+      .map(d => new Date(d.dueDate).getTime())
+      .filter(t => t > now)
+      .sort((a, b) => a - b)[0];
+    return upcoming ? Math.max(0, Math.ceil((upcoming - now) / 86400000)) : 0;
   }
 
-  addFinancialTransaction(txData: Omit<FinancialTransaction, 'id' | 'createdAt'>): FinancialTransaction {
-    const newTx: FinancialTransaction = {
-      ...txData,
-      id: `tx-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-      createdAt: new Date().toISOString(),
-    };
-    this.financialTransactions = [newTx, ...this.financialTransactions];
-    
-    if (newTx.type === 'EXPENDITURE') {
-      const ent = this.entities.find(e => e.id === newTx.entityId);
-      if (ent) {
-        const allExp = this.financialTransactions
-          .filter(t => t.entityId === newTx.entityId && t.type === 'EXPENDITURE')
-          .reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
-        ent.reportedExpenditureZAR = allExp;
-      }
-    } else if (newTx.type === 'TRANSFER') {
-      const ent = this.entities.find(e => e.id === newTx.entityId);
-      if (ent) {
-        const allTrans = this.financialTransactions
-          .filter(t => t.entityId === newTx.entityId && t.type === 'TRANSFER')
-          .reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
-        ent.transferredAmountZAR = allTrans;
-      }
-    }
+  /**
+   * Financial early-warning rules for an entity, evaluated for the CURRENT reporting period (the previous build
+   * hard-coded 'Q3' and gave every alert an invented "days until deadline").
+   */
+  recalculateFinancialRisks(entityId: string, financialYear?: string): void {
+    const period = getCurrentReportingPeriod();
+    // Alerts describe the current reporting period; a return for another year does not raise or clear them.
+    if (financialYear && !sameFinancialYear(financialYear, period.financialYear)) return;
 
-    this.addAuditLog(
-      'FINANCIAL_RECORD_UPDATED',
-      `Recorded ${newTx.type} transaction of ${formatZAR(newTx.amount)} (Ref: ${newTx.referenceNumber}).`,
-      newTx.entityName
-    );
-    this.persistAll();
-    return newTx;
-  }
-
-  recalculateFinancialRisks(entityId: string, financialYear = '2026/27'): void {
-    const summary = this.getEntityFinancialSummary(entityId, financialYear, 'Q3');
     const entity = this.entities.find(e => e.id === entityId);
-    if (!entity) return;
+    if (!entity || !isPortfolioMember(entity)) return;
+    const summary = this.getEntityFinancialSummary(entityId, period.financialYear, period.quarter);
 
-    // Filter existing financial risk alerts for this entity
+    // Clear this entity's previous financial alerts, then re-evaluate.
     this.riskAlerts = this.riskAlerts.filter(
       r => !(r.entityId === entityId && (
         r.title.includes('Budget Overspend') ||
         r.title.includes('Rapid Utilisation') ||
         r.title.includes('Severe Under-Utilisation') ||
+        r.title.includes('Under-Utilisation Warning') ||
+        r.title.includes('Projected Year-End Overspend') ||
         r.title.includes('Financial & Delivery Disconnect')
       ))
     );
 
-    // Rule 1: Overspending
+    // The formula-based score first; financial alerts may then only raise it.
+    this.recalculateEntityRisk(entityId);
+
+    const lateReports = this.reports.filter(r => r.entityId === entityId && r.submissionStatus === 'OVERDUE').length;
+    const days = this.daysToNextStatutoryDeadline();
+    const evidence = (over: Partial<RiskAlert['evidenceData']> = {}): RiskAlert['evidenceData'] => ({
+      actualAchieved: summary.ytdActual,
+      expectedTrajectory: summary.expectedYtd,
+      annualTarget: summary.approvedAmount,
+      financialUtilisationRate: summary.utilisationPercent,
+      historicalLateReportsCount: lateReports,
+      daysUntilDeadline: days,
+      ...over,
+    });
+    const stamp = new Date().toISOString();
+
     if (summary.isOverspent) {
       this.riskAlerts.unshift({
-        id: `risk-fin-over-${Date.now()}`,
+        id: `risk-fin-over-${entityId}`,
         entityId,
         entityName: entity.name,
         riskLevel: 'CRITICAL',
@@ -2795,25 +3229,16 @@ export class GovTrackStore {
           `Net Deficit / Overspend: ${formatZAR(summary.overspendAmount)}`,
           'PFMA Section 38 compliance alert'
         ],
-        evidenceData: {
-          actualAchieved: summary.ytdActual,
-          expectedTrajectory: summary.expectedYtd,
-          annualTarget: summary.approvedAmount,
-          financialUtilisationRate: summary.utilisationPercent,
-          historicalLateReportsCount: 0,
-          daysUntilDeadline: 14,
-        },
+        evidenceData: evidence(),
         recommendedAction: 'Issue formal PFMA Section 38(1)(j) inquiry and require immediate financial reprioritisation recovery plan.',
-        createdAt: new Date().toISOString(),
+        createdAt: stamp,
         acknowledged: false,
       });
       entity.riskLevel = 'CRITICAL';
       entity.riskScore = Math.max(entity.riskScore, 88);
-    }
-    // Rule 2: Rapid Utilisation / High Variance
-    else if (summary.variancePercent > 18) {
+    } else if (summary.financialStatus === 'REQUIRES_REVIEW') {
       this.riskAlerts.unshift({
-        id: `risk-fin-rapid-${Date.now()}`,
+        id: `risk-fin-rapid-${entityId}`,
         entityId,
         entityName: entity.name,
         riskLevel: 'HIGH',
@@ -2825,24 +3250,15 @@ export class GovTrackStore {
           `Actual spend: ${formatZAR(summary.ytdActual)} vs expected ${formatZAR(summary.expectedYtd)}`,
           'Risk of exhaustion prior to Q4 closeout'
         ],
-        evidenceData: {
-          actualAchieved: summary.ytdActual,
-          expectedTrajectory: summary.expectedYtd,
-          annualTarget: summary.approvedAmount,
-          financialUtilisationRate: summary.utilisationPercent,
-          historicalLateReportsCount: 0,
-          daysUntilDeadline: 21,
-        },
-        recommendedAction: 'Audit Q3/Q4 cash-flow run rate to ensure allocations will sustain operations through financial year-end.',
-        createdAt: new Date().toISOString(),
+        evidenceData: evidence(),
+        recommendedAction: 'Audit the cash-flow run rate to ensure allocations will sustain operations through financial year-end.',
+        createdAt: stamp,
         acknowledged: false,
       });
       if (entity.riskLevel === 'LOW') entity.riskLevel = 'MEDIUM';
-    }
-    // Rule 3: Severe Under-utilisation
-    else if (summary.financialStatus === 'UNDER_UTILISING') {
+    } else if (summary.financialStatus === 'UNDER_UTILISING') {
       this.riskAlerts.unshift({
-        id: `risk-fin-under-${Date.now()}`,
+        id: `risk-fin-under-${entityId}`,
         entityId,
         entityName: entity.name,
         riskLevel: 'MEDIUM',
@@ -2850,28 +3266,44 @@ export class GovTrackStore {
         title: `Under-Utilisation Warning: ${summary.utilisationPercent}% Absorbed`,
         reason: `Low financial expenditure rate (${summary.variancePercent}% variance against trajectory). Potential procurement halts or programme delays in key sub-programmes.`,
         contributingFactors: [
-          `Utilisation: ${summary.utilisationPercent}%`,
+          `Budget utilisation: ${summary.utilisationPercent}% of approved; absorption of transfers: ${summary.absorptionRate}%`,
           `Variance: ${summary.variancePercent}% against trajectory`,
           'Capital procurement delays or unfilled vacancies'
         ],
-        evidenceData: {
-          actualAchieved: summary.ytdActual,
-          expectedTrajectory: summary.expectedYtd,
-          annualTarget: summary.approvedAmount,
-          financialUtilisationRate: summary.utilisationPercent,
-          historicalLateReportsCount: 0,
-          daysUntilDeadline: 30,
-        },
+        evidenceData: evidence(),
         recommendedAction: 'Request quarterly procurement acceleration plan and audit pipeline commitments.',
-        createdAt: new Date().toISOString(),
+        createdAt: stamp,
         acknowledged: false,
       });
     }
 
-    // Rule 4: Performance vs Finance Disconnect (Section 23)
+    // Forecast rule: not yet overspent, but the current run-rate lands above the approved budget at year end.
+    if (!summary.isOverspent && summary.approvedAmount > 0 && summary.projectedYearEndUtilisationPercent > 105) {
+      this.riskAlerts.unshift({
+        id: `risk-fin-proj-${entityId}`,
+        entityId,
+        entityName: entity.name,
+        riskLevel: 'HIGH',
+        riskScore: 70,
+        title: `Projected Year-End Overspend: ${summary.projectedYearEndUtilisationPercent}% of Budget`,
+        reason: `At the current run-rate (${formatZAR(summary.ytdActual)} over ${summary.dueQuarters.length - summary.missingQuarters.length} reported quarter(s)) expenditure is projected to reach ${formatZAR(summary.projectedYearEndSpend)} against an approved budget of ${formatZAR(summary.approvedAmount)}.`,
+        contributingFactors: [
+          `Projected year-end spend: ${formatZAR(summary.projectedYearEndSpend)}`,
+          `Approved budget: ${formatZAR(summary.approvedAmount)}`,
+          'Linear run-rate projection; seasonality not modelled',
+        ],
+        evidenceData: evidence({ actualAchieved: summary.projectedYearEndSpend, expectedTrajectory: summary.approvedAmount }),
+        recommendedAction: 'Ask the Accounting Officer for a recovery plan or a budget adjustment request before the overspend materialises.',
+        createdAt: stamp,
+        acknowledged: false,
+      });
+      if (entity.riskLevel === 'LOW') entity.riskLevel = 'MEDIUM';
+    }
+
+    // Performance vs Finance Disconnect (Section 23)
     if (summary.performanceFinanceSignal?.status === 'REQUIRES_REVIEW') {
       this.riskAlerts.unshift({
-        id: `risk-fin-perf-${Date.now()}`,
+        id: `risk-fin-perf-${entityId}`,
         entityId,
         entityName: entity.name,
         riskLevel: 'HIGH',
@@ -2879,20 +3311,13 @@ export class GovTrackStore {
         title: `Financial & Delivery Disconnect: High Spend vs Low Output`,
         reason: summary.performanceFinanceSignal.commentary,
         contributingFactors: [
-          `Financial utilisation: ${summary.utilisationPercent}%`,
+          `Budget utilisation: ${summary.utilisationPercent}%`,
           `Target achievement rate: ${summary.targetAchievementRate || 0}%`,
           'Asymmetry between resource drawdown and verifiable service delivery'
         ],
-        evidenceData: {
-          actualAchieved: summary.targetAchievementRate || 0,
-          expectedTrajectory: 75,
-          annualTarget: 100,
-          financialUtilisationRate: summary.utilisationPercent,
-          historicalLateReportsCount: 0,
-          daysUntilDeadline: 14,
-        },
+        evidenceData: evidence({ actualAchieved: summary.targetAchievementRate || 0, expectedTrajectory: 100, annualTarget: 100 }),
         recommendedAction: 'Schedule joint governance review between DSAC Finance Directorate and Programme Performance Monitoring unit.',
-        createdAt: new Date().toISOString(),
+        createdAt: stamp,
         acknowledged: false,
       });
     }

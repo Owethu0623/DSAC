@@ -572,11 +572,20 @@ export async function analyzeDocumentContent(
       reasons.push(`Insufficient statutory indicators for ${requiredType.replace(/_/g, ' ')} (Confidence ${Math.round(confidence * 100)}% below required threshold).`);
     }
   } else {
-    // Complete type mismatch
-    matchesRequiredType = false;
-    status = 'REJECTED';
-    reasons.push(`Uploaded document does not match the required ${requiredType.replace(/_/g, ' ')}.`);
-    reasons.push(`System detected: ${detectedType.replace(/_/g, ' ')}.`);
+    // A valid binary file may not expose searchable text in the browser (for
+    // example, a scanned PDF). Do not reject it solely because classification
+    // could not identify its contents; route it to an official for review.
+    if (detectedType === 'UNKNOWN') {
+      matchesRequiredType = false;
+      status = 'MANUAL_REVIEW';
+      reasons.push(`The file is valid, but its contents could not be classified automatically for ${requiredType.replace(/_/g, ' ')}.`);
+      reasons.push('Manual review is required because this may be a scanned or protected document.');
+    } else {
+      matchesRequiredType = false;
+      status = 'REJECTED';
+      reasons.push(`Uploaded document does not match the required ${requiredType.replace(/_/g, ' ')}.`);
+      reasons.push(`System detected: ${detectedType.replace(/_/g, ' ')}.`);
+    }
   }
 
   return {

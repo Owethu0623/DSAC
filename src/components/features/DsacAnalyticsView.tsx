@@ -26,6 +26,7 @@ import { PublicEntity, EntityType } from '../../types';
 import { AIPerformanceAnalyst } from '../AIPerformanceAnalyst';
 import { store } from '../../services/store';
 import { normalizeFinancialYear } from '../../services/calculationEngine';
+import { getCurrentReportingPeriod, isFinancialYearClosed } from '../../services/reportingPeriod';
 
 interface DsacAnalyticsViewProps {
   entities: PublicEntity[];
@@ -44,15 +45,17 @@ export const DsacAnalyticsView: React.FC<DsacAnalyticsViewProps> = ({
   const [typeFilter, setTypeFilter] = useState<'ALL' | 'PUBLIC_ENTITY' | 'NPO'>('ALL');
   const [clusterFilter, setClusterFilter] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [selectedYear, setSelectedYear] = useState<string>('2025/26');
+  const [selectedYear, setSelectedYear] = useState<string>(getCurrentReportingPeriod().financialYear);
+  // Current year: year-to-date at the reporting quarter. A closed year: the full year.
+  const quarterFor = (fy: string) => (isFinancialYearClosed(normalizeFinancialYear(fy)) ? 'FULL_YEAR' as const : getCurrentReportingPeriod().quarter);
 
   // Authoritative Department Aggregation from Calculation Engine
   const deptFinancialAgg = useMemo(() => {
-    return store.getDepartmentFinancialAggregation(selectedYear, 'Q3', typeFilter);
+    return store.getDepartmentFinancialAggregation(selectedYear, quarterFor(selectedYear), typeFilter);
   }, [selectedYear, typeFilter]);
 
   const deptPerfAgg = useMemo(() => {
-    return store.getDepartmentPerformanceAggregation(selectedYear, 'Q3', typeFilter);
+    return store.getDepartmentPerformanceAggregation(selectedYear, quarterFor(selectedYear), typeFilter);
   }, [selectedYear, typeFilter]);
 
   // Clusters list
@@ -128,7 +131,7 @@ export const DsacAnalyticsView: React.FC<DsacAnalyticsViewProps> = ({
       if (!map[c]) {
         map[c] = { budget: 0, transferred: 0, count: 0 };
       }
-      const fin = store.getEntityFinancialSummary(e.id, selectedYear, 'Q3');
+      const fin = store.getEntityFinancialSummary(e.id, selectedYear, quarterFor(selectedYear));
       map[c].budget += fin.approvedAmount;
       map[c].transferred += fin.ytdActual;
       map[c].count += 1;
@@ -439,7 +442,7 @@ export const DsacAnalyticsView: React.FC<DsacAnalyticsViewProps> = ({
                       Budget Allocation vs. Transferred by Sector
                     </h3>
                     <p className="text-[11px] text-slate-500 mt-0.5">
-                      Statutory Vote 40 MTEF Tranche Distribution
+                      Statutory Vote 37 MTEF Tranche Distribution
                     </p>
                   </div>
                   <button

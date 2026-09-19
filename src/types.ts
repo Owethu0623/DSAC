@@ -33,7 +33,10 @@ export type KPIStatus = 'ON_TRACK' | 'AT_RISK' | 'NOT_STARTED' | 'MISSED' | 'COM
 
 export type RiskLevel = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
 
-export type AuditOutcome = 'CLEAN_AUDIT' | 'UNQUALIFIED_WITH_FINDINGS' | 'QUALIFIED' | 'DISCLAIMER';
+export type AuditOutcome = 'CLEAN_AUDIT' | 'UNQUALIFIED_WITH_FINDINGS' | 'QUALIFIED' | 'DISCLAIMER' | 'NOT_YET_AUDITED';
+
+/** ACTIVE = verified member of the DSAC portfolio. PENDING_VERIFICATION = self-registered, awaiting DSAC approval. */
+export type RegistrationStatus = 'ACTIVE' | 'PENDING_VERIFICATION';
 
 export type DocumentCategory = 
   | 'STRATEGIC_PLAN'
@@ -54,6 +57,9 @@ export interface User {
   entityId?: string; // If ENTITY_OFFICER, bound to their specific entity
   entityName?: string;
   designation: string;
+  /** SHA-256 hash of the password. Plain-text passwords are never stored or compared. */
+  passwordHash?: string;
+  /** @deprecated legacy plain-text field, only read once to migrate old browser data to `passwordHash`. */
   password?: string;
 }
 
@@ -84,9 +90,17 @@ export interface PublicEntity {
   shortCode: string;
   type: EntityType;
   cluster: EntityCluster;
+  /**
+   * DENORMALISED READ CACHE for the current reporting period. Never write these directly: they are
+   * recomputed by the store from the budget profile (approved), the disbursement ledger (disbursed) and the
+   * lodged quarterly returns (expenditure), which are the single sources of truth.
+   */
   budgetAllocationZAR: number;
   transferredAmountZAR: number;
   reportedExpenditureZAR: number;
+  registrationStatus?: RegistrationStatus;
+  /** Budget the organisation stated when self-registering. Unverified: never counted as approved. */
+  declaredBudgetZAR?: number;
   auditOutcome: AuditOutcome;
   auditYear: string;
   overallComplianceScore: number; // 0-100
@@ -117,6 +131,12 @@ export interface KPIRecord {
   name: string;
   description: string;
   unitOfMeasure: string;
+  /**
+   * How quarterly results combine into year-to-date. CUMULATIVE (default): quarters add up (beneficiaries,
+   * workshops, jobs). NON_CUMULATIVE: the latest reported quarter IS the YTD result (percentages, rates,
+   * "% of invoices paid in 30 days"), so summing quarters would be wrong.
+   */
+  calculationType?: 'CUMULATIVE' | 'NON_CUMULATIVE';
   baseline: number;
   annualTarget: number;
   q1Target: number;
@@ -184,6 +204,8 @@ export interface DocumentVersion {
   fileSizeBytes: number;
   changeSummary: string;
   downloadUrl?: string;
+  mimeType?: string;
+  contentDataUrl?: string;
 }
 
 export interface EntityDocument {
@@ -213,6 +235,7 @@ export interface EntityDocument {
   uploadedAt?: string;
   uploadedBy?: string;
   verificationSummary?: string;
+  mimeType?: string;
 }
 
 export interface CommentMessage {
@@ -326,7 +349,11 @@ export interface AuditLogEntry {
     | 'EXTENSION_REQUESTED'
     | 'STATUTORY_NOTICE_ISSUED'
     | 'SUPPORT_REQUEST_CREATED'
-    | 'SUPPORT_REQUEST_REVIEWED';
+    | 'SUPPORT_REQUEST_REVIEWED'
+    | 'ACCESS_DENIED'
+    | 'KPI_ACTUAL_UPDATED'
+    | 'LOGIN_FAILED'
+    | 'TRANCHE_DISBURSED';
   details: string;
   ipAddress?: string;
 }

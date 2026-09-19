@@ -1,0 +1,22 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      # A reproducible install from the lockfile (no --legacy-peer-deps needed).
+      - run: npm ci
+      # Type-check, then the reconciliation/control tests, then a production build. Any failure blocks the merge.
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build

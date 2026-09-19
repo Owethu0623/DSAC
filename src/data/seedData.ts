@@ -805,16 +805,17 @@ export function generateOfficialReports(entities: PublicEntity[], kpis: KPIRecor
 
     // Q3 Report (Current Active Period)
     let q3Status: ReportStatus = 'APPROVED';
-    let q3SubmittedAt: string | undefined = '2026-04-20T10:00:00.000Z';
-    let q3ReviewedAt: string | undefined = '2026-04-25T14:00:00.000Z';
+    // Q3 (Oct-Dec 2025) statutory deadline is 31 Jan 2026; submissions and reviews fall in Jan/Feb 2026.
+    let q3SubmittedAt: string | undefined = '2026-01-22T10:00:00.000Z';
+    let q3ReviewedAt: string | undefined = '2026-02-03T14:00:00.000Z';
     let q3Reviewer: string | undefined = 'Sicelo Sakhile Mkhize (DSAC Admin)';
     let q3Notes: string | undefined = 'Performance target milestones confirmed. Good institutional governance.';
     let q3RejectionReason: string | undefined = undefined;
 
     if (code === 'SAHRA') {
       q3Status = 'CORRECTION_REQUIRED';
-      q3SubmittedAt = '2026-04-28T14:32:00.000Z';
-      q3ReviewedAt = '2026-05-02T10:15:00.000Z';
+      q3SubmittedAt = '2026-01-28T14:32:00.000Z';
+      q3ReviewedAt = '2026-02-02T10:15:00.000Z';
       q3Reviewer = 'Sicelo Sakhile Mkhize (DSAC Admin)';
       q3Notes = 'Q3 Heritage Sites Assessed target achieved only 8 of 15 expected. Variance exceeds 15% statutory threshold without an attached Board-approved recovery plan. Portfolio of Evidence for provincial site visits in the Eastern Cape is missing required field verification stamps.';
       q3RejectionReason = 'Under-performance on KPI-1 and incomplete Portfolio of Evidence for Eastern Cape sites.';
@@ -834,20 +835,20 @@ export function generateOfficialReports(entities: PublicEntity[], kpis: KPIRecor
       q3RejectionReason = 'Statutory deadline missed. Section 38 letter dispatched.';
     } else if (code === 'PACOFS') {
       q3Status = 'CORRECTION_REQUIRED';
-      q3SubmittedAt = '2026-04-29T16:40:00.000Z';
-      q3ReviewedAt = '2026-05-02T14:30:00.000Z';
+      q3SubmittedAt = '2026-01-29T16:40:00.000Z';
+      q3ReviewedAt = '2026-02-02T14:30:00.000Z';
       q3Reviewer = 'Sicelo Sakhile Mkhize (DSAC Admin)';
       q3Notes = '3 unresolved AGSA asset register findings on fixed theatre assets and lease accounting schedules. Management remediation plan and updated physical inventory log required.';
       q3RejectionReason = 'Deficient fixed theatre asset register reconciliation and unresolved Auditor-General findings.';
     } else if (code === 'TPC') {
       q3Status = 'UNDER_REVIEW';
-      q3SubmittedAt = '2026-04-29T16:40:00.000Z';
+      q3SubmittedAt = '2026-01-29T16:40:00.000Z';
       q3ReviewedAt = undefined;
       q3Reviewer = undefined;
       q3Notes = 'Under technical review by DSAC Public Entities Directorate.';
     } else if (entity.overallComplianceScore < 70) {
       q3Status = 'RESUBMITTED';
-      q3SubmittedAt = '2026-05-03T09:10:00.000Z';
+      q3SubmittedAt = '2026-02-03T09:10:00.000Z';
       q3ReviewedAt = undefined;
       q3Reviewer = undefined;
       q3Notes = 'Resubmitted with revised asset registers and procurement logs.';
@@ -878,7 +879,7 @@ export function generateOfficialReports(entities: PublicEntity[], kpis: KPIRecor
       financialYear: '2025/2026',
       quarter: 'Q3',
       submissionStatus: q3Status,
-      dueDate: '2026-04-30T23:59:59.000Z',
+      dueDate: '2026-01-31T23:59:59.000Z',
       submittedAt: q3SubmittedAt,
       submittedBy: q3SubmittedAt ? (entity.reportingOfficerName || entity.headOfEntity) : undefined,
       submittedByName: q3SubmittedAt ? (entity.reportingOfficerName || entity.headOfEntity) : undefined,

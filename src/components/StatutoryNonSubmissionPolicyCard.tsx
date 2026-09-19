@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { PublicEntity } from '../types';
 import { store } from '../services/store';
+import { getCurrentReportingPeriod, quarterDueDate } from '../services/reportingPeriod';
 
 interface StatutoryNonSubmissionPolicyCardProps {
   entity: PublicEntity;
@@ -39,7 +40,9 @@ export const StatutoryNonSubmissionPolicyCard: React.FC<StatutoryNonSubmissionPo
   const [extensionReason, setExtensionReason] = useState('');
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
 
-  const trancheAmount = entity.trancheAmountZAR || Math.round((entity.budgetAllocationZAR || 40000000) / 4);
+  const period = getCurrentReportingPeriod();
+  const nextReturnDue = `${new Date(quarterDueDate(period.financialYear, period.quarter)).toLocaleDateString('en-ZA', { day: '2-digit', month: 'long', year: 'numeric', timeZone: 'UTC' })} (${period.quarter} return)`;
+  const trancheAmount = entity.trancheAmountZAR ?? 0;
   const isWithheld = entity.trancheStatus === 'WITHHELD' || (entity.statutoryDefaultStage || 0) >= 2;
   const isUnderReview = entity.trancheStatus === 'UNDER_REVIEW';
   const isConditional = entity.trancheStatus === 'CONDITIONAL_HOLD';
@@ -51,7 +54,7 @@ export const StatutoryNonSubmissionPolicyCard: React.FC<StatutoryNonSubmissionPo
     store.requestComplianceExtension(entity.id, extensionDays, extensionReason);
     setShowExtensionModal(false);
     setExtensionReason('');
-    setFeedbackMessage(`7-Day Statutory Extension registered for ${entity.shortCode}. Conditional hold applied.`);
+    setFeedbackMessage(`${extensionDays}-day statutory extension registered for ${entity.shortCode}. Conditional hold applied.`);
     setTimeout(() => setFeedbackMessage(null), 4000);
   };
 
@@ -60,7 +63,7 @@ export const StatutoryNonSubmissionPolicyCard: React.FC<StatutoryNonSubmissionPo
       store.liftTrancheWithholding(entity.id, 'Ministerial verification complete. Statutory clearance issued.');
       setFeedbackMessage(`Tranche hold lifted for ${entity.shortCode}. Grant release authorized on BAS.`);
     } else {
-      store.enforceTrancheWithholding(entity.id, 'Non-submission of verified Q3 performance return and certified PoE.');
+      store.enforceTrancheWithholding(entity.id, `Non-submission of the verified ${getCurrentReportingPeriod().quarter} performance return and certified PoE.`);
       setFeedbackMessage(`PFMA Section 38(1)(j) Tranche Freeze enforced for ${entity.shortCode}.`);
     }
     setTimeout(() => setFeedbackMessage(null), 4000);
@@ -137,7 +140,7 @@ export const StatutoryNonSubmissionPolicyCard: React.FC<StatutoryNonSubmissionPo
         <div className="flex items-center gap-3 self-end sm:self-auto shrink-0 bg-white/80 px-3 py-1.5 rounded-xl border border-black/5 shadow-2xs">
           <div>
             <div className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">
-              {isWithheld ? 'Frozen Tranche Amount' : 'Quarterly Vote 40 Transfer'}
+              {isWithheld ? 'Frozen Tranche Amount' : 'Quarterly Vote 37 Transfer'}
             </div>
             <div className={`text-sm font-black font-mono ${isWithheld ? 'text-rose-700' : 'text-slate-900'}`}>
               R {(trancheAmount / 1_000_000).toFixed(2)}M
@@ -230,7 +233,7 @@ export const StatutoryNonSubmissionPolicyCard: React.FC<StatutoryNonSubmissionPo
           <span>
             {isWithheld
               ? 'Action Required: Submit certified return and evidence to lift tranche freeze.'
-              : 'Next Statutory Return Due: 30 April 2026 (Q4 & Annual Draft).'}
+              : `Next statutory return due: ${nextReturnDue}.`}
           </span>
         </div>
 
@@ -324,7 +327,7 @@ export const StatutoryNonSubmissionPolicyCard: React.FC<StatutoryNonSubmissionPo
               <div className="space-y-2">
                 <div className="font-bold text-slate-900">Consequences of Non-Submission:</div>
                 <ul className="list-disc pl-5 space-y-1.5 text-slate-600">
-                  <li><strong>Disbursement Suspension:</strong> BAS operational transfers (Vote 40) are automatically withheld.</li>
+                  <li><strong>Disbursement Suspension:</strong> BAS operational transfers (Vote 37) are automatically withheld.</li>
                   <li><strong>Council Notification:</strong> Formal default notices are served to the Chairperson of Council and Audit Committee.</li>
                   <li><strong>Auditor-General Listing:</strong> Unsubmitted returns are classified as non-compliance audit findings in the AGSA annual report.</li>
                   <li><strong>Parliamentary Scrutiny:</strong> Listed in the quarterly report to the Portfolio Committee on Sport, Arts and Culture.</li>

@@ -1,4 +1,8 @@
 import { store } from './store';
+import { formatZAR, isPortfolioMember } from './financialService';
+import { calculateKpiItemProgress, projectKpiAnnualAttainment } from './kpiProgress';
+import { getCurrentReportingPeriod, pct1, toLongFinancialYear } from './reportingPeriod';
+import { PublicEntity } from '../types';
 
 export interface AIAnalysisResponse {
   answer: string;
@@ -11,128 +15,226 @@ export interface AIAnalysisResponse {
   responsibleAIDisclaimer: string;
 }
 
+/**
+ * PERFORMANCE ANALYST (rule-based).
+ *
+ * Every figure below is computed at the moment of the question from the same engines the dashboards use, for the
+ * current reporting period. Nothing is typed in. It does not use a language model: it selects and phrases results
+ * by rules, and it says so. (The previous version returned canned paragraphs with invented numbers, for example
+ * "NAC has spent 89.5%" when the data said 62.6%, while claiming to be "strictly from current store data".)
+ */
+const DISCLAIMER =
+  'Rule-based analysis computed from the platform\'s current data for the stated period. It does not use a language model. Projections are simple run-rates and do not model seasonality. Advisory only: all sanctions or financial decisions require formal departmental authorisation.';
+
+const compact = (n: number) => formatZAR(n, { compact: true });
+
+/** "Name (CODE)" without repeating the code when the registered name already ends with it. */
+const label = (e: PublicEntity) => (e.name.includes(`(${e.shortCode})`) ? e.name : `${e.name} (${e.shortCode})`);
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 export async function askAIPerformanceAnalyst(query: string): Promise<AIAnalysisResponse> {
-  // Extract real-time ground truth from the store
-  const entities = store.entities;
-  const kpis = store.kpis;
-  const reports = store.reports;
-  const tasks = store.tasks;
+  const period = getCurrentReportingPeriod();
+  const fy = period.financialYear;
+  const periodLabel = `${toLongFinancialYear(fy)} ${period.quarter}`;
+  const members = store.entities.filter(isPortfolioMember);
   const pulse = store.getPerformancePulse();
 
-  const qLower = query.toLowerCase();
+  const finOf = (e: PublicEntity) => store.getEntityFinancialSummary(e.id, fy, period.quarter);
+  const perfOf = (e: PublicEntity) => store.getEntityPerformanceSummary(e.id, fy, period.quarter);
+  const q = query.toLowerCase();
 
-  // Grounded Deterministic Intelligence Engine with deep public-sector domain logic
-  if (qLower.includes('attention') || qLower.includes('risk') || qLower.includes('intervention')) {
-    const criticalEntities = entities.filter(e => e.riskLevel === 'CRITICAL' || e.riskLevel === 'HIGH');
-    const entityNames = criticalEntities.map(e => `${e.name} (${e.shortCode})`);
+  // ---------------------------------------------------------------------------------------------
+  // A specific organisation was named
+  // ---------------------------------------------------------------------------------------------
+  const named = members.find(e =>
+    new RegExp(`\\b${escapeRegExp(e.shortCode)}\\b`, 'i').test(query) ||
+    q.includes(e.name.toLowerCase().replace(/\s*\(.*\)\s*$/, ''))
+  );
+  if (named) {
+    const fin = finOf(named);
+    const perf = perfOf(named);
+    const worst = perf.items.slice().sort((a, b) => a.percentageAchieved - b.percentageAchieved).slice(0, 3);
+    const overdue = store.reports.filter(r => r.entityId === named.id && r.submissionStatus === 'OVERDUE');
+    const lines: string[] = [
+      `**${label(named)} — ${periodLabel}**`,
+      `• **Risk:** ${named.riskLevel} (score ${named.riskScore}/100); compliance score ${named.overallComplianceScore}%.`,
+      `• **Budget:** ${formatZAR(fin.approvedAmount)} approved; ${formatZAR(fin.disbursedToDate)} disbursed; ${formatZAR(fin.ytdActual)} reported to date (${fin.utilisationPercent}% of budget, ${fin.absorptionRate}% of funds received).`,
+      `• **Year-end outlook:** at the current run-rate spend reaches ${formatZAR(fin.projectedYearEndSpend)} (${fin.projectedYearEndUtilisationPercent}% of budget).`,
+    ];
+    if (fin.missingQuarters.length > 0) lines.push(`• **Finance return outstanding:** ${fin.missingQuarters.join(', ')}. ${fin.statusExplanation}`);
+    if (overdue.length > 0) lines.push(`• **Statutory reports overdue:** ${overdue.map(r => r.quarter).join(', ')}.`);
+    if (named.trancheStatus === 'WITHHELD') lines.push(`• **Funding:** the next tranche is withheld (${named.statutoryDefaultReason || 'statutory non-submission'}).`);
+    lines.push(
+      `• **Performance:** ${perf.completedCount} of ${perf.totalKpis} indicators achieved to date; average achievement ${perf.overallAchievementRate}% of year-to-date targets.`
+    );
+    worst.forEach(i => lines.push(`   – ${i.name}: ${i.actualDisplay} vs ${i.targetDisplay} year-to-date (${i.percentageAchieved}%).`));
+
+    const actions: string[] = [];
+    if (overdue.length > 0 || fin.missingQuarters.length > 0) actions.push(`Obtain the outstanding ${[...overdue.map(r => r.quarter), ...fin.missingQuarters].filter((v, i, a) => a.indexOf(v) === i).join(', ')} return(s) from ${named.headOfEntity}.`);
+    if (fin.performanceFinanceSignal?.status === 'REQUIRES_REVIEW') actions.push('Review expenditure against delivery evidence before the next tranche is released.');
+    if (fin.isOverspent) actions.push('Issue a Section 38 inquiry into the overspend and require a recovery plan.');
+    if (fin.projectedYearEndUtilisationPercent > 105 && !fin.isOverspent) actions.push('Request a cash-flow recovery plan: projected year-end spend exceeds the approved budget.');
+    if (actions.length === 0) actions.push('No intervention indicated by the current data; continue routine monitoring.');
 
     return {
-      answer: `Based on current DSAC reporting intake for the 2025/26 financial year, **${criticalEntities.length} entities** require urgent management intervention:
+      answer: lines.join('\n'),
+      sourceEntities: [named.name],
+      groundedMetrics: [
+        { label: 'Budget Utilisation', value: `${fin.utilisationPercent}%` },
+        { label: 'Transfer Absorption', value: `${fin.absorptionRate}%` },
+        { label: 'Indicators Achieved', value: `${perf.completedCount} of ${perf.totalKpis}` },
+      ],
+      recommendedActions: actions,
+      responsibleAIDisclaimer: DISCLAIMER,
+    };
+  }
 
-1. **Boxing South Africa (BSA) — Risk Score: 91/100 (CRITICAL)**
-   - **Root Cause:** Sanctioned boxing tournament delivery is currently at only 40.0% of target (32 of 80 annual target), while 98.5% of transferred operational funding has been exhausted.
-   - **Statutory Non-Compliance:** Two statutory quarterly reports remain overdue under PFMA Section 38(1)(j).
+  // ---------------------------------------------------------------------------------------------
+  // Attention / risk / intervention
+  // ---------------------------------------------------------------------------------------------
+  if (/attention|risk|intervention|flag|priority|worst/.test(q)) {
+    const flagged = members.slice().sort((a, b) => b.riskScore - a.riskScore).filter(e => e.riskLevel === 'HIGH' || e.riskLevel === 'CRITICAL' || e.riskLevel === 'MEDIUM').slice(0, 5);
+    if (flagged.length === 0) {
+      return {
+        answer: `No institution is rated MEDIUM or above for ${periodLabel}.`,
+        sourceEntities: [],
+        groundedMetrics: [{ label: 'Entities Requiring Intervention', value: `0 of ${pulse.totalEntities}` }],
+        recommendedActions: ['Continue routine quarterly monitoring.'],
+        responsibleAIDisclaimer: DISCLAIMER,
+      };
+    }
+    const blocks = flagged.map((e, i) => {
+      const fin = finOf(e);
+      const perf = perfOf(e);
+      const worst = perf.items.slice().sort((a, b) => a.percentageAchieved - b.percentageAchieved)[0];
+      const overdue = store.reports.filter(r => r.entityId === e.id && r.submissionStatus === 'OVERDUE').length;
+      const facts: string[] = [];
+      if (overdue > 0) facts.push(`${overdue} statutory report${overdue === 1 ? '' : 's'} overdue`);
+      if (fin.missingQuarters.length > 0) facts.push(`${fin.missingQuarters.join(', ')} finance return outstanding`);
+      if (worst) facts.push(`weakest indicator "${worst.name}" at ${worst.percentageAchieved}% of its year-to-date target`);
+      facts.push(`${fin.absorptionRate}% of funds received spent`);
+      if (e.trancheStatus === 'WITHHELD') facts.push('next tranche withheld');
+      return `${i + 1}. **${label(e)} — ${e.riskLevel}, score ${e.riskScore}/100**\n   - ${facts.join('; ')}.`;
+    });
 
-2. **National Arts Council of South Africa (NAC) — Risk Score: 82/100 (HIGH)**
-   - **Root Cause:** Severe lag in grant disbursements to grassroots community artists (930 funded vs 1,350 expected trajectory). 
-   - **Financial Variance:** R104.2M expenditure claimed against a R115.6M transfer, demonstrating an 89.5% funding drawdown against only 51.7% service delivery achievement.
-   - **Status:** Q3 report is currently overdue by 3 days.
-
-3. **South African Heritage Resources Agency (SAHRA) — Risk Score: 58/100 (MEDIUM)**
-   - **Root Cause:** Under-performance on National Heritage Sites assessed (-15.5% variance). Q3 report flagged with CORRECTION_REQUIRED due to unverified Eastern Cape site verification logs.`,
-      sourceEntities: entityNames,
+    return {
+      answer: `Based on ${periodLabel} reporting, **${pulse.interventionCount} institution${pulse.interventionCount === 1 ? '' : 's'}** are rated HIGH or CRITICAL and ${flagged.length} are listed below by risk score:\n\n${blocks.join('\n\n')}`,
+      sourceEntities: flagged.map(label),
       groundedMetrics: [
         { label: 'Entities Requiring Intervention', value: `${pulse.interventionCount} of ${pulse.totalEntities}` },
-        { label: 'Total Overdue Statutory Reports', value: `${pulse.overdueReportsCount} reports` },
-        { label: 'Funding/Delivery Variance Peak', value: 'NAC: 89.5% spent vs 51.7% delivered' },
+        { label: 'Overdue Statutory Reports', value: `${pulse.overdueReportsCount}` },
+        { label: 'Finance Returns Outstanding', value: `${pulse.entitiesWithOutstandingReturns} entities` },
       ],
-      recommendedActions: [
-        'Convene immediate section 38 PFMA compliance review with the Accounting Authority of Boxing SA.',
-        'Withhold tranche Q4 transfer for NAC until audited grant disbursement schedules are tabled.',
-        'Monitor SAHRA Corrective Task #task-1 due in 14 days for Eastern Cape site verification.',
-      ],
-      responsibleAIDisclaimer: 'AI-Generated Assessment: Formulated strictly from current store data. Advisory only; all punitive or financial sanctions require formal departmental authorization by the Director-General.',
+      recommendedActions: flagged
+        .filter(e => e.riskLevel === 'CRITICAL' || e.riskLevel === 'HIGH')
+        .map(e => `Convene a compliance review with the Accounting Authority of ${e.shortCode}${e.trancheStatus === 'WITHHELD' ? ' before the withheld tranche is reconsidered' : ''}.`)
+        .concat(['Confirm outstanding returns are lodged before the next statutory deadline.']),
+      responsibleAIDisclaimer: DISCLAIMER,
     };
   }
 
-  if (qLower.includes('kpi') || qLower.includes('declining') || qLower.includes('target') || qLower.includes('trend')) {
-    const laggingKPIs = kpis.filter(k => k.status === 'AT_RISK' || k.status === 'MISSED');
+  // ---------------------------------------------------------------------------------------------
+  // Indicators / targets / trends
+  // ---------------------------------------------------------------------------------------------
+  if (/kpi|indicator|declin|target|trend|delivery|perform/.test(q)) {
+    const rows = members.flatMap(e =>
+      store.kpis
+        .filter(k => k.entityId === e.id)
+        .map(k => ({ e, k, item: calculateKpiItemProgress(k, fy, period.quarter), proj: projectKpiAnnualAttainment(k, period.quarter) }))
+    );
+    const lagging = rows
+      .filter(r => r.item.kpiStatus === 'AT_RISK' || r.item.kpiStatus === 'MISSED')
+      .sort((a, b) => a.item.percentageAchieved - b.item.percentageAchieved);
+    const top = lagging.slice(0, 5);
+    const body = top.length
+      ? top.map(r => `• **${r.item.name} (${r.e.shortCode})**: ${r.item.actualDisplay} vs ${r.item.targetDisplay} year-to-date (${r.item.percentageAchieved}%). At this pace the year ends at about ${r.proj.projected.toLocaleString()} against an annual target of ${r.proj.annualTarget.toLocaleString()} (${r.proj.percentage}%).`).join('\n')
+      : 'No indicator is currently behind target.';
 
     return {
-      answer: `Analysis of agreed performance indicators across all public entities reveals **${laggingKPIs.length} KPIs exhibiting significant trajectory delays**:
-
-• **Sanctioned Boxing Tournaments (Boxing SA)**: 
-  - Actual: 32 vs Expected Trajectory: 60 (Annual Target: 80)
-  - Gap: -28 tournaments (-46.7% trajectory deficit). Litigation costs and administration disputes cited in previous submissions.
-
-• **Grassroots Community Arts Practitioners Funded (NAC)**: 
-  - Actual: 930 vs Expected Trajectory: 1,350 (Annual Target: 1,800)
-  - Gap: -420 artists (-31.1% trajectory deficit). Grant portal processing delays and provincial committee backlogs have throttled disbursements.
-
-• **National Heritage Sites Assessed and Graded (SAHRA)**: 
-  - Actual: 38 vs Expected Trajectory: 45 (Annual Target: 60)
-  - Gap: -7 sites (-15.5% trajectory deficit). Weather events in Sarah Baartman district delayed field assessments; recovery plan in progress.`,
-      sourceEntities: laggingKPIs.map(k => k.entityName),
+      answer: `${pulse.kpisAtRisk + pulse.kpisMissed} of ${pulse.totalKpis} indicators are At Risk or Not Achieved for ${periodLabel}:\n\n${body}`,
+      sourceEntities: Array.from(new Set(top.map(r => r.e.name))),
       groundedMetrics: [
-        { label: 'Lagging Indicators', value: `${laggingKPIs.length} KPIs` },
-        { label: 'On-Track Indicators', value: `${kpis.filter(k => k.status === 'ON_TRACK').length} KPIs` },
-        { label: 'Highest Trajectory Deficit', value: 'Boxing SA (-46.7%)' },
+        { label: 'Achieved / On Track', value: `${pulse.kpisOnTrack} of ${pulse.totalKpis}` },
+        { label: 'At Risk', value: `${pulse.kpisAtRisk}` },
+        { label: 'Not Achieved', value: `${pulse.kpisMissed}` },
+        { label: 'Average Achievement (year-to-date)', value: `${pulse.averageKpiAchievement}%` },
       ],
-      recommendedActions: [
-        'Mandate fast-track adjudication panels for the National Arts Council to disburse pending Q3 grant allocations.',
-        'Authorize SAHRA to deploy freelance heritage inspectors across the Eastern Cape to meet the 60-site annual milestone.',
-      ],
-      responsibleAIDisclaimer: 'Calculated deterministically from actual versus expected target milestones submitted by accounting officers.',
+      recommendedActions: top.slice(0, 3).map(r => `Ask ${r.e.shortCode} for a corrective action plan on "${r.item.name}".`),
+      responsibleAIDisclaimer: DISCLAIMER,
     };
   }
 
-  if (qLower.includes('financial') || qLower.includes('budget') || qLower.includes('spending') || qLower.includes('variance')) {
+  // ---------------------------------------------------------------------------------------------
+  // Money
+  // ---------------------------------------------------------------------------------------------
+  if (/financ|budget|spend|spending|variance|money|fund|forecast|project|utilis|absor/.test(q)) {
+    const sums = members.map(e => ({ e, s: finOf(e) }));
+    const disconnect = sums.filter(x => x.s.performanceFinanceSignal?.status === 'REQUIRES_REVIEW');
+    const overProjected = sums.filter(x => !x.s.isOverspent && x.s.projectedYearEndUtilisationPercent > 105);
+    const idleCash = sums.slice().sort((a, b) => b.s.unspentDisbursed - a.s.unspentDisbursed).slice(0, 3);
+
+    const lines = [
+      `**Financial position — ${periodLabel}**`,
+      `• **Approved budget:** ${compact(pulse.totalAllocation)}; **disbursed:** ${compact(pulse.totalTransferred)} (${pulse.transferRate}% of approved); **still to disburse:** ${compact(pulse.remainingDisbursement)}.`,
+      `• **Reported expenditure:** ${compact(pulse.totalExpended)} — ${pulse.burnRate}% of the approved budget and ${pulse.expenditureRate}% of funds received. ${compact(pulse.totalVerifiedExpenditure)} has been verified by DSAC.`,
+      `• **Cash held by entities but unspent:** ${compact(pulse.unspentDisbursed)}.`,
+    ];
+    if (idleCash.length) lines.push(`   – Largest balances: ${idleCash.map(x => `${x.e.shortCode} ${compact(x.s.unspentDisbursed)}`).join(', ')}.`);
+    if (disconnect.length) {
+      lines.push(`• **Spend running ahead of delivery:** ${disconnect.map(x => `${x.e.shortCode} (spend ${x.s.utilisationPercent}% of budget, delivery ${x.s.targetAchievementRate ?? 0}% of targets)`).join('; ')}.`);
+    }
+    if (overProjected.length) {
+      lines.push(`• **Projected to exceed budget by year end (run-rate):** ${overProjected.map(x => `${x.e.shortCode} ${x.s.projectedYearEndUtilisationPercent}%`).join(', ')}.`);
+    }
+    if (pulse.entitiesWithOutstandingReturns > 0) lines.push(`• **${pulse.entitiesWithOutstandingReturns} entit${pulse.entitiesWithOutstandingReturns === 1 ? 'y has' : 'ies have'} a finance return outstanding**, so their spend is understated until lodged.`);
+
     return {
-      answer: `**Financial Allocation vs Service Delivery Variance Report:**
-
-• **Total DSAC Parliamentary Grant Allocation**: R ${(pulse.totalAllocation / 1_000_000).toFixed(1)} Million
-• **Transferred to Date (Tranches 1-3)**: R ${(pulse.totalTransferred / 1_000_000).toFixed(1)} Million (75.0% of annual budget)
-• **Reported Entity Expenditure**: R ${(pulse.totalExpended / 1_000_000).toFixed(1)} Million (${pulse.expenditureRate}% of transferred tranches)
-
-**High Variance Anomaly Detected:**
-- **National Arts Council (NAC)**: Expenditure has reached **89.5%** of transferred funds, while target achievement sits at only **51.7%**. This indicates high administrative overhead absorption relative to frontline community artist grant disbursements.
-- **National Film and Video Foundation (NFVF)**: Balanced ratio. 89.7% expenditure aligned with **82.0%** target delivery and over 1,240 youth jobs verified in production slates.`,
-      sourceEntities: ['National Arts Council of South Africa (NAC)', 'National Film and Video Foundation (NFVF)'],
+      answer: lines.join('\n'),
+      sourceEntities: Array.from(new Set([...disconnect, ...overProjected, ...idleCash].map(x => x.e.name))),
       groundedMetrics: [
-        { label: 'Total Budget Monitored', value: `R ${(pulse.totalAllocation / 1_000_000).toFixed(1)}M` },
-        { label: 'Average Expenditure Rate', value: `${pulse.expenditureRate}%` },
-        { label: 'Disproportionate Ratio', value: 'NAC (89.5% spend / 51.7% target)' },
+        { label: 'Total Budget Monitored', value: compact(pulse.totalAllocation) },
+        { label: 'Budget Utilisation', value: `${pulse.burnRate}%` },
+        { label: 'Transfer Absorption', value: `${pulse.expenditureRate}%` },
+        { label: 'Unspent Disbursed Cash', value: compact(pulse.unspentDisbursed) },
       ],
       recommendedActions: [
-        'Perform targeted internal audit sample on NAC operational cost allocations.',
-        'Require quarterly reconciliation of grant commitment bank accounts versus actual EFT releases.',
+        ...disconnect.slice(0, 2).map(x => `Review ${x.e.shortCode}'s expenditure against delivery evidence before further tranches.`),
+        ...overProjected.slice(0, 2).map(x => `Ask ${x.e.shortCode} for a recovery plan: projected year-end spend is ${x.s.projectedYearEndUtilisationPercent}% of budget.`),
+        'Require quarterly reconciliation of grant commitments against actual payments.',
       ],
-      responsibleAIDisclaimer: 'Treasury regulation compliant synthesis. Language conforms to PFMA terminology standards.',
+      responsibleAIDisclaimer: DISCLAIMER,
     };
   }
 
-  // Default intelligent overview
+  // ---------------------------------------------------------------------------------------------
+  // Default overview
+  // ---------------------------------------------------------------------------------------------
+  const watch = members.slice().sort((a, b) => b.riskScore - a.riskScore).filter(e => e.riskLevel !== 'LOW').slice(0, 3);
   return {
-    answer: `**GovTrack SA Intelligence Briefing for DSAC Executive Leadership:**
-
-• **Overview:** DSAC currently oversees **${pulse.totalEntities} funded institutions** (26 Public Entities and 6 NPOs).
-• **Performance Pulse Status:**
-  - **${pulse.onTrackCount} Entities On Track (Green)**: High target achievement and clean reporting (NFVF, PanSALB, Playhouse Company, Ditsong Museums).
-  - **${pulse.monitoringCount} Entities Under Monitoring (Amber)**: SAHRA and BASA, with minor quarterly variances or upcoming statutory deadlines.
-  - **${pulse.interventionCount} Entities Requiring Intervention (Red)**: NAC and Boxing SA, showing critical target deficits and overdue returns.
-• **Employment Impact:** ${pulse.totalYouthJobs.toLocaleString()} youth jobs and ${pulse.totalCreativePractitioners.toLocaleString()} cultural practitioners supported across verified portfolios.
-• **Active Governance Tasks:** ${tasks.filter(t => t.status === 'OPEN').length} open corrective directives currently monitored by DSAC Administrators.`,
-    sourceEntities: entities.map(e => e.name),
+    answer: [
+      `**GovTrack SA briefing — ${periodLabel}**`,
+      `• **Portfolio:** ${pulse.totalEntities} funded institutions (${pulse.publicEntitiesCount} Public Entities and ${pulse.nposCount} NPOs).`,
+      `• **Risk:** ${pulse.onTrackCount} low risk, ${pulse.monitoringCount} under monitoring, ${pulse.interventionCount} requiring intervention.`,
+      `• **Reports this quarter:** ${pulse.currentQuarterSubmittedCount} of ${pulse.totalEntities} lodged; ${pulse.currentQuarterOverdueCount} overdue and ${pulse.currentQuarterReturnedCount} returned for correction.`,
+      `• **Money:** ${compact(pulse.totalExpended)} reported against ${compact(pulse.totalTransferred)} disbursed (${pulse.expenditureRate}% absorption) and ${compact(pulse.totalAllocation)} approved (${pulse.burnRate}% utilisation).`,
+      `• **Delivery:** ${pulse.kpisOnTrack} of ${pulse.totalKpis} indicators achieved or on track; average achievement ${pulse.averageKpiAchievement}% of year-to-date targets.`,
+      `• **Employment impact:** ${pulse.totalYouthJobs.toLocaleString()} youth jobs and ${pulse.totalCreativePractitioners.toLocaleString()} cultural practitioners supported.`,
+      watch.length ? `• **Watch:** ${watch.map(e => `${e.shortCode} (${e.riskLevel})`).join(', ')}.` : '• **Watch:** no institution rated MEDIUM or above.',
+    ].join('\n'),
+    sourceEntities: watch.map(e => e.name),
     groundedMetrics: [
       { label: 'Compliance Health Average', value: `${pulse.averageCompliance}%` },
-      { label: 'Verified Youth Jobs Created', value: `${pulse.totalYouthJobs.toLocaleString()}` },
+      { label: 'Verified Youth Jobs Created', value: pulse.totalYouthJobs.toLocaleString() },
       { label: 'Entities On Track', value: `${pulse.onTrackCount} of ${pulse.totalEntities}` },
     ],
     recommendedActions: [
-      'Prioritize resolution of overdue Q3 reports for NAC and Boxing SA.',
-      'Review pending resubmission from SAHRA on heritage site grading evidence.',
-      'Maintain quarterly funding release schedules for compliant entities (NFVF, PanSALB).',
+      ...(pulse.currentQuarterOverdueCount > 0 ? [`Chase the ${pulse.currentQuarterOverdueCount} overdue ${period.quarter} report(s).`] : []),
+      ...(pulse.currentQuarterReturnedCount > 0 ? [`Follow up the ${pulse.currentQuarterReturnedCount} report(s) returned for correction.`] : []),
+      ...watch.map(e => `Review the risk profile of ${e.shortCode}.`),
     ],
-    responsibleAIDisclaimer: 'Grounded in verifiable DSAC performance records. Prepared for executive oversight purposes.',
+    responsibleAIDisclaimer: DISCLAIMER,
   };
 }

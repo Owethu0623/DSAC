@@ -17,6 +17,35 @@ export type QuarterlyFinancialStatus =
 
 export type FinancialQuarter = 'Q1' | 'Q2' | 'Q3' | 'Q4';
 
+/**
+ * Returns whose figures count as "reported expenditure" on DSAC dashboards.
+ * DRAFT (not yet lodged) and CORRECTION_REQUIRED (sent back to the entity) are excluded so a
+ * disputed or unfinished return can never inflate portfolio totals.
+ */
+export const REPORTED_RETURN_STATUSES: QuarterlyFinancialStatus[] = ['SUBMITTED', 'UNDER_REVIEW', 'APPROVED'];
+/** Returns DSAC has accepted. Reported-but-not-accepted amounts are shown as "awaiting verification". */
+export const VERIFIED_RETURN_STATUSES: QuarterlyFinancialStatus[] = ['APPROVED'];
+
+export type DisbursementStatus = 'RELEASED' | 'SCHEDULED' | 'WITHHELD';
+
+/**
+ * One transfer (tranche) from DSAC to an entity. "Amount Disbursed" is ALWAYS the sum of RELEASED records,
+ * never a free-standing number, so it can change by quarter and be audited.
+ */
+export interface DisbursementRecord {
+  id: string;
+  entityId: string;
+  financialYear: string; // canonical "2025/26"
+  tranche: FinancialQuarter; // tranche n is scheduled with quarter n
+  amountZAR: number;
+  status: DisbursementStatus;
+  scheduledDate?: string;
+  releasedAt?: string;
+  releasedByName?: string;
+  reference?: string;
+  note?: string;
+}
+
 export interface QuarterlyTimelinePoint {
   quarter: FinancialQuarter;
   quarterName?: string;
@@ -27,6 +56,9 @@ export interface QuarterlyTimelinePoint {
   utilisationPercent: number;
   isSubmitted: boolean;
   status?: string;
+  /** Tranche released for this quarter (0 if none). */
+  disbursedInQuarter?: number;
+  cumulativeDisbursed?: number;
 }
 
 export interface ExpenseCategory {
@@ -82,6 +114,10 @@ export interface QuarterlyFinancialSubmission {
   accountingOfficerName?: string;
   createdAt: string;
   updatedAt: string;
+  /** Incremented every time the entity re-lodges this quarter (resubmission after correction). */
+  revision?: number;
+  /** Prior lodged totals, kept so a resubmission never silently overwrites what was originally reported. */
+  revisionHistory?: { at: string; totalQuarterlyActual: number; status: QuarterlyFinancialStatus }[];
 }
 
 export interface SpendingTrajectory {
@@ -118,6 +154,8 @@ export interface EntityBudgetProfile {
 export interface CategoryQuarterlyPerformance {
   categoryId: string;
   categoryName: string;
+  /** Spend reported against a line that has no approved budget (irregular / unauthorised until proven otherwise). */
+  isUnbudgeted?: boolean;
   annualBudget: number;
   q1Actual: number;
   q2Actual: number;
@@ -172,9 +210,35 @@ export interface EntityFinancialSummary {
   overspendAmount: number;
   
   // Trajectory analysis
-  financialStatus: 'ON_TRACK' | 'REQUIRES_REVIEW' | 'OVERSPENDING' | 'UNDER_UTILISING' | 'MISSING_SUBMISSION';
+  financialStatus: FinancialStatus;
   statusExplanation: string;
-  
+
+  // Disbursement & absorption. Utilisation above is Budget Utilisation (YTD / Approved).
+  // Absorption is the separate, explicitly named metric YTD / Disbursed.
+  hasBudgetProfile: boolean;
+  disbursedToDate: number;
+  disbursementRate: number; // disbursed / approved, %
+  absorptionRate: number; // YTD actual / disbursed, %
+  undisbursedBalance: number; // approved - disbursed
+  unspentDisbursed: number; // disbursed - YTD actual (never negative)
+  spentAheadOfDisbursement: boolean; // YTD actual exceeds cash received
+
+  // Verification: reported = lodged returns; verified = accepted by DSAC
+  verifiedYtdActual: number;
+  unverifiedYtdActual: number;
+  dueQuarters: FinancialQuarter[];
+  missingQuarters: FinancialQuarter[];
+  returnedQuarters: FinancialQuarter[];
+
+  // Forecast (run-rate): where year-end spend lands if the current pace continues
+  projectedYearEndSpend: number;
+  projectedYearEndUtilisationPercent: number;
+
+  // Integrity flags
+  lineBudgetTotal: number; // sum of expense-line budgets
+  lineBudgetVariance: number; // approved - line budget total (must be 0)
+  linesReconcile: boolean;
+
   // Performance and Finance connection
   targetAchievementRate?: number; // e.g. 48%
   performanceFinanceSignal?: {
@@ -187,78 +251,26 @@ export interface EntityFinancialSummary {
 
   // Category breakdown
   categories: CategoryQuarterlyPerformance[];
-
-  // Authoritative Core Financial Totals & Concepts
-  budgetAllocated: number; // Approved Vote 40 Parliamentary allocation
-  totalDisbursedToDate: number; // Sum of authorized released tranches
-  totalTransferredToDate: number; // Sum of confirmed EFT transfers deposited to entity account
-  totalCommittedToDate: number; // Sum of contracted commitments and active purchase orders
-  totalSpentToDate: number; // Authoritative actual expenditure to date (synonymous with ytdActual)
-  unspentDisbursedBalance: number; // Transferred - Spent
-  undisbursedAllocation: number; // Allocated - Transferred
-  disbursementRate: number; // (Disbursed / Allocated) * 100
-  transferRate: number; // (Transferred / Allocated) * 100
-  absorptionRate: number; // (Spent / Transferred) * 100
-  disbursementVariance: number; // Allocated - Disbursed
-  transferVariance: number; // Disbursed - Transferred
-  commitmentVsSpendingDifference: number; // Committed - Spent
-  budgetVsSpendingDifference: number; // Allocated - Spent
-
-  // Underlying traceable transactions
-  transactions: FinancialTransaction[];
 }
 
-export type FinancialTransactionType = 
-  | 'ALLOCATION'
-  | 'DISBURSEMENT'
-  | 'TRANSFER'
-  | 'COMMITMENT'
-  | 'EXPENDITURE';
-
-export interface FinancialTransaction {
-  id: string;
-  entityId: string;
-  entityName: string;
-  financialYear: string; // e.g. "2025/26"
-  quarter: FinancialQuarter; // 'Q1' | 'Q2' | 'Q3' | 'Q4'
-  type: FinancialTransactionType;
-  amount: number; // Full precision unrounded number, e.g. 75500.125
-  transactionDate: string; // ISO date or "YYYY-MM-DD"
-  referenceNumber: string; // e.g. "BAS-DISB-4091", "EFT-TR-8812", "PO-2025-0012", "GL-EXP-5591"
-  description: string;
-  categoryId?: string;
-  categoryName?: string;
-  status: 'POSTED' | 'VERIFIED' | 'RECONCILED' | 'PENDING';
-  supportingDocumentId?: string;
-  supportingDocumentName?: string;
-  verifiedBy?: string;
-  createdAt: string;
-  updatedAt?: string;
-}
+export type FinancialStatus =
+  | 'ON_TRACK'
+  | 'REQUIRES_REVIEW'
+  | 'OVERSPENDING'
+  | 'UNDER_UTILISING'
+  | 'MISSING_SUBMISSION'
+  | 'NOT_DUE';
 
 export interface DepartmentFinancialKPIs {
+  totalDisbursed: number;
+  totalVerifiedActual: number;
   totalRequested: number;
   totalApproved: number;
-  totalBudgetAllocated: number;
-  totalDisbursedToDate: number;
-  totalTransferredToDate: number;
-  totalCommittedToDate: number;
-  totalSpentToDate: number;
   totalActualExpenditure: number;
   totalActualYTD: number;
   totalRemaining: number;
-  totalRemainingBudget: number;
-  unspentDisbursedBalance: number;
-  undisbursedAllocation: number;
   overallUtilisationPercent: number;
   departmentUtilisationPercent: number;
-  disbursementRate: number;
-  transferRate: number;
-  expenditureRate: number;
-  disbursementVariance: number;
-  transferVariance: number;
-  commitmentVsSpendingDifference: number;
-  budgetVsSpendingDifference: number;
   targetTrajectoryPercent: number;
   entitiesOverspendingCount: number;
   overspendingEntitiesCount: number;

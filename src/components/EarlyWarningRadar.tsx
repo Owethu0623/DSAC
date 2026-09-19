@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
   AlertOctagon, 
   AlertTriangle, 
@@ -29,6 +29,13 @@ export const EarlyWarningRadar: React.FC<EarlyWarningRadarProps> = ({
 }) => {
   const [selectedRiskFilter, setSelectedRiskFilter] = useState<string>('ALL');
   const [activeExplainAlert, setActiveExplainAlert] = useState<RiskAlert | null>(null);
+
+  // The 30-day / 15-day / hourly countdown must actually count down: re-render once a minute.
+  const [, setClock] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setClock(c => c + 1), 60_000);
+    return () => clearInterval(id);
+  }, []);
 
   const riskAlerts = store.riskAlerts;
   const deadlines = store.deadlines;

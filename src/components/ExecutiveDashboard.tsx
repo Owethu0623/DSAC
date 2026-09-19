@@ -19,7 +19,6 @@ import {
   Layers
 } from 'lucide-react';
 import { store } from '../services/store';
-import { formatCompactZAR } from '../services/calculationEngine';
 import { PublicEntity, RiskLevel } from '../types';
 
 interface ExecutiveDashboardProps {
@@ -175,7 +174,7 @@ export const ExecutiveDashboard: React.FC<ExecutiveDashboardProps> = ({
           <div>
             <div className="text-xs text-slate-400">Parliamentary Allocation</div>
             <div className="text-2xl font-bold font-mono text-white mt-1">
-              {formatCompactZAR(pulse.totalAllocation)}
+              R {(pulse.totalAllocation / 1_000_000).toFixed(1)}M
             </div>
             <div className="text-[11px] text-slate-500 mt-1">Statutory baseline across 32 entities</div>
           </div>
@@ -183,7 +182,7 @@ export const ExecutiveDashboard: React.FC<ExecutiveDashboardProps> = ({
           <div>
             <div className="text-xs text-slate-400">Transferred Funds to Date</div>
             <div className="text-2xl font-bold font-mono text-emerald-400 mt-1">
-              {formatCompactZAR(pulse.totalTransferred)}
+              R {(pulse.totalTransferred / 1_000_000).toFixed(1)}M
             </div>
             <div className="text-[11px] text-slate-500 mt-1">75.0% of annual budget released</div>
           </div>
@@ -191,9 +190,9 @@ export const ExecutiveDashboard: React.FC<ExecutiveDashboardProps> = ({
           <div>
             <div className="text-xs text-slate-400">Reported Entity Expenditure</div>
             <div className="text-2xl font-bold font-mono text-blue-400 mt-1">
-              {formatCompactZAR(pulse.totalExpended)}
+              R {(pulse.totalExpended / 1_000_000).toFixed(1)}M
             </div>
-            <div className="text-[11px] text-slate-500 mt-1">{pulse.expenditureRate.toFixed(1)}% of transferred funds utilised</div>
+            <div className="text-[11px] text-slate-500 mt-1">{pulse.expenditureRate}% of transferred funds utilised</div>
           </div>
 
           <div className="bg-slate-800/80 p-3 rounded-lg border border-slate-700">

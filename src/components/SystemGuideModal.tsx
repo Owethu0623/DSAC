@@ -383,7 +383,7 @@ export const SystemGuideModal: React.FC<SystemGuideModalProps> = ({
                     plain: 'A formal legal instruction issued by the Department ordering an entity to immediately fix an audit failure, breach, or performance delay.'
                   },
                   {
-                    term: 'Vote 40',
+                    term: 'Vote 37',
                     plain: 'The official code number for the Department of Sport, Arts and Culture in the South African National Parliament budget.'
                   },
                   {
@@ -437,7 +437,7 @@ export const SystemGuideModal: React.FC<SystemGuideModalProps> = ({
                   },
                   {
                     label: 'I want to see how much money was given to each entity and spent',
-                    desc: 'Vote 40 budget breakdown, transfers to date, and remaining funds.',
+                    desc: 'Vote 37 budget breakdown, transfers to date, and remaining funds.',
                     sectionId: 'financials',
                     icon: Coins
                   },

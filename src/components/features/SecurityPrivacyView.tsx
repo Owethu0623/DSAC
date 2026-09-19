@@ -49,7 +49,7 @@ export const SecurityPrivacyView: React.FC = () => {
             </div>
           </div>
           <p className="text-xs text-slate-500 mt-1 max-w-3xl">
-            Protection of Personal Information Act (POPIA No. 4 of 2013), Role-Based Access Control (RBAC), and immutable PFMA audit logging for public entities and NPOs.
+            Protection of Personal Information Act (POPIA No. 4 of 2013), Role-Based Access Control (RBAC), and PFMA audit logging for public entities and NPOs. Each panel states what this build implements and what a production deployment must provide.
           </p>
         </div>
 
@@ -86,7 +86,7 @@ export const SecurityPrivacyView: React.FC = () => {
             }`}
           >
             <History className="w-3.5 h-3.5 text-amber-600" />
-            <span>Immutable Audit Trail</span>
+            <span>Audit Trail</span>
           </button>
         </div>
       </div>
@@ -103,9 +103,9 @@ export const SecurityPrivacyView: React.FC = () => {
                   <CheckCircle2 className="w-4 h-4" />
                 </span>
               </div>
-              <div className="text-lg font-black text-slate-900 mt-2">Certified Compliant</div>
+              <div className="text-lg font-black text-slate-900 mt-2">Design Target</div>
               <p className="text-[11px] text-slate-600 mt-1">
-                8 lawful conditions of processing met: Purpose specification, open notice &amp; security safeguards.
+                The platform is designed around the 8 conditions for lawful processing. It has not been formally assessed or certified; that requires a POPIA assessment of the production deployment.
               </p>
             </div>
 
@@ -116,9 +116,9 @@ export const SecurityPrivacyView: React.FC = () => {
                   <Lock className="w-4 h-4" />
                 </span>
               </div>
-              <div className="text-lg font-black text-slate-900 mt-2">AES-256 &amp; TLS 1.3</div>
+              <div className="text-lg font-black text-slate-900 mt-2">Production requirement</div>
               <p className="text-[11px] text-slate-600 mt-1">
-                All statutory files, financial spreadsheets, and identity records encrypted in transit and at rest.
+                Production must encrypt data in transit (TLS 1.2+) and at rest. This demonstration build runs entirely in the browser and keeps its data unencrypted in local browser storage, so it must not hold real personal or financial records.
               </p>
             </div>
 
@@ -129,9 +129,9 @@ export const SecurityPrivacyView: React.FC = () => {
                   <Server className="w-4 h-4" />
                 </span>
               </div>
-              <div className="text-lg font-black text-slate-900 mt-2">South Africa Hosted</div>
+              <div className="text-lg font-black text-slate-900 mt-2">Deployment requirement</div>
               <p className="text-[11px] text-slate-600 mt-1">
-                Zero international exfiltration. Data domiciled inside South African government data centers (SITA/GovCloud).
+                Production hosting must be inside South Africa (an in-country government or cloud region). This demonstration build has no server and stores nothing outside the user's own browser.
               </p>
             </div>
 
@@ -142,9 +142,9 @@ export const SecurityPrivacyView: React.FC = () => {
                   <FileLock2 className="w-4 h-4" />
                 </span>
               </div>
-              <div className="text-lg font-black text-slate-900 mt-2">SHA-256 Hash Ledgers</div>
+              <div className="text-lg font-black text-slate-900 mt-2">SHA-256 Document Hashes</div>
               <p className="text-[11px] text-slate-600 mt-1">
-                Every document upload receives a verifiable cryptographic hash matching AGSA audit verification standards.
+                Implemented: every document upload receives a SHA-256 hash that can be re-computed to prove the file has not changed.
               </p>
             </div>
           </div>
@@ -183,7 +183,7 @@ export const SecurityPrivacyView: React.FC = () => {
                   <span>Purpose Specification</span>
                 </div>
                 <p className="text-slate-600 leading-relaxed">
-                  Data collected under Vote 40 is explicitly designated for statutory performance evaluation and parliamentary accountability. Commercial data mining or third-party sharing is strictly prohibited.
+                  Data collected under Vote 37 is explicitly designated for statutory performance evaluation and parliamentary accountability. Commercial data mining or third-party sharing is strictly prohibited.
                 </p>
               </div>
 
@@ -267,16 +267,16 @@ export const SecurityPrivacyView: React.FC = () => {
         </div>
       )}
 
-      {/* TAB 3: IMMUTABLE AUDIT TRAIL */}
+      {/* TAB 3: AUDIT TRAIL */}
       {activeTab === 'audit' && (
         <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
             <div>
               <h2 className="text-base font-black text-slate-900">
-                Statutory Immutable PFMA Audit Trail
+                Statutory PFMA Audit Trail
               </h2>
               <p className="text-xs text-slate-500">
-                Chronological, tamper-evident activity ledger required for Section 38 governance compliance.
+                Chronological activity ledger for Section 38 governance. In this build it is a browser-local list (most recent 100 entries) and can be altered by the person using the browser; production must write to an append-only, server-side store.
               </p>
             </div>
 

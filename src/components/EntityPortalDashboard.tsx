@@ -45,16 +45,25 @@ import {
   LogOut,
   Landmark,
   Trash2,
-  Paperclip
+  Paperclip,
+  Eye
 } from 'lucide-react';
 import { store } from '../services/store';
-import { FinancialQuarter } from '../types';
+import { EntityDocument, FinancialQuarter } from '../types';
 import { normalizeFinancialYear, normalizeQuarter } from '../services/calculationEngine';
+import { kpiCumulativeThrough } from '../services/kpiProgress';
+import { returnTotal } from '../services/financialService';
+import {
+  financialYearStart,
+  getCurrentReportingPeriod,
+  isFinancialYearClosed,
+  sameFinancialYear,
+  toLongFinancialYear
+} from '../services/reportingPeriod';
 import { UbuntuArtsLogo } from './UbuntuArtsLogo';
 import { downloadStatutoryDocument } from '../services/downloadHelper';
 import { DocumentVerificationDossier } from './DocumentVerificationDossier';
 import { EntityFinancialView } from './features/EntityFinancialView';
-import { EntityVisualAnalytics } from './features/EntityVisualAnalytics';
 import { KpiProgressCard } from './shared/KpiProgressCard';
 import { CaptureKpiActualModal } from './shared/CaptureKpiActualModal';
 import { SupportRequestModal } from './shared/SupportRequestModal';
@@ -82,8 +91,16 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
   }, []);
 
   const [activeSidebar, setActiveSidebar] = useState<string>('overview');
-  const [selectedYear, setSelectedYear] = useState<string>('2025/26 Financial Year');
-  const [selectedQuarter, setSelectedQuarter] = useState<FinancialQuarter | 'FULL_YEAR'>('Q3');
+  const reportingPeriod = getCurrentReportingPeriod();
+  const reportingFyLong = toLongFinancialYear(reportingPeriod.financialYear);
+  const [selectedYear, setSelectedYear] = useState<string>(`${reportingPeriod.financialYear} Financial Year`);
+  const [selectedQuarter, setSelectedQuarter] = useState<FinancialQuarter | 'FULL_YEAR'>(reportingPeriod.quarter);
+
+  // Financial years offered in the selectors: the current year and the two closed years before it.
+  const portalYearOptions = [0, 1, 2].map(i => {
+    const y = financialYearStart(reportingPeriod.financialYear) - i;
+    return `${y}/${String((y + 1) % 100).padStart(2, '0')} Financial Year`;
+  });
   const [showNotifications, setShowNotifications] = useState<boolean>(false);
   const [showProfileMenu, setShowProfileMenu] = useState<boolean>(false);
 
@@ -95,15 +112,20 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
   const [showSupportModal, setShowSupportModal] = useState<boolean>(false);
 
   // Resolve current entity from store
+  // An entity officer is locked to their own organisation: the portal cannot be pointed at another entity's data.
+  // (DSAC officials keep the full switcher so they can preview any entity's portal.)
+  const lockedEntityId = store.currentUser?.role === 'ENTITY_OFFICER' ? store.currentUser.entityId : undefined;
   const [selectedEntityId, setSelectedEntityId] = useState<string>(() => {
-    return entityId || store.currentUser?.entityId || 'ent-sahra';
+    return lockedEntityId || entityId || store.currentUser?.entityId || 'ent-sahra';
   });
 
   useEffect(() => {
-    if (entityId) {
+    if (lockedEntityId) {
+      setSelectedEntityId(lockedEntityId);
+    } else if (entityId) {
       setSelectedEntityId(entityId);
     }
-  }, [entityId]);
+  }, [entityId, lockedEntityId]);
 
   const entity = store.entities.find(e => e.id === selectedEntityId) || store.entities.find(e => e.id === 'ent-sahra') || store.entities[0];
   const entityKPIs = store.kpis.filter(k => k.entityId === entity.id);
@@ -112,26 +134,25 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
 
   // Performance Return Ingestion Stepper State (Entity Side)
   const [stepperStep, setStepperStep] = useState<1 | 2>(1);
-  const [reportingQuarter, setReportingQuarter] = useState<string>('Q3 (2025/2026 Financial Year)');
-  const [spentThisQuarter, setSpentThisQuarter] = useState<number>(entity.shortCode === 'SAHRA' ? 24800000 : 1200000);
+  const [reportingQuarter, setReportingQuarter] = useState<string>(`${reportingPeriod.quarter} (${reportingFyLong} Financial Year)`);
+  // Starts from what the entity has actually lodged for the quarter (its finance return), never an assumed figure.
+  const lodgedSpendFor = (q: FinancialQuarter): number => {
+    const ret = store.getQuarterlyFinancialSubmissionsForEntity(entity.id, reportingPeriod.financialYear).find(r => r.quarter === q);
+    return ret ? returnTotal(ret) : 0;
+  };
+  const [spentThisQuarter, setSpentThisQuarter] = useState<number>(() => lodgedSpendFor(reportingPeriod.quarter));
   const [stepperKpiEntries, setStepperKpiEntries] = useState<Record<string, { actual: number; varianceReason: string; correctiveAction: string }>>({});
   const [stepperPoeDocId, setStepperPoeDocId] = useState<string>('');
-  const [stepperAffirmed, setStepperAffirmed] = useState<boolean>(true);
+  const [stepperAffirmed, setStepperAffirmed] = useState<boolean>(false);
   const [stepperSuccessMessage, setStepperSuccessMessage] = useState<string | null>(null);
 
   // Sync spentThisQuarter and KPI entries whenever entity changes
   useEffect(() => {
-    setSpentThisQuarter(entity.shortCode === 'SAHRA' ? 24800000 : 1200000);
+    setSpentThisQuarter(lodgedSpendFor(reportingPeriod.quarter));
     const initialEntries: Record<string, { actual: number; varianceReason: string; correctiveAction: string }> = {};
     entityKPIs.forEach(k => {
-      const defaultActual = entity.shortCode === 'SAHRA' && k.name.includes('Sites') ? 38 :
-                            entity.shortCode === 'SAHRA' && k.name.includes('Workshops') ? 33 :
-                            k.currentValue;
-      initialEntries[k.id] = {
-        actual: defaultActual,
-        varianceReason: defaultActual < k.expectedValue ? 'Reason for delay or over-achievement' : '',
-        correctiveAction: defaultActual < k.expectedValue ? 'Corrective steps planned for next quarter' : '',
-      };
+      // Starts from the year-to-date result already on record (nothing is assumed for any entity).
+      initialEntries[k.id] = { actual: kpiCumulativeThrough(k, reportingPeriod.quarter).actual, varianceReason: '', correctiveAction: '' };
     });
     setStepperKpiEntries(initialEntries);
   }, [entity.id]);
@@ -148,27 +169,53 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
 
   const handleSubmitStepper = (e: React.FormEvent) => {
     e.preventDefault();
-    const updatedItems = entityKPIs.map(kpi => {
-      const entry = stepperKpiEntries[kpi.id] || { actual: kpi.currentValue, varianceReason: '', correctiveAction: '' };
-      const target = kpi.expectedValue;
-      const actual = Number(entry.actual) || 0;
-      const variance = target > 0 ? Math.round(((actual - target) / target) * 1000) / 10 : 0;
+    if (!stepperAffirmed) return;
+
+    const quarterCode = (reportingQuarter.includes('Q3') ? 'Q3' : reportingQuarter.includes('Q2') ? 'Q2' : reportingQuarter.includes('Q1') ? 'Q1' : 'Q4') as FinancialQuarter;
+    const quarterPosition = ['Q1', 'Q2', 'Q3', 'Q4'].indexOf(quarterCode);
+
+    // A result behind its target needs a genuine reason, not a canned sentence.
+    const missingReason = entityKPIs.filter(kpi => {
+      const entry = stepperKpiEntries[kpi.id];
+      return !!entry && (Number(entry.actual) || 0) < kpiCumulativeThrough(kpi, quarterCode).target && !entry.varianceReason.trim();
+    });
+    if (missingReason.length > 0) {
+      alert(`Please give a reason for the variance on: ${missingReason.map(k => k.name).join('; ')}`);
+      return;
+    }
+
+    // Record every result through the single KPI path. The form collects the CUMULATIVE year-to-date result; the
+    // store keeps each quarter's own result and derives the cumulative itself. (This form used to build report
+    // items only and never updated the KPIs the dashboards read.)
+    entityKPIs.forEach(kpi => {
+      const entry = stepperKpiEntries[kpi.id];
+      if (!entry) return;
+      const cumulative = Number(entry.actual);
+      if (!Number.isFinite(cumulative) || cumulative < 0) return;
+      const earlier = [kpi.q1Actual, kpi.q2Actual, kpi.q3Actual, kpi.q4Actual]
+        .slice(0, quarterPosition)
+        .reduce<number>((sum, v) => sum + (v ?? 0), 0);
+      store.updateKPIValue(kpi.id, Math.max(0, cumulative - earlier), entry.varianceReason || undefined, quarterCode, entry.correctiveAction || undefined);
+    });
+
+    const updatedItems = store.kpis.filter(k => k.entityId === entity.id).map(kpi => {
+      const cumulative = kpiCumulativeThrough(kpi, quarterCode);
+      const entry = stepperKpiEntries[kpi.id];
       return {
         id: `item-${kpi.id}-${Date.now()}`,
         kpiId: kpi.id,
         kpiName: kpi.name,
-        targetToDate: target,
-        actualAchieved: actual,
+        targetToDate: cumulative.target,
+        actualAchieved: cumulative.actual,
         unit: kpi.unitOfMeasure,
-        status: (actual >= target ? 'ON_TRACK' : actual >= target * 0.8 ? 'AT_RISK' : 'MISSED') as any,
-        variancePercentage: variance,
-        varianceReason: entry.varianceReason || 'Documented in Portfolio of Evidence.',
-        correctiveAction: entry.correctiveAction || 'Corrective steps planned for next quarter.',
+        status: kpi.status,
+        variancePercentage: cumulative.target > 0 ? Math.round(((cumulative.actual - cumulative.target) / cumulative.target) * 1000) / 10 : 0,
+        varianceReason: entry?.varianceReason || undefined,
+        correctiveAction: entry?.correctiveAction || undefined,
       };
     });
 
-    const quarterCode = (reportingQuarter.includes('Q3') ? 'Q3' : reportingQuarter.includes('Q2') ? 'Q2' : reportingQuarter.includes('Q1') ? 'Q1' : 'Q4') as any;
-    const existingReport = entityReports.find(r => r.quarter === quarterCode);
+    const existingReport = entityReports.find(r => r.quarter === quarterCode && sameFinancialYear(r.financialYear, reportingPeriod.financialYear));
 
     if (existingReport) {
       store.submitReport(existingReport.id, updatedItems, spentThisQuarter);
@@ -176,10 +223,11 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
       store.submitQuarterlyReport({
         entityId: entity.id,
         quarter: quarterCode,
-        financialYear: '2025/2026',
+        financialYear: reportingPeriod.financialYear,
         expenditureClaimedZAR: spentThisQuarter,
-        declarationNotes: `Q3 statutory performance return submitted with verified figures and Section 38(1)(j) sign-off.`,
+        declarationNotes: `${quarterCode} statutory performance return submitted with verified figures and Section 38(1)(j) sign-off.`,
         poeDocId: stepperPoeDocId || entityDocuments[0]?.id,
+        items: updatedItems,
       });
     }
 
@@ -201,9 +249,11 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
   const [uploadDocTitle, setUploadDocTitle] = useState('');
   const [uploadDocCategory, setUploadDocCategory] = useState<'PORTFOLIO_OF_EVIDENCE' | 'OPERATIONAL_PLAN' | 'FINANCIAL_REPORT' | 'ANNUAL_REPORT' | 'GOVERNANCE_CHARTER'>('PORTFOLIO_OF_EVIDENCE');
   const [uploadFileName, setUploadFileName] = useState('');
+  const [selectedUploadFile, setSelectedUploadFile] = useState<File | null>(null);
   const [uploadFileSize, setUploadFileSize] = useState('4.2 MB');
   const [uploadSummary, setUploadSummary] = useState('');
-  const [section38Confirmed, setSection38Confirmed] = useState(true);
+  const [section38Confirmed, setSection38Confirmed] = useState(false);
+  const [previewDocument, setPreviewDocument] = useState<EntityDocument | null>(null);
 
   // File selection & drag-and-drop helper
   const handleFileSelected = (file: File) => {
@@ -213,7 +263,7 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
       setUploadDocTitle(cleanName);
     }
     const bytes = file.size;
-    const formattedSize = bytes < 1000000 ? `${Math.round(bytes / 1024)} KB` : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    const formattedSize = bytes < 1_000_000 ? `${Math.round(bytes / 1024)} KB` : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
     setUploadFileSize(formattedSize);
 
     // Auto-detect category from filename
@@ -230,10 +280,79 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
   };
 
   // Report Submission Form State
-  const [reportQuarter, setReportQuarter] = useState<'Q1' | 'Q2' | 'Q3' | 'Q4'>('Q2');
-  const [reportExpenditure, setReportExpenditure] = useState('1200000');
+  const [reportQuarter, setReportQuarter] = useState<'Q1' | 'Q2' | 'Q3' | 'Q4'>(reportingPeriod.quarter);
+  const [reportExpenditure, setReportExpenditure] = useState('');
   const [reportPoeDocId, setReportPoeDocId] = useState('');
   const [reportDeclaration, setReportDeclaration] = useState('I hereby affirm that the programmatic targets and expenditure reported reflect verified records in accordance with PFMA Section 38.');
+  const [fundingDraft, setFundingDraft] = useState(() => {
+    try {
+      const saved = window.localStorage.getItem(`dsac-funding-draft-${entity.id}`);
+      return saved ? JSON.parse(saved) : {
+        financialYear: reportingPeriod.financialYear,
+        programme: '',
+        purpose: '',
+        lines: [
+          { categoryId: 'PERSONNEL', categoryName: 'Employee / personnel costs', amount: 0 },
+          { categoryId: 'PROGRAMME', categoryName: 'Programme / project costs', amount: 0 },
+          { categoryId: 'TRAVEL', categoryName: 'Travel and subsistence', amount: 0 },
+          { categoryId: 'ADMIN', categoryName: 'Administration / operating costs', amount: 0 },
+          { categoryId: 'SERVICES', categoryName: 'Professional / contracted services', amount: 0 },
+          { categoryId: 'CAPITAL', categoryName: 'Capital expenditure', amount: 0 },
+          { categoryId: 'OTHER', categoryName: 'Other approved categories', amount: 0 },
+        ],
+      };
+    } catch {
+      return { financialYear: reportingPeriod.financialYear, programme: '', purpose: '', lines: [] };
+    }
+  });
+  const fundingTotal = fundingDraft.lines.reduce((total: number, line: { amount: number }) => total + (Number(line.amount) || 0), 0);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(`dsac-funding-draft-${entity.id}`, JSON.stringify(fundingDraft));
+    } catch {
+      // Draft persistence is best effort; submission remains store-backed.
+    }
+  }, [entity.id, fundingDraft]);
+
+  const updateFundingLine = (categoryId: string, amount: string) => {
+    setFundingDraft((draft: typeof fundingDraft) => ({
+      ...draft,
+      lines: draft.lines.map((line: { categoryId: string; amount: number }) =>
+        line.categoryId === categoryId ? { ...line, amount: Math.max(0, Number(amount) || 0) } : line
+      ),
+    }));
+  };
+
+  const submitFundingApplication = () => {
+    if (!fundingDraft.purpose.trim() || fundingTotal <= 0) {
+      setActionSuccess('Add a funding purpose and at least one budget amount before submitting.');
+      setTimeout(() => setActionSuccess(null), 3500);
+      return;
+    }
+    try {
+      store.submitBudgetRequest({
+        entityId: entity.id,
+        entityName: entity.name,
+        financialYear: fundingDraft.financialYear,
+        requestedAmount: fundingTotal,
+        justification: fundingDraft.purpose.trim(),
+        lines: fundingDraft.lines
+          .filter((line: { amount: number }) => line.amount > 0)
+          .map((line: { categoryId: string; categoryName: string; amount: number }) => ({
+            categoryId: line.categoryId,
+            categoryName: line.categoryName,
+            requestedAmount: line.amount,
+            notes: fundingDraft.programme.trim() || undefined,
+          })),
+      });
+      window.localStorage.removeItem(`dsac-funding-draft-${entity.id}`);
+      setActionSuccess('Funding application submitted to DSAC for review.');
+    } catch (error) {
+      setActionSuccess(error instanceof Error ? error.message : 'Funding application could not be submitted.');
+    }
+    setTimeout(() => setActionSuccess(null), 4500);
+  };
 
   const [newMessage, setNewMessage] = useState('');
   const [messagesList, setMessagesList] = useState([
@@ -241,7 +360,7 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
       id: 1,
       sender: 'Thandi Mokoena (DSAC Oversight Reviewer)',
       time: 'Today, 09:15',
-      content: 'Good morning Lerato. We have verified your Q1 Portfolio of Evidence. Please ensure the Q2 Youth Arts workshop attendance register includes ID numbers for PFMA Section 38 compliance.',
+      content: 'Good morning Lerato. Q1 evidence is verified. Please add ID numbers to the Q2 attendance register.',
       isDsac: true,
     },
     {
@@ -253,46 +372,86 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
     },
   ]);
 
-  // Organisation Profile State - Statutory identifiers are strictly final
-  const [orgProfile, setOrgProfile] = useState({
-    name: 'Ubuntu Arts NPO',
-    npoNumber: 'NPO-2018-8841',
-    cipcReg: '2018/142981/08',
-    pboNumber: '930064128',
-    address: 'Old Fort Complex, 11 Kotze St, Braamfontein, Johannesburg, 2001',
-    province: 'Gauteng',
-    accountingOfficer: 'Lerato Phiri',
-    officerEmail: 'l.phiri@ubuntuarts.org.za',
-    officerPhone: '+27 (0)11 384 9200',
-    chairperson: 'Dr. Zanele Khumalo',
-    treasurer: 'Thabo Maseko (CA SA)',
-    bankName: 'Standard Bank South Africa',
-    accountEnding: '**** 4921',
-  });
+  // Organisation Profile State - Statutory identifiers are strictly final.
+  // The recorded statutory details below belong to the demonstration NPO only. Every other organisation starts from
+  // its own record (the previous build showed Ubuntu Arts' registration and banking details to every entity).
+  const buildOrgProfile = (e: typeof entity) => e.id === 'ent-ubuntu-arts'
+    ? {
+        name: 'Ubuntu Arts NPO',
+        npoNumber: 'NPO-2018-8841',
+        cipcReg: '2018/142981/08',
+        pboNumber: '930064128',
+        address: 'Old Fort Complex, 11 Kotze St, Braamfontein, Johannesburg, 2001',
+        province: 'Gauteng',
+        accountingOfficer: 'Lerato Phiri',
+        officerEmail: 'l.phiri@ubuntuarts.org.za',
+        officerPhone: '+27 (0)11 384 9200',
+        chairperson: 'Dr. Zanele Khumalo',
+        treasurer: 'Thabo Maseko (CA SA)',
+        bankName: 'Standard Bank South Africa',
+        accountEnding: '**** 4921',
+      }
+    : {
+        name: e.name,
+        npoNumber: '',
+        cipcReg: '',
+        pboNumber: '',
+        address: '',
+        province: '',
+        accountingOfficer: e.reportingOfficerName,
+        officerEmail: e.contactEmail,
+        officerPhone: '',
+        chairperson: '',
+        treasurer: '',
+        bankName: '',
+        accountEnding: '',
+      };
+  const [orgProfile, setOrgProfile] = useState(() => buildOrgProfile(entity));
+  useEffect(() => {
+    setOrgProfile(buildOrgProfile(entity));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entity.id]);
 
   // Dynamic Year & Quarter Based Stats strictly synchronized with Department Dashboard
   const yearStats = useMemo(() => {
-    const normYear = selectedYear.includes('2024') ? '2024/25' :
-                     selectedYear.includes('2023') ? '2023/24' :
-                     selectedYear.includes('2026') ? '2026/27' : '2025/26';
-
-    const isAudited = normYear === '2024/25' || normYear === '2023/24';
+    const normYear = normalizeFinancialYear(selectedYear);
+    const isAudited = isFinancialYearClosed(normYear);
     const fin = store.getEntityFinancialSummary(entity.id, normYear, selectedQuarter);
     const perf = store.getEntityPerformanceSummary(entity.id, normYear, selectedQuarter);
+
+    // Compliance figures are computed from the entity's own reports and the statutory calendar (previously typed).
+    const reportsForEntity = store.reports.filter(r => r.entityId === entity.id);
+    const overdue = reportsForEntity.filter(r => r.submissionStatus === 'OVERDUE').length;
+    const returned = reportsForEntity.filter(r => r.submissionStatus === 'CORRECTION_REQUIRED').length;
+    const now = Date.now();
+    const upcoming = store.deadlines.filter(d => {
+      const due = new Date(d.dueDate).getTime();
+      return due > now && due <= now + 60 * 86400000;
+    }).length;
+
+    const auditLabels: Record<string, string> = {
+      CLEAN_AUDIT: 'Clean Audit (Unqualified)',
+      UNQUALIFIED_WITH_FINDINGS: 'Unqualified with Findings',
+      QUALIFIED: 'Qualified Audit Opinion',
+      DISCLAIMER: 'Disclaimer of Opinion',
+      NOT_YET_AUDITED: 'Not yet audited',
+    };
+    const auditRecordedForYear = sameFinancialYear(entity.auditYear, normYear);
 
     return {
       yearLabel: `${normYear} Financial Year`,
       fiscalTag: normYear,
       quarterLabel: selectedQuarter === 'FULL_YEAR' ? 'Full Year' : selectedQuarter,
       budgetAllocated: fin.approvedAmount,
-      transferred: isAudited ? fin.approvedAmount : (entity.transferredAmountZAR || 0),
+      transferred: fin.disbursedToDate,
       expenditure: fin.ytdActual,
       utilPercent: fin.utilisationPercent,
+      absorptionPercent: fin.absorptionRate,
       remaining: Math.max(0, fin.remainingBudget),
-      complianceStatus: 'On Track',
-      complianceScore: isAudited ? 100 : (entity.overallComplianceScore || 88),
-      upcomingDueDates: isAudited ? 0 : 2,
-      overdueItems: isAudited ? 0 : 1,
+      complianceStatus: overdue > 0 ? 'Overdue Reporting' : returned > 0 ? 'Attention Required' : 'Compliant',
+      complianceScore: entity.overallComplianceScore,
+      upcomingDueDates: isAudited ? 0 : upcoming,
+      overdueItems: isAudited ? 0 : overdue,
       kpiAchievedCount: perf.completedCount,
       kpiTotalCount: perf.totalKpis,
       kpiPercent: perf.completedPercent,
@@ -303,10 +462,40 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
         pct: Math.min(100, item.percentageAchieved),
         color: item.percentageAchieved >= 100 ? 'bg-emerald-500' : item.percentageAchieved >= 50 ? 'bg-blue-500' : 'bg-rose-500',
       })),
-      auditOutcome: isAudited ? 'Clean Audit (Unqualified)' : (entity.auditOutcome || 'Clean Audit'),
-      badge: isAudited ? 'Audited & Closed' : 'Active Financial Year',
+      auditOutcome: auditRecordedForYear || !isAudited ? (auditLabels[entity.auditOutcome] || 'Not recorded') : 'Not recorded for this year',
+      badge: isAudited ? 'Closed Financial Year' : 'Active Financial Year',
     };
   }, [selectedYear, selectedQuarter, entity, tick]);
+
+  const complianceItems = useMemo(() => {
+    const now = Date.now();
+    const reportItems = entityReports.map(report => {
+      const returned = report.submissionStatus === 'CORRECTION_REQUIRED';
+      const accepted = report.submissionStatus === 'APPROVED';
+      return {
+        title: `${report.quarter} Performance Report`,
+        desc: 'Structured performance and expenditure return for the reporting period.',
+        status: accepted ? 'Accepted' : returned ? 'Returned for Correction' : report.submissionStatus.replace(/_/g, ' '),
+        date: report.dueDate ? `Due: ${report.dueDate}` : 'No due date recorded',
+        color: accepted ? 'bg-emerald-100 text-emerald-800' : returned ? 'bg-rose-100 text-rose-800' : 'bg-amber-100 text-amber-800',
+      };
+    });
+    const deadlineItems = store.deadlines
+      .filter(deadline => (!deadline.entityType || deadline.entityType === 'ALL' || deadline.entityType === entity.type) && new Date(deadline.dueDate).getTime() >= now - 86400000)
+      .slice(0, 5)
+      .map(deadline => {
+        const due = new Date(deadline.dueDate).getTime();
+        const overdue = due < now;
+        return {
+          title: deadline.title,
+          desc: deadline.description,
+          status: overdue ? 'Overdue' : due < now + 30 * 86400000 ? 'Due Soon' : 'Upcoming',
+          date: `Due: ${deadline.dueDate}`,
+          color: overdue ? 'bg-rose-100 text-rose-800' : due < now + 30 * 86400000 ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800',
+        };
+      });
+    return [...reportItems, ...deadlineItems];
+  }, [entityReports, entity.type, tick]);
 
   const currentUser = store.currentUser || {
     name: 'Lerato Phiri',
@@ -318,9 +507,20 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
 
   const handleUploadDocument = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!selectedUploadFile) {
+      setActionSuccess('Please choose a document file before uploading.');
+      setTimeout(() => setActionSuccess(null), 3500);
+      return;
+    }
     const finalTitle = uploadDocTitle.trim() || uploadFileName.replace(/\.[^/.]+$/, "") || 'Section 38 Portfolio Evidence';
-    const finalFileName = uploadFileName.trim() || `${finalTitle.replace(/[^a-zA-Z0-9_-]/g, '_')}.pdf`;
-    const numBytes = Math.round((parseFloat(uploadFileSize) || 3.5) * 1024 * 1024);
+    const finalFileName = selectedUploadFile.name;
+    const numBytes = selectedUploadFile.size;
+    const contentDataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error('The selected file could not be read.'));
+      reader.onerror = () => reject(new Error('The selected file could not be read.'));
+      reader.readAsDataURL(selectedUploadFile);
+    });
 
     // Map category to statutory requirement slot
     const requirements = store.getDocumentRequirements(reportQuarter);
@@ -338,11 +538,8 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
         requirementId: targetReq?.id || store.documentRequirements[0]?.id,
         quarter: reportQuarter,
         financialYear: yearStats.fiscalTag,
-        file: {
-          name: finalFileName,
-          size: numBytes,
-          type: 'application/pdf',
-        },
+        file: selectedUploadFile,
+        contentDataUrl,
         changeSummary: uploadSummary || 'Statutory evidence dossier submitted under PFMA Section 38 audit verification.',
       });
 
@@ -370,13 +567,14 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
     setActiveModal(null);
     setUploadDocTitle('');
     setUploadFileName('');
+    setSelectedUploadFile(null);
     setUploadSummary('');
     setTimeout(() => setActionSuccess(null), 4000);
   };
 
   const handleReportSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const spentAmount = parseFloat(reportExpenditure) || 1200000;
+    const spentAmount = Math.max(0, parseFloat(reportExpenditure) || 0);
     store.submitQuarterlyReport({
       entityId: entity.id,
       quarter: reportQuarter,
@@ -386,7 +584,7 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
       poeDocId: reportPoeDocId || entityDocuments[0]?.id,
     });
 
-    setActionSuccess(`Quarter ${reportQuarter} Statutory Performance Report submitted to DSAC with expenditure of R ${(spentAmount / 1_000_000).toFixed(2)}M.`);
+    setActionSuccess(`Quarter ${reportQuarter} Statutory Performance Report submitted to DSAC with a claimed expenditure of ${formatZAR(spentAmount)}.`);
     setActiveModal(null);
     setTimeout(() => setActionSuccess(null), 3500);
   };
@@ -407,8 +605,14 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
     setTimeout(() => setActionSuccess(null), 3000);
   };
 
-  const handleDownloadDoc = (fileName: string, title: string, category: string) => {
-    downloadStatutoryDocument(fileName, title, category, entity.name);
+  const handleDownloadDoc = (docId: string, fileName: string, title: string, category: string) => {
+    const documentRecord = store.documents.find(doc => doc.id === docId);
+    const currentVersion = documentRecord?.versions.find(version => version.versionNumber === documentRecord.currentVersion);
+    if (currentVersion?.contentDataUrl) {
+      store.downloadDocument(docId);
+    } else {
+      downloadStatutoryDocument(fileName, title, category, entity.name);
+    }
     setActionSuccess(`Downloaded authentic copy of "${fileName}".`);
     setTimeout(() => setActionSuccess(null), 2500);
   };
@@ -420,16 +624,18 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
   };
 
   const sidebarItems = [
-    { id: 'overview', label: 'Overview', icon: Building },
-    { id: 'organisation', label: 'My Organisation', icon: Building },
-    { id: 'compliance', label: 'Compliance', icon: ShieldCheck },
+    { id: 'overview', label: 'Dashboard Overview', icon: Building },
+    { id: 'funding', label: 'Apply for Funding', icon: HandCoins },
+    { id: 'submissions', label: 'Report Submission', icon: FileText },
     { id: 'kpis', label: 'Targets & KPIs', icon: Target },
-    { id: 'budget', label: 'Budget & Utilization', icon: Coins },
+    { id: 'budget', label: 'Budget & Finance', icon: Coins },
+    { id: 'compliance', label: 'Compliance', icon: ShieldCheck },
+    { id: 'reports', label: 'Reports', icon: BarChart3 },
     { id: 'support', label: 'Support Requests', icon: HandCoins },
-    { id: 'submissions', label: 'Reports Submission', icon: FileText },
     { id: 'documents', label: 'Documents', icon: FolderLock },
+    { id: 'organisation', label: 'Organisation Profile', icon: Building },
     { id: 'messages', label: 'Messages', icon: MessageSquare },
-    { id: 'calendar', label: 'Calendar', icon: Calendar, badge: 2 },
+    { id: 'calendar', label: 'Deadlines', icon: Calendar, badge: yearStats.upcomingDueDates + yearStats.overdueItems || undefined },
     { id: 'help', label: 'Help & Support', icon: HelpCircle },
   ];
 
@@ -544,11 +750,12 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
               <select
                 id="portal-entity-switcher"
                 value={entity.id}
-                onChange={(e) => setSelectedEntityId(e.target.value)}
-                className="text-xs bg-slate-50 hover:bg-slate-100 border border-slate-300 rounded-lg px-2.5 py-1.5 font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 focus:outline-hidden cursor-pointer"
-                title="Select Reporting Entity"
+                onChange={(e) => setSelectedEntityId(lockedEntityId || e.target.value)}
+                disabled={!!lockedEntityId}
+                className="text-xs bg-slate-50 hover:bg-slate-100 border border-slate-300 rounded-lg px-2.5 py-1.5 font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 focus:outline-hidden cursor-pointer disabled:cursor-default disabled:opacity-90"
+                title={lockedEntityId ? 'Your organisation' : 'Select Reporting Entity'}
               >
-                {store.entities.map(e => (
+                {store.entities.filter(e => !lockedEntityId || e.id === lockedEntityId).map(e => (
                   <option key={e.id} value={e.id}>
                     {e.shortCode} — {e.name.length > 32 ? e.name.slice(0, 32) + '...' : e.name}
                   </option>
@@ -583,9 +790,9 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
                   <div className="flex items-center justify-between font-bold text-slate-800 mb-2 pb-2 border-b border-slate-100">
                     <span className="flex items-center gap-1.5">
                       <Bell className="w-3.5 h-3.5 text-indigo-600" />
-                      Portal Notifications &amp; Alerts
+                      Notifications
                     </span>
-                    <span className="text-[10px] text-slate-400 font-normal">Real-Time Sync</span>
+                    <span className="text-[10px] text-slate-400 font-normal">Live</span>
                   </div>
                   <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
                     {/* Recent Uploads status */}
@@ -608,7 +815,7 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
                           </span>
                         </div>
                         <div className="text-[10px] text-slate-500 mt-1 flex items-center justify-between">
-                          <span>Section 38 Statutory Repository</span>
+                          <span>Evidence files</span>
                           <span>{doc.uploadedAt ? doc.uploadedAt.split('T')[0] : 'Today'}</span>
                         </div>
                       </div>
@@ -620,10 +827,10 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
                     >
                       <div className="font-bold text-[11px] flex items-center gap-1">
                         <Clock className="w-3 h-3 text-amber-600" />
-                        Quarter 2 Performance Report Due
+                        Q2 report due
                       </div>
                       <div className="text-[10px] text-amber-700 mt-0.5">
-                        Statutory submission deadline: 15 Oct 2025 (in 18 days). PoE register required.
+                        Due 15 Oct 2025. Evidence register required.
                       </div>
                     </div>
 
@@ -633,10 +840,10 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
                     >
                       <div className="font-bold text-[11px] flex items-center gap-1">
                         <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                        Tranche 2 Disbursed: R 1 700 000
+                        Tranche 2 paid: R 1 700 000
                       </div>
                       <div className="text-[10px] text-emerald-700 mt-0.5">
-                        Funds cleared into Standard Bank account under Vote 40 BAS allocation.
+                        Funds paid from the approved allocation.
                       </div>
                     </div>
                   </div>
@@ -725,15 +932,15 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
                     onChange={(e) => {
                       const newYr = e.target.value;
                       setSelectedYear(newYr);
-                      if (newYr.includes('2024') || newYr.includes('2023')) {
+                      if (isFinancialYearClosed(normalizeFinancialYear(newYr))) {
                         setSelectedQuarter('FULL_YEAR');
                       }
                     }}
                     className="text-xs font-semibold text-slate-700 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 focus:outline-hidden cursor-pointer"
                   >
-                    <option>2025/26 Financial Year</option>
-                    <option>2024/25 Financial Year</option>
-                    <option>2023/24 Financial Year</option>
+                    {portalYearOptions.map(label => (
+                      <option key={label}>{label}</option>
+                    ))}
                   </select>
 
                   <select
@@ -841,34 +1048,87 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
                       <Coins className="w-4 h-4" />
                     </div>
                     <div>
-                      <div className="text-xl font-black text-slate-900 leading-none">{yearStats.utilPercent.toFixed(1)}%</div>
+                      <div className="text-xl font-black text-slate-900 leading-none">{yearStats.utilPercent}%</div>
                       <div className="text-[10px] text-slate-500 font-medium">R {(yearStats.expenditure / 1_000_000).toFixed(1)}M / R {(yearStats.budgetAllocated / 1_000_000).toFixed(1)}M</div>
                     </div>
                   </div>
                 </div>
               </div>
 
-              {/* Visual Analytics: Performance Status & Budget Utilisation Pie Charts */}
-              <EntityVisualAnalytics
-                entityId={entity.id}
-                financialYear={
-                  selectedYear.includes('2026') ? '2026/27' :
-                  selectedYear.includes('2024') ? '2024/25' :
-                  selectedYear.includes('2023') ? '2023/24' :
-                  '2025/26'
-                }
-                initialQuarter={selectedQuarter}
-                selectedQuarter={selectedQuarter}
-                onQuarterChange={(q) => setSelectedQuarter(q)}
-                showQuarterSelector={true}
-                showYearSelector={true}
-                onYearChange={(newYear) => {
-                  if (newYear.includes('2024')) setSelectedYear('2024/25 Financial Year');
-                  else if (newYear.includes('2023')) setSelectedYear('2023/24 Financial Year');
-                  else if (newYear.includes('2026')) setSelectedYear('2026/27 Financial Year');
-                  else setSelectedYear('2025/26 Financial Year');
-                }}
-              />
+              {/* Compact dashboard panels matching the entity portal overview design. Values remain sourced from the calculation engine. */}
+              <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+                <div className="bg-white rounded-xl border border-slate-200 shadow-xs p-4">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                    <h4 className="font-bold text-sm text-slate-900">Compliance Alerts &amp; Due Dates</h4>
+                    <button onClick={() => setActiveSidebar('compliance')} className="text-[10px] font-bold text-indigo-700 hover:underline cursor-pointer">View All</button>
+                  </div>
+                  <div className="space-y-2 mt-3">
+                    {complianceItems.slice(0, 5).map((item, index) => (
+                      <button key={`${item.title}-${index}`} onClick={() => setActiveSidebar('compliance')} className="w-full flex items-start justify-between gap-2 text-left p-2 rounded-lg hover:bg-slate-50 cursor-pointer">
+                        <span className="flex items-start gap-2 min-w-0">
+                          <span className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${item.status === 'Overdue' || item.status === 'Returned for Correction' ? 'bg-rose-500' : item.status === 'Due Soon' ? 'bg-amber-500' : 'bg-emerald-500'}`} />
+                          <span className="min-w-0">
+                            <span className="block text-[11px] font-bold text-slate-800 truncate">{item.title}</span>
+                            <span className="block text-[10px] text-slate-400 truncate">{item.date}</span>
+                          </span>
+                        </span>
+                        <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full whitespace-nowrap ${item.color}`}>{item.status}</span>
+                      </button>
+                    ))}
+                    {complianceItems.length === 0 && <p className="text-xs text-slate-400 py-5 text-center">No compliance items recorded.</p>}
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-xl border border-slate-200 shadow-xs p-4">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                    <h4 className="font-bold text-sm text-slate-900">KPI Performance</h4>
+                    <button onClick={() => setActiveSidebar('kpis')} className="text-[10px] font-bold text-indigo-700 hover:underline cursor-pointer">View Details</button>
+                  </div>
+                  <div className="flex items-center gap-4 py-4">
+                    <div className="w-24 h-24 rounded-full border-[10px] border-emerald-500 flex items-center justify-center shrink-0">
+                      <div className="text-center">
+                        <div className="text-xl font-black text-slate-900">{yearStats.kpiPercent}%</div>
+                        <div className="text-[9px] text-slate-500">Overall</div>
+                      </div>
+                    </div>
+                    <div className="space-y-2 text-[10px]">
+                      <div className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-emerald-500" /> Achieved <strong className="ml-auto">{yearStats.kpiAchievedCount}</strong></div>
+                      <div className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-amber-400" /> In progress <strong className="ml-auto">{Math.max(0, yearStats.kpiTotalCount - yearStats.kpiAchievedCount)}</strong></div>
+                      <div className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-slate-300" /> Total KPIs <strong className="ml-auto">{yearStats.kpiTotalCount}</strong></div>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    {yearStats.targets.slice(0, 4).map((target, index) => (
+                      <div key={`${target.title}-${index}`}>
+                        <div className="flex justify-between text-[10px] text-slate-600 mb-1"><span className="truncate">{target.title}</span><strong>{target.pct}%</strong></div>
+                        <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden"><div className={`${target.color} h-full rounded-full`} style={{ width: `${target.pct}%` }} /></div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-xl border border-slate-200 shadow-xs p-4">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                    <h4 className="font-bold text-sm text-slate-900">Budget Overview</h4>
+                    <button onClick={() => setActiveSidebar('budget')} className="text-[10px] font-bold text-indigo-700 hover:underline cursor-pointer">View Details</button>
+                  </div>
+                  <div className="flex items-center gap-4 py-4">
+                    <div className="w-24 h-24 rounded-full border-[10px] border-blue-500 flex items-center justify-center shrink-0">
+                      <div className="text-center">
+                        <div className="text-xl font-black text-slate-900">{yearStats.utilPercent}%</div>
+                        <div className="text-[9px] text-slate-500">Utilised</div>
+                      </div>
+                    </div>
+                    <div className="space-y-2 text-[10px] text-slate-600">
+                      <div>Total approved <strong className="block text-slate-900">{formatZAR(yearStats.budgetAllocated)}</strong></div>
+                      <div>Total utilised <strong className="block text-slate-900">{formatZAR(yearStats.expenditure)}</strong></div>
+                      <div>Remaining balance <strong className="block text-slate-900">{formatZAR(yearStats.remaining)}</strong></div>
+                    </div>
+                  </div>
+                  <div className="h-2 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-blue-500 rounded-full" style={{ width: `${Math.min(yearStats.utilPercent, 100)}%` }} /></div>
+                  <p className="text-[10px] text-slate-400 mt-2">Utilisation is calculated from approved budget and cumulative actual expenditure.</p>
+                </div>
+              </div>
 
               {/* Row 2: Targets (Left) & Upcoming Due Dates (Right) */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
@@ -1005,7 +1265,7 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
                       <span className="font-bold text-slate-900 text-sm">
                         R {(yearStats.expenditure / 1_000_000).toFixed(1)}M / R {(yearStats.budgetAllocated / 1_000_000).toFixed(1)}M
                       </span>
-                      <span className="font-bold text-emerald-700 text-xs">{yearStats.utilPercent.toFixed(1)}%</span>
+                      <span className="font-bold text-emerald-700 text-xs">{yearStats.utilPercent}%</span>
                     </div>
                     <div className="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden">
                       <div className="bg-emerald-500 h-full rounded-full" style={{ width: `${Math.min(yearStats.utilPercent, 100)}%` }}></div>
@@ -1220,6 +1480,53 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
           )}
 
           {/* ================= VIEW 2: MY ORGANISATION ================= */}
+          {activeSidebar === 'funding' && (
+            <div className="space-y-5">
+              <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
+                <div className="pb-4 border-b border-slate-100">
+                  <h3 className="text-base font-black text-slate-900">Apply for Funding</h3>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Submit a structured annual budget request. Approved values remain the baseline used by finance and reporting.
+                  </p>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
+                  <label className="text-xs font-bold text-slate-700">
+                    Financial year
+                    <select value={fundingDraft.financialYear} onChange={e => setFundingDraft({ ...fundingDraft, financialYear: e.target.value })} className="mt-1 w-full p-2 rounded-lg border border-slate-200 bg-slate-50">
+                      {portalYearOptions.map(year => <option key={year} value={year.split(' ')[0]}>{year}</option>)}
+                    </select>
+                  </label>
+                  <label className="text-xs font-bold text-slate-700">
+                    Programme / category
+                    <input value={fundingDraft.programme} onChange={e => setFundingDraft({ ...fundingDraft, programme: e.target.value })} className="mt-1 w-full p-2 rounded-lg border border-slate-200" placeholder="Funded programme" />
+                  </label>
+                </div>
+                <label className="block text-xs font-bold text-slate-700 mt-3">
+                  Purpose and summary
+                  <textarea value={fundingDraft.purpose} onChange={e => setFundingDraft({ ...fundingDraft, purpose: e.target.value })} rows={3} className="mt-1 w-full p-2 rounded-lg border border-slate-200" placeholder="Explain what the funding will deliver and why it is needed." />
+                </label>
+                <div className="mt-4 border border-slate-200 rounded-xl overflow-hidden">
+                  <div className="grid grid-cols-[1fr_150px] gap-3 px-3 py-2 bg-slate-50 text-[11px] font-bold text-slate-600">
+                    <span>Budget category</span><span>Requested amount (ZAR)</span>
+                  </div>
+                  {fundingDraft.lines.map((line: { categoryId: string; categoryName: string; amount: number }) => (
+                    <div key={line.categoryId} className="grid grid-cols-[1fr_150px] gap-3 items-center px-3 py-2 border-t border-slate-100 text-xs">
+                      <span>{line.categoryName}</span>
+                      <input type="number" min="0" step="1000" value={line.amount || ''} onChange={e => updateFundingLine(line.categoryId, e.target.value)} className="p-1.5 rounded border border-slate-200 text-right" />
+                    </div>
+                  ))}
+                  <div className="flex justify-between px-3 py-3 border-t border-slate-200 font-black text-sm">
+                    <span>Total requested</span><span>{formatZAR(fundingTotal)}</span>
+                  </div>
+                </div>
+                <div className="flex justify-end gap-2 mt-4">
+                  <button onClick={() => setActionSuccess('Funding application draft saved.')} className="px-4 py-2 rounded-lg bg-slate-100 text-slate-700 text-xs font-bold">Save as Draft</button>
+                  <button onClick={submitFundingApplication} className="px-4 py-2 rounded-lg bg-indigo-700 text-white text-xs font-bold">Submit to DSAC</button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {activeSidebar === 'organisation' && (
             <div className="space-y-5">
               <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
@@ -1350,61 +1657,20 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
                       <span>Statutory Compliance Matrix (PFMA Act 1 of 1999)</span>
                     </h3>
                     <p className="text-xs text-slate-500 mt-0.5">
-                      National Treasury statutory compliance checklist for public funds recipients.
+                      National Treasury checklist for public funds.
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="px-3 py-1 bg-emerald-100 text-emerald-800 rounded-full font-bold text-xs">
-                      100% On Track
+                    <span className={`px-3 py-1 rounded-full font-bold text-xs ${
+                      yearStats.overdueItems > 0 ? 'bg-rose-100 text-rose-800' : yearStats.complianceStatus === 'Attention Required' ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'
+                    }`}>
+                      {yearStats.complianceStatus}
                     </span>
                   </div>
                 </div>
 
                 <div className="divide-y divide-slate-100 text-xs mt-3">
-                  {[
-                    {
-                      title: 'PFMA Section 38 Compliance Certificate',
-                      desc: 'Written assurance of effective, efficient and transparent financial systems',
-                      status: 'Verified',
-                      date: 'Exp: 31 Mar 2026',
-                      color: 'bg-emerald-100 text-emerald-800',
-                    },
-                    {
-                      title: 'SARS Tax Compliance Pin (TCS)',
-                      desc: 'Active Good Standing verified via SARS eFiling system',
-                      status: 'Active',
-                      date: 'Exp: 14 Nov 2025',
-                      color: 'bg-emerald-100 text-emerald-800',
-                    },
-                    {
-                      title: 'Annual Audited Financial Statements (AFS)',
-                      desc: 'Audited by independent registered auditor (Clean Audit opinion)',
-                      status: 'Approved',
-                      date: 'Submitted 31 Jul 2025',
-                      color: 'bg-emerald-100 text-emerald-800',
-                    },
-                    {
-                      title: 'B-BBEE Sworn Affidavit / Certificate',
-                      desc: 'Level 1 Contributor with 100% Black Ownership verification',
-                      status: 'Valid',
-                      date: 'Exp: 10 Jan 2026',
-                      color: 'bg-emerald-100 text-emerald-800',
-                    },
-                    {
-                      title: 'Protection of Personal Information Act (POPIA)',
-                      desc: 'Registered Information Officer with the Information Regulator',
-                      status: 'Registered',
-                      date: 'Active',
-                      color: 'bg-indigo-100 text-indigo-800',
-                    },
-                    {
-                      title: 'Quarter 1 Performance Report & PoE',
-                      desc: 'Validated and accepted by DSAC Oversight Desk',
-                      status: 'Approved',
-                      date: '15 Jul 2025',
-                      color: 'bg-emerald-100 text-emerald-800',
-                    },
-                  ].map((item, i) => (
+                  {complianceItems.map((item, i) => (
                     <div key={i} className="py-3 flex items-center justify-between gap-3">
                       <div>
                         <div className="font-bold text-slate-800">{item.title}</div>
@@ -1434,7 +1700,7 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
                       <span>Targets &amp; Key Performance Indicators ({yearStats.fiscalTag})</span>
                     </h3>
                     <p className="text-xs text-slate-500 mt-0.5">
-                      National Treasury APP performance indicators. Capture quarterly actuals to update achievement rates.
+                      National Treasury indicators. Enter quarterly actuals to update results.
                     </p>
                   </div>
                   <div className="flex items-center gap-3">
@@ -1480,7 +1746,7 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
               </div>
               <EntityFinancialView
                 entityId={entity.id}
-                financialYear={selectedYear.includes('2024') ? '2024/25' : selectedYear.includes('2025') ? '2025/26' : '2026/27'}
+                financialYear={yearStats.fiscalTag}
                 readOnly={false}
               />
             </div>
@@ -1586,7 +1852,7 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
           )}
 
           {/* ================= VIEW 7: REPORTS SUBMISSION & STEPPER ================= */}
-          {activeSidebar === 'submissions' && (
+          {(activeSidebar === 'submissions' || activeSidebar === 'reports') && (
             <div className="space-y-6">
               {/* Stepper Success Banner */}
               {stepperSuccessMessage && (
@@ -1605,7 +1871,7 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
                       <span>{entity.shortCode} Performance Return Ingestion Stepper</span>
                     </h2>
                     <p className="text-xs text-slate-500 mt-0.5">
-                      Enter verified quarterly figures, document variance justifications, and submit for DSAC National sign-off.
+                      Enter quarterly figures, explain variances, and submit for DSAC review.
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
@@ -1647,10 +1913,9 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
                           onChange={(e) => setReportingQuarter(e.target.value)}
                           className="w-full text-xs p-2.5 rounded-lg bg-slate-50 border border-slate-300 font-semibold text-slate-800 focus:bg-white focus:outline-hidden focus:ring-1 focus:ring-emerald-600"
                         >
-                          <option value="Q3 (2025/2026 Financial Year)">Q3 (2025/2026 Financial Year)</option>
-                          <option value="Q2 (2025/2026 Financial Year)">Q2 (2025/2026 Financial Year)</option>
-                          <option value="Q1 (2025/2026 Financial Year)">Q1 (2025/2026 Financial Year)</option>
-                          <option value="Q4 (2025/2026 Financial Year)">Q4 (2025/2026 Financial Year)</option>
+                          {['Q1', 'Q2', 'Q3', 'Q4'].map(q => (
+                            <option key={q} value={`${q} (${reportingFyLong} Financial Year)`}>{q} ({reportingFyLong} Financial Year)</option>
+                          ))}
                         </select>
                       </div>
 
@@ -1663,7 +1928,7 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
                           value={spentThisQuarter} 
                           onChange={(e) => setSpentThisQuarter(Number(e.target.value))}
                           className="w-full text-xs p-2.5 rounded-lg border border-slate-300 font-mono text-slate-900 focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
-                          placeholder="e.g. 24800000"
+                          placeholder="Amount in ZAR"
                         />
                         <span className="text-[10px] text-slate-500 mt-0.5 block">
                           PFMA Vote 37: Disbursed towards agreed programme outputs.
@@ -1752,7 +2017,7 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
                     <div className="pt-4 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                       <div className="text-xs text-slate-500 flex items-center gap-1.5">
                         <ShieldAlert className="w-4 h-4 text-emerald-600 shrink-0" />
-                        <span>Submission triggers automated risk recalculation and immutable audit stamp.</span>
+                        <span>Submission updates risk and records an audit stamp.</span>
                       </div>
 
                       <button
@@ -1846,7 +2111,7 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
                       <div className="flex items-center gap-3">
                         <div className="text-xs text-slate-500 hidden sm:flex items-center gap-1.5">
                           <ShieldAlert className="w-4 h-4 text-emerald-600 shrink-0" />
-                          <span>Submission triggers automated risk recalculation and immutable audit stamp.</span>
+                          <span>Submission updates risk and records an audit stamp.</span>
                         </div>
 
                         <button
@@ -1924,7 +2189,7 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
                             </span>
                           </div>
                           <p className="text-slate-600 mt-1.5">
-                            {rep.varianceExplanations || `Statutory return claiming expenditure of R ${((rep.fundsSpentThisQuarterZAR || 24800000) / 1_000_000).toFixed(2)}M.`}
+                            {rep.varianceExplanations || `Statutory return claiming expenditure of R ${((rep.fundsSpentThisQuarterZAR || 0) / 1_000_000).toFixed(2)}M.`}
                           </p>
 
                           {rep.items && rep.items.length > 0 && (
@@ -1946,7 +2211,7 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
                               type="button"
                               onClick={() => {
                                 setStepperStep(1);
-                                setReportingQuarter(`${rep.quarter} (2025/2026 Financial Year)`);
+                                setReportingQuarter(`${rep.quarter} (${reportingFyLong} Financial Year)`);
                                 if (rep.fundsSpentThisQuarterZAR) {
                                   setSpentThisQuarter(rep.fundsSpentThisQuarterZAR);
                                 }
@@ -1979,7 +2244,7 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
                   }`}
                 >
                   <ShieldCheck className="w-4 h-4 text-indigo-600" />
-                  <span>Section 38 Statutory Verification Dossier</span>
+                  <span>Document Verification</span>
                 </button>
 
                 <button
@@ -1991,7 +2256,7 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
                   }`}
                 >
                   <FolderLock className="w-4 h-4 text-slate-600" />
-                  <span>All Uploaded Files &amp; Archive ({entityDocuments.length})</span>
+                  <span>All Files ({entityDocuments.length})</span>
                 </button>
               </div>
 
@@ -2008,10 +2273,10 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
                   <div>
                     <h3 className="text-base font-black text-slate-900 flex items-center gap-2">
                       <FolderLock className="w-5 h-5 text-indigo-600" />
-                      <span>Portfolio of Evidence &amp; Governance Repository</span>
+                      <span>                      Evidence Repository</span>
                     </h3>
                     <p className="text-xs text-slate-500 mt-0.5">
-                      Statutory evidence documents uploaded under Section 38 audit verification.
+                      Files uploaded for DSAC review.
                     </p>
                   </div>
                   <button
@@ -2027,12 +2292,12 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
                   {entityDocuments.length === 0 ? (
                     <div className="py-8 text-center text-slate-400">
                       <FolderLock className="w-8 h-8 text-slate-300 mx-auto mb-2" />
-                      <p>No statutory evidence documents uploaded yet.</p>
+                      <p>No files uploaded yet.</p>
                       <button
                         onClick={() => setActiveModal('uploadPoE')}
                         className="mt-2 px-3 py-1 bg-indigo-50 text-indigo-700 font-bold rounded-lg hover:bg-indigo-100 transition-colors"
                       >
-                        Upload Section 38 Document
+                        Upload File
                       </button>
                     </div>
                   ) : (
@@ -2064,7 +2329,16 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
                             {doc.uploadedAt ? doc.uploadedAt.split('T')[0] : '14 Jul 2025'}
                           </span>
                           <button
-                            onClick={() => handleDownloadDoc(doc.fileName || doc.title, doc.title, doc.category)}
+                            onClick={() => setPreviewDocument(doc)}
+                            aria-label={`Preview ${doc.fileName || doc.title}`}
+                            title="Preview document"
+                            className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-slate-100 rounded-lg transition-colors"
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => handleDownloadDoc(doc.id, doc.fileName || doc.title, doc.title, doc.category)}
+                            aria-label={`Download ${doc.fileName || doc.title}`}
                             title="Download official file"
                             className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-slate-100 rounded-lg transition-colors"
                           >
@@ -2151,7 +2425,7 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
                 <div className="pb-4 border-b border-slate-100">
                   <h3 className="text-base font-black text-slate-900 flex items-center gap-2">
                     <Calendar className="w-5 h-5 text-indigo-600" />
-                    <span>Statutory Submission Deadlines Calendar (FY 2025/26)</span>
+                    <span>Statutory Submission Deadlines Calendar ({yearStats.fiscalTag})</span>
                   </h3>
                   <p className="text-xs text-slate-500 mt-0.5">
                     Critical dates for compliance, reports, and financial bids under Vote 37.
@@ -2159,37 +2433,19 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4 text-xs">
-                  <div className="p-4 bg-amber-50 rounded-xl border border-amber-200">
-                    <div className="flex items-center justify-between font-bold text-amber-900">
-                      <span>Quarter 2 Performance Report</span>
-                      <span>15 Oct 2025</span>
+                  {complianceItems.filter(item => item.date.startsWith('Due:')).map((item, index) => (
+                    <div key={`${item.title}-${index}`} className="p-4 bg-slate-50 rounded-xl border border-slate-200">
+                      <div className="flex items-center justify-between gap-3 font-bold text-slate-900">
+                        <span>{item.title}</span>
+                        <span className="shrink-0">{item.date.replace('Due: ', '')}</span>
+                      </div>
+                      <div className="text-slate-600 mt-1">{item.desc}</div>
+                      <span className={`inline-block mt-2 px-2 py-0.5 rounded-full text-[10px] font-bold ${item.color}`}>{item.status}</span>
                     </div>
-                    <div className="text-amber-800 mt-1">18 days remaining. Upload all Q2 attendance registers and signed PoE.</div>
-                  </div>
-
-                  <div className="p-4 bg-blue-50 rounded-xl border border-blue-200">
-                    <div className="flex items-center justify-between font-bold text-blue-900">
-                      <span>Mid-Year Financial Statement</span>
-                      <span>30 Oct 2025</span>
-                    </div>
-                    <div className="text-blue-800 mt-1">Reconciliation of R 3.2M expenditure and general ledger extract.</div>
-                  </div>
-
-                  <div className="p-4 bg-slate-50 rounded-xl border border-slate-200">
-                    <div className="flex items-center justify-between font-bold text-slate-900">
-                      <span>2026/27 Strategic Plan Update</span>
-                      <span>30 Nov 2025</span>
-                    </div>
-                    <div className="text-slate-600 mt-1">Statutory MTEF planning window for the upcoming fiscal cycle.</div>
-                  </div>
-
-                  <div className="p-4 bg-slate-50 rounded-xl border border-slate-200">
-                    <div className="flex items-center justify-between font-bold text-slate-900">
-                      <span>Quarter 3 Performance Report</span>
-                      <span>15 Jan 2026</span>
-                    </div>
-                    <div className="text-slate-600 mt-1">Submissions for October to December activities and holiday arts festival.</div>
-                  </div>
+                  ))}
+                  {complianceItems.filter(item => item.date.startsWith('Due:')).length === 0 && (
+                    <div className="col-span-2 p-6 text-center text-slate-500">No deadlines are currently recorded for this organisation.</div>
+                  )}
                 </div>
               </div>
             </div>
@@ -2224,7 +2480,7 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
                       DSAC Oversight Directorate Contact Desk
                     </div>
                     <div className="text-slate-600 space-y-1">
-                      <div>Director: Sicelo Sakhile Mkhize (sakhilesicelo94@gmail.com)</div>
+                      <div>Director: Sicelo Sakhile Mkhize (DSAC Oversight)</div>
                       <div>Chief Reviewer: Thandi Mokoena (t.mokoena@dsac.gov.za)</div>
                       <div>Helpline: +27 (0)12 441 3000 • Sechaba House, 202 Madiba St, Pretoria</div>
                     </div>
@@ -2256,7 +2512,7 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
             <div className="flex items-center justify-between pb-2 border-b border-slate-100">
               <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2">
                 <Upload className="w-4 h-4 text-indigo-600" />
-                <span>Upload Verified Statutory Document &amp; PoE</span>
+                <span>Upload Evidence File</span>
               </h3>
               <button onClick={() => setActiveModal(null)} className="text-slate-400 hover:text-slate-600">
                 <X className="w-4 h-4" />
@@ -2293,17 +2549,10 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
                 </div>
 
                 <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Simulated File Size</label>
-                  <select
-                    value={uploadFileSize}
-                    onChange={(e) => setUploadFileSize(e.target.value)}
-                    className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs"
-                  >
-                    <option value="2.4 MB">2.4 MB (Standard PDF)</option>
-                    <option value="4.2 MB">4.2 MB (Comprehensive PoE)</option>
-                    <option value="6.8 MB">6.8 MB (Audited Statements)</option>
-                    <option value="850 KB">850 KB (Certificate / Pin)</option>
-                  </select>
+                  <label className="block font-semibold text-slate-700 mb-1">Selected File Size</label>
+                  <div className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-600">
+                    {selectedUploadFile ? uploadFileSize : 'Choose a file to see its size'}
+                  </div>
                 </div>
               </div>
 
@@ -2315,6 +2564,7 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
                   onChange={(e) => {
                     const file = e.target.files?.[0];
                     if (file) {
+                      setSelectedUploadFile(file);
                       setUploadFileName(file.name);
                       if (!uploadDocTitle) setUploadDocTitle(file.name.replace(/\.[^/.]+$/, ""));
                       const mb = (file.size / (1024 * 1024)).toFixed(1);
@@ -2328,7 +2578,7 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
                   {uploadFileName ? uploadFileName : "Click or drag & drop evidence file here"}
                 </div>
                 <div className="text-[10px] text-slate-500">
-                  Supported formats: PDF registers, signed resolutions, financial statements
+                  Supported: PDF, DOCX, XLSX, CSV
                 </div>
               </div>
 
@@ -2336,7 +2586,7 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
                 <label className="block font-semibold text-slate-700 mb-1">Executive Summary / Audit Notes</label>
                 <textarea
                   rows={2}
-                  placeholder="Summary of participant verification, Section 38 audit trail, and vouchers attached..."
+                  placeholder="Add a short note about this file..."
                   value={uploadSummary}
                   onChange={(e) => setUploadSummary(e.target.value)}
                   className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:bg-white focus:outline-none focus:ring-1 focus:ring-indigo-600"
@@ -2352,7 +2602,7 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
                   className="mt-0.5 rounded text-indigo-600 focus:ring-indigo-500"
                 />
                 <label htmlFor="section38affirm" className="text-[11px] text-slate-600 select-none">
-                  I affirm that this statutory evidence is submitted in compliance with Section 38(1)(j) of the PFMA and represents verified institutional activities.
+                  I confirm this file is accurate and submitted under PFMA Section 38(1)(j).
                 </label>
               </div>
 
@@ -2377,6 +2627,48 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
         </div>
       )}
 
+      {previewDocument && (() => {
+        const currentVersion = previewDocument.versions.find(version => version.versionNumber === previewDocument.currentVersion);
+        const source = currentVersion?.contentDataUrl;
+        const mimeType = currentVersion?.mimeType || 'application/octet-stream';
+        const canEmbed = Boolean(source && (mimeType === 'application/pdf' || mimeType.startsWith('image/')));
+        return (
+          <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-xs flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl max-w-5xl w-full h-[85vh] shadow-2xl border border-slate-200 p-4 flex flex-col">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                <div>
+                  <h3 className="font-bold text-sm text-slate-900">{previewDocument.title}</h3>
+                  <p className="text-[10px] text-slate-500">{previewDocument.fileName}</p>
+                </div>
+                <button onClick={() => setPreviewDocument(null)} className="text-slate-400 hover:text-slate-600">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="flex-1 min-h-0 mt-3 rounded-lg bg-slate-50 border border-slate-200 overflow-hidden flex items-center justify-center">
+                {canEmbed ? (
+                  mimeType === 'application/pdf' ? (
+                    <iframe title={`Preview of ${previewDocument.fileName}`} src={source} className="w-full h-full" />
+                  ) : (
+                    <img src={source} alt={previewDocument.title} className="max-w-full max-h-full object-contain" />
+                  )
+                ) : (
+                  <div className="text-center p-6 text-sm text-slate-600">
+                    <FileText className="w-10 h-10 mx-auto mb-2 text-slate-400" />
+                    <p>This file type cannot be displayed in the browser.</p>
+                    <button
+                      onClick={() => handleDownloadDoc(previewDocument.id, previewDocument.fileName || previewDocument.title, previewDocument.title, previewDocument.category)}
+                      className="mt-3 px-3 py-2 bg-indigo-700 text-white rounded-lg text-xs font-semibold"
+                    >
+                      Download original file
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Modal 2: Submit a Report */}
       {activeModal === 'report' && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
@@ -2384,7 +2676,7 @@ export const EntityPortalDashboard: React.FC<EntityPortalDashboardProps> = ({
             <div className="flex items-center justify-between pb-2 border-b border-slate-100">
               <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2">
                 <FileText className="w-4 h-4 text-indigo-600" />
-                <span>Submit Statutory Performance Report</span>
+                <span>Submit Performance Report</span>
               </h3>
               <button onClick={() => setActiveModal(null)} className="text-slate-400 hover:text-slate-600">
                 <X className="w-4 h-4" />

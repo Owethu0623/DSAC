@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
   Sparkles, 
   Send, 
@@ -38,6 +38,16 @@ export const AIPerformanceAnalyst: React.FC = () => {
     }
   };
 
+  useEffect(() => {
+    const queuedQuery = typeof window !== 'undefined'
+      ? window.sessionStorage.getItem('dsac_analyst_query')
+      : null;
+    if (queuedQuery) {
+      window.sessionStorage.removeItem('dsac_analyst_query');
+      void handleAsk(queuedQuery);
+    }
+  }, []);
+
   return (
     <div className="space-y-6 pb-12">
       {/* Banner */}
@@ -46,18 +56,18 @@ export const AIPerformanceAnalyst: React.FC = () => {
           <div>
             <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-emerald-400 bg-emerald-950/80 px-2.5 py-1 rounded border border-emerald-700/60 w-fit">
               <Sparkles className="w-3.5 h-3.5" />
-              <span>Grounded Government Intelligence Engine</span>
+              <span>Live Portfolio Analysis</span>
             </div>
             <h1 className="text-2xl sm:text-3xl font-black text-white mt-2 font-['Cabinet_Grotesk'] tracking-tight">
-              AI Performance Analyst
+              Performance Analyst
             </h1>
             <p className="text-xs sm:text-sm text-slate-300 mt-1 max-w-3xl">
-              Strictly grounded inquiry assistant designed for DSAC Executive Management and Oversight Directors. Analyzes verified entity returns without hallucinations or unsupported claims.
+              Ask about delivery, KPIs, budgets, and reporting. Answers use current platform data.
             </p>
           </div>
 
           <div className="p-3 bg-slate-800/80 border border-slate-700 rounded-lg text-xs text-slate-300 max-w-xs">
-            <strong className="text-emerald-400">Responsible AI:</strong> All outputs cite verified departmental datasets and serve as advisory decision-support.
+            <strong className="text-emerald-400">Note:</strong> Rule-based results are advisory. Confirm decisions through formal review.
           </div>
         </div>
 
@@ -73,7 +83,7 @@ export const AIPerformanceAnalyst: React.FC = () => {
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Ask anything about entity delivery, KPI delays, budgets, or audit findings..."
+            placeholder="Ask about delivery, KPIs, budgets, or reports..."
             className="flex-1 px-4 py-3 bg-slate-950/80 border border-slate-700 rounded-xl text-xs sm:text-sm text-white placeholder-slate-400 focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
           />
           <button
@@ -92,7 +102,7 @@ export const AIPerformanceAnalyst: React.FC = () => {
 
         {/* Sample Quick Prompts */}
         <div className="mt-4 flex flex-wrap gap-2 text-xs">
-          <span className="text-slate-400 self-center text-[11px] font-semibold">Suggested Inquiries:</span>
+          <span className="text-slate-400 self-center text-[11px] font-semibold">Try:</span>
           {sampleQuestions.map((q, i) => (
             <button
               key={i}
@@ -112,7 +122,7 @@ export const AIPerformanceAnalyst: React.FC = () => {
           <div className="flex items-center justify-between pb-3 border-b border-slate-100">
             <div className="flex items-center gap-2 text-xs font-bold text-slate-800 uppercase tracking-wider">
               <Bot className="w-4 h-4 text-emerald-600" />
-              <span>Grounded Performance Intelligence Output</span>
+              <span>Portfolio Analysis</span>
             </div>
             <span className="text-[11px] text-slate-400">Timestamp: {new Date().toLocaleTimeString()}</span>
           </div>
@@ -136,7 +146,7 @@ export const AIPerformanceAnalyst: React.FC = () => {
           <div className="p-4 bg-emerald-50/60 rounded-xl border border-emerald-200 text-xs space-y-2">
             <div className="font-bold text-emerald-900 flex items-center gap-1.5">
               <Building2 className="w-4 h-4 text-emerald-700" />
-              <span>Verified Departmental Data Sources Grounding this Synthesis:</span>
+              <span>Source entities:</span>
             </div>
             <div className="flex flex-wrap gap-2">
               {response.sourceEntities.map((ent, i) => (
@@ -150,7 +160,7 @@ export const AIPerformanceAnalyst: React.FC = () => {
           {/* Actionable Recommendations */}
           <div className="space-y-2">
             <div className="text-xs font-bold uppercase tracking-wider text-slate-500">
-              Recommended Management Actions:
+              Recommended actions:
             </div>
             <div className="space-y-1.5">
               {response.recommendedActions.map((act, i) => (

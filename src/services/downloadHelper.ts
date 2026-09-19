@@ -33,7 +33,7 @@ Classification:       ${category}
 Registration Date:    ${timestamp}
 Statutory Reference:  DSAC-PFMA-SEC38-2025/26
 Oversight Directorate: Directorate of Public Entities & Subsidised NPOs
-Verification Registry: Government Oversight REPO System (Vote 40)
+Verification Registry: Government Oversight REPO System (Vote 37)
 
 SECTION 38 WRITTEN ASSURANCE:
 --------------------------------------------------------------------------------

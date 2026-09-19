@@ -20,6 +20,7 @@ import { PublicEntity } from '../../types';
 import { store } from '../../services/store';
 import { FinancialQuarter } from '../../types/financial';
 import { normalizeFinancialYear } from '../../services/calculationEngine';
+import { getCurrentReportingPeriod } from '../../services/reportingPeriod';
 
 interface DsacPerformanceViewProps {
   entities: PublicEntity[];
@@ -34,8 +35,8 @@ export const DsacPerformanceView: React.FC<DsacPerformanceViewProps> = ({
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [typeFilter, setTypeFilter] = useState<'ALL' | 'PUBLIC_ENTITY' | 'NPO'>('ALL');
-  const [selectedYear, setSelectedYear] = useState<string>('2025/26');
-  const [quarterTab, setQuarterTab] = useState<FinancialQuarter>('Q3');
+  const [selectedYear, setSelectedYear] = useState<string>(getCurrentReportingPeriod().financialYear);
+  const [quarterTab, setQuarterTab] = useState<FinancialQuarter>(getCurrentReportingPeriod().quarter);
   const [selectedEntityId, setSelectedEntityId] = useState<string>(entities[0]?.id || 'ent-sahra');
   const [actionNotice, setActionNotice] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
@@ -148,7 +149,7 @@ export const DsacPerformanceView: React.FC<DsacPerformanceViewProps> = ({
                       : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
                   }`}
                 >
-                  {q} {q === 'Q3' && <span className="text-[9px] text-emerald-300 ml-0.5">• Live</span>}
+                  {q} {q === getCurrentReportingPeriod().quarter && normalizeFinancialYear(selectedYear) === getCurrentReportingPeriod().financialYear && <span className="text-[9px] text-emerald-300 ml-0.5">• Live</span>}
                 </button>
               ))}
             </div>
@@ -433,7 +434,7 @@ export const DsacPerformanceView: React.FC<DsacPerformanceViewProps> = ({
                             {kpi.q2Actual !== null ? kpi.q2Actual.toLocaleString() : '-'} / {kpi.q2Target.toLocaleString()}
                           </div>
                         </div>
-                        <div className={`p-1.5 rounded-lg border ${quarterTab === 'Q3' ? 'bg-emerald-50 border-emerald-300 font-bold' : 'bg-white border-slate-200'}`}>
+                        <div className={`p-1.5 rounded-lg border ${quarterTab === getCurrentReportingPeriod().quarter ? 'bg-emerald-50 border-emerald-300 font-bold' : 'bg-white border-slate-200'}`}>
                           <div className="text-[9px] font-bold text-emerald-800">Q3 Actual / Target</div>
                           <div className="text-xs font-bold text-emerald-900 mt-0.5">
                             {kpi.q3Actual !== null ? kpi.q3Actual.toLocaleString() : '-'} / {kpi.q3Target.toLocaleString()}

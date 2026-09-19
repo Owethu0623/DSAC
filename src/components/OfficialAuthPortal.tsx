@@ -23,6 +23,7 @@ import {
   Coins
 } from 'lucide-react';
 import { store } from '../services/store';
+import { DEMO_MODE, DEMO_PASSWORD, DEMO_DSAC_ADMIN_EMAIL } from '../config/demoMode';
 import { UserRole, EntityType, EntityCluster } from '../types';
 import { SouthAfricanCoatOfArms } from './SouthAfricanCoatOfArms';
 import { UbuntuArtsLogo } from './UbuntuArtsLogo';
@@ -46,8 +47,8 @@ export const OfficialAuthPortal: React.FC<OfficialAuthPortalProps> = ({
   const [entitySubTab, setEntitySubTab] = useState<'signin' | 'signup'>('signin');
 
   // --- DSAC SIGN IN STATE ---
-  const [dsacEmail, setDsacEmail] = useState('sakhilesicelo94@gmail.com');
-  const [dsacPassword, setDsacPassword] = useState('Mkhize@550');
+  const [dsacEmail, setDsacEmail] = useState(DEMO_MODE ? DEMO_DSAC_ADMIN_EMAIL : '');
+  const [dsacPassword, setDsacPassword] = useState(DEMO_MODE ? DEMO_PASSWORD : '');
   const [showDsacPassword, setShowDsacPassword] = useState(false);
   const [dsacLoginError, setDsacLoginError] = useState<string | null>(null);
 
@@ -63,8 +64,8 @@ export const OfficialAuthPortal: React.FC<OfficialAuthPortalProps> = ({
   const [dsacAcceptedTerms, setDsacAcceptedTerms] = useState(true);
 
   // --- ENTITY SIGN IN STATE ---
-  const [entityEmail, setEntityEmail] = useState('l.phiri@ubuntuarts.org.za');
-  const [entityPassword, setEntityPassword] = useState('Password123!');
+  const [entityEmail, setEntityEmail] = useState(DEMO_MODE ? 'l.phiri@ubuntuarts.org.za' : '');
+  const [entityPassword, setEntityPassword] = useState(DEMO_MODE ? DEMO_PASSWORD : '');
   const [showEntityPassword, setShowEntityPassword] = useState(false);
   const [entityLoginError, setEntityLoginError] = useState<string | null>(null);
 
@@ -79,78 +80,10 @@ export const OfficialAuthPortal: React.FC<OfficialAuthPortalProps> = ({
   const [entitySignupEmail, setEntitySignupEmail] = useState('');
   const [entitySignupPassword, setEntitySignupPassword] = useState('');
   const [entitySignupConfirmPassword, setEntitySignupConfirmPassword] = useState('');
-  const [newBudgetAllocation, setNewBudgetAllocation] = useState('3500000');
+  const [newBudgetAllocation, setNewBudgetAllocation] = useState('');
   const [entityAcceptedPfma, setEntityAcceptedPfma] = useState(true);
   const [entitySignupError, setEntitySignupError] = useState<string | null>(null);
   const [isSubmittingEntity, setIsSubmittingEntity] = useState(false);
-
-  // 1-Click DSAC Official Profiles
-  const quickDsacAccounts = [
-    {
-      label: 'Sicelo Sakhile Mkhize',
-      role: 'Chief Director: Public Entities Oversight',
-      email: 'sakhilesicelo94@gmail.com',
-      password: 'Mkhize@550',
-      badge: 'DSAC Admin',
-      badgeClass: 'bg-emerald-950/80 text-emerald-300 border-emerald-700/60',
-    },
-    {
-      label: 'Dr. Sipho Khumalo',
-      role: 'Deputy Director-General: Governance',
-      email: 's.khumalo@dsac.gov.za',
-      password: 'Password123!',
-      badge: 'Executive DDG',
-      badgeClass: 'bg-blue-950/80 text-blue-300 border-blue-700/60',
-    },
-    {
-      label: 'Thandi Mokoena',
-      role: 'Oversight Directorate Reviewer',
-      email: 't.mokoena@dsac.gov.za',
-      password: 'Password123!',
-      badge: 'Oversight Official',
-      badgeClass: 'bg-teal-950/80 text-teal-300 border-teal-700/60',
-    },
-  ];
-
-  // 1-Click Entity Profiles
-  const quickEntityAccounts = [
-    {
-      entity: 'Ubuntu Arts NPO',
-      name: 'Lerato Phiri',
-      role: 'Organisation Admin',
-      email: 'l.phiri@ubuntuarts.org.za',
-      password: 'Password123!',
-      badge: 'Subsidized NPO',
-      badgeClass: 'bg-indigo-950/80 text-indigo-300 border-indigo-700/60',
-    },
-    {
-      entity: 'SAHRA (Heritage Agency)',
-      name: 'Kagiso Mokoena',
-      role: 'Chief Reporting Officer',
-      email: 'kmokoena@sahra.org.za',
-      password: 'Password123!',
-      badge: 'Schedule 3A',
-      badgeClass: 'bg-amber-950/80 text-amber-300 border-amber-700/60',
-    },
-    {
-      entity: 'National Arts Council (NAC)',
-      name: 'Palesa Dlamini',
-      role: 'Finance & Compliance Officer',
-      email: 'p.dlamini@nac.org.za',
-      password: 'Password123!',
-      badge: 'Statutory Body',
-      badgeClass: 'bg-emerald-950/80 text-emerald-300 border-emerald-700/60',
-    },
-    {
-      entity: 'National Film & Video (NFVF)',
-      name: 'Bongani Sithole',
-      role: 'Monitoring & Evaluations',
-      email: 'b.sithole@nfvf.co.za',
-      password: 'Password123!',
-      badge: 'Film & Media',
-      badgeClass: 'bg-purple-950/80 text-purple-300 border-purple-700/60',
-    },
-  ];
 
   // Handler for DSAC sign in
   const handleDsacSignIn = (e: React.FormEvent) => {
@@ -195,29 +128,6 @@ export const OfficialAuthPortal: React.FC<OfficialAuthPortalProps> = ({
       onSuccess();
     } else {
       setEntityLoginError(result.message || 'Entity authentication failed. Please check credentials or register.');
-    }
-  };
-
-  // Quick 1-click login handler
-  const handleQuickLogin = (email: string, pass: string, portal: 'dsac' | 'entity') => {
-    if (portal === 'dsac') {
-      setDsacEmail(email);
-      setDsacPassword(pass);
-      setDsacLoginError(null);
-    } else {
-      setEntityEmail(email);
-      setEntityPassword(pass);
-      setEntityLoginError(null);
-    }
-    const result = store.login(email, pass);
-    if (result.success) {
-      onSuccess();
-    } else {
-      if (portal === 'dsac') {
-        setDsacLoginError(result.message || 'Login failed.');
-      } else {
-        setEntityLoginError(result.message || 'Login failed.');
-      }
     }
   };
 
@@ -285,7 +195,7 @@ export const OfficialAuthPortal: React.FC<OfficialAuthPortalProps> = ({
     setIsSubmittingEntity(true);
 
     try {
-      const budgetNum = parseFloat(newBudgetAllocation) || 3_500_000;
+      const budgetNum = Math.max(0, parseFloat(newBudgetAllocation) || 0);
       const result = store.registerEntityAndUser({
         entityName: newEntityName.trim(),
         entityType: newEntityType,
@@ -322,29 +232,53 @@ export const OfficialAuthPortal: React.FC<OfficialAuthPortalProps> = ({
         
         {/* National Crest & Sovereign Header */}
         <div className="text-center mb-6 flex flex-col items-center">
-          <div className="w-16 h-16 rounded-2xl bg-emerald-950/80 border border-emerald-500/40 flex items-center justify-center p-2 mb-3 shadow-2xl backdrop-blur-md">
-            <SouthAfricanCoatOfArms size={52} variant="gold" />
+          <div className="w-full max-w-xl rounded-[28px] border border-emerald-500/40 bg-gradient-to-r from-emerald-950/90 via-slate-900 to-slate-950 shadow-[0_0_30px_rgba(16,185,129,0.18)] p-4 sm:p-5 mb-4">
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-4 text-center sm:text-left">
+              <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-[22px] bg-emerald-900/80 border border-emerald-500/40 flex items-center justify-center p-2 shadow-lg">
+                <SouthAfricanCoatOfArms size={84} variant="gold" />
+              </div>
+
+              <div className="space-y-1">
+                <div className="text-[10px] sm:text-[11px] font-black uppercase tracking-[0.28em] text-emerald-300/90">
+                  sport, arts &amp; culture
+                </div>
+                <div className="text-base sm:text-lg font-bold text-white leading-tight">
+                  Department: Sport, Arts and Culture
+                </div>
+                <div className="text-[10px] sm:text-[11px] font-black uppercase tracking-[0.28em] text-emerald-400">
+                  Republic of South Africa
+                </div>
+              </div>
+            </div>
           </div>
 
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-950/90 border border-emerald-600/50 text-emerald-300 text-[11px] font-bold uppercase tracking-wider mb-2">
-            <span>Republic of South Africa</span>
+            <span>GovTrack SA</span>
             <span className="w-1 h-1 rounded-full bg-emerald-400" />
-            <span>GovTrack SA Statutory Gateway</span>
+            <span>Simple access</span>
           </div>
 
           <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight font-['Cabinet_Grotesk']">
-            Department of Sport, Arts and Culture
+            Welcome to DSAC oversight
           </h1>
           <p className="text-xs sm:text-sm text-slate-400 mt-1 max-w-lg font-medium">
-            Statutory Performance Monitoring, Portfolio of Evidence &amp; Financial Governance System (PFMA Section 38)
+            Pick your portal, sign in, and open the dashboard in seconds.
           </p>
         </div>
 
         {/* PRIMARY PORTAL SELECTOR: DSAC vs PUBLIC ENTITIES & NPOs */}
         <div className="mb-5">
           <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2.5 flex items-center justify-between px-1">
-            <span>Select Your Official Access Portal:</span>
-            <span className="text-emerald-400 font-mono text-[10px]">Vote 40 Secured</span>
+            <span>Choose your portal</span>
+            <span className="text-emerald-400 font-mono text-[10px]">Secure access</span>
+          </div>
+
+          <div className="mb-3 flex items-center gap-2 text-[10px] text-slate-400 justify-center sm:justify-start">
+            <span className="inline-flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>1. Select portal</span>
+            <span>•</span>
+            <span className="inline-flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-indigo-400"></span>2. Sign in</span>
+            <span>•</span>
+            <span className="inline-flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-slate-400"></span>3. View status</span>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -460,10 +394,23 @@ export const OfficialAuthPortal: React.FC<OfficialAuthPortalProps> = ({
                 <div className="flex items-center gap-2.5">
                   <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
                   <span className="text-xs font-bold text-emerald-400 uppercase tracking-wider">
-                    DSAC National Department Access Gateway
+                    DSAC official access
                   </span>
                 </div>
-                <span className="text-[10px] text-slate-400 font-mono">Vote 40 Pretoria HQ</span>
+                <span className="text-[10px] text-slate-400 font-mono">National office</span>
+              </div>
+
+              <div className="flex items-center justify-between gap-3 rounded-xl border border-slate-800 bg-slate-900/80 px-3 py-2.5">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-950/80 border border-emerald-500/40 flex items-center justify-center shrink-0">
+                    <SouthAfricanCoatOfArms size={28} variant="gold" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-[10px] uppercase tracking-[0.22em] text-emerald-300/80">Secure access</p>
+                    <p className="text-sm font-bold text-white truncate">Department of Sport, Arts and Culture</p>
+                  </div>
+                </div>
+                <span className="text-[10px] font-bold text-emerald-300 border border-emerald-500/40 bg-emerald-950/80 px-2 py-1 rounded-full">Official</span>
               </div>
 
               {/* Sub-tabs: Sign In vs Register DSAC */}
@@ -480,7 +427,7 @@ export const OfficialAuthPortal: React.FC<OfficialAuthPortalProps> = ({
                       : 'text-slate-400 hover:text-slate-200'
                   }`}
                 >
-                  DSAC Official Sign In
+                  Sign in
                 </button>
                 <button
                   type="button"
@@ -494,7 +441,7 @@ export const OfficialAuthPortal: React.FC<OfficialAuthPortalProps> = ({
                       : 'text-slate-400 hover:text-slate-200'
                   }`}
                 >
-                  Register Official Account
+                  Create account
                 </button>
               </div>
 
@@ -511,14 +458,14 @@ export const OfficialAuthPortal: React.FC<OfficialAuthPortalProps> = ({
 
                     <div>
                       <label className="block font-semibold text-slate-300 mb-1.5">
-                        Official Government Email Address
+                        Email address
                       </label>
                       <div className="relative">
                         <Mail className="w-4 h-4 text-slate-500 absolute left-3 top-3" />
                         <input
                           required
                           type="email"
-                          placeholder="e.g. sakhilesicelo94@gmail.com or official@dsac.gov.za"
+                          placeholder="e.g. official@dsac.gov.za"
                           value={dsacEmail}
                           onChange={(e) => setDsacEmail(e.target.value)}
                           className="w-full pl-9 pr-3 py-2.5 bg-slate-900 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
@@ -555,42 +502,12 @@ export const OfficialAuthPortal: React.FC<OfficialAuthPortalProps> = ({
                         type="submit"
                         className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-bold shadow-lg shadow-emerald-950 transition-all flex items-center justify-center gap-2 text-xs uppercase tracking-wider"
                       >
-                        <span>Sign In to DSAC Oversight Dashboard</span>
+                        <span>Open dashboard</span>
                         <ArrowRight className="w-4 h-4" />
                       </button>
                     </div>
                   </form>
 
-                  {/* 1-Click DSAC Instant Profiles */}
-                  <div className="pt-4 border-t border-slate-800">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                        1-Click Instant Official Demo Accounts
-                      </span>
-                      <span className="text-[10px] text-emerald-400 font-mono">Auto-populates credentials</span>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                      {quickDsacAccounts.map((acc) => (
-                        <button
-                          key={acc.email}
-                          type="button"
-                          onClick={() => handleQuickLogin(acc.email, acc.password, 'dsac')}
-                          className="text-left p-2.5 rounded-xl border border-slate-800 bg-slate-900 hover:bg-emerald-950/40 hover:border-emerald-600/60 transition-all flex flex-col justify-between group"
-                        >
-                          <div className="flex items-center justify-between mb-1">
-                            <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded border ${acc.badgeClass}`}>
-                              {acc.badge}
-                            </span>
-                          </div>
-                          <div className="font-bold text-xs text-white group-hover:text-emerald-300 truncate">
-                            {acc.label}
-                          </div>
-                          <div className="text-[10px] text-slate-400 truncate mt-0.5">{acc.email}</div>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
                 </div>
               )}
 
@@ -699,7 +616,7 @@ export const OfficialAuthPortal: React.FC<OfficialAuthPortalProps> = ({
                     </label>
                     <input
                       type="text"
-                      placeholder="e.g. PERSAL 78492014"
+                      placeholder="PERSAL number"
                       value={dsacSignupStaffId}
                       onChange={(e) => setDsacSignupStaffId(e.target.value)}
                       className="w-full p-2.5 bg-slate-900 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:ring-2 focus:ring-emerald-500 focus:outline-hidden font-mono"
@@ -746,10 +663,23 @@ export const OfficialAuthPortal: React.FC<OfficialAuthPortalProps> = ({
                 <div className="flex items-center gap-2.5">
                   <div className="w-2.5 h-2.5 rounded-full bg-indigo-500 animate-pulse" />
                   <span className="text-xs font-bold text-indigo-400 uppercase tracking-wider">
-                    Statutory Entities &amp; Subsidized NPOs Gateway
+                    Entity and NPO access
                   </span>
                 </div>
-                <span className="text-[10px] text-slate-400 font-mono">26 PEs &amp; 6 NPOs</span>
+                <span className="text-[10px] text-slate-400 font-mono">Reporting portal</span>
+              </div>
+
+              <div className="flex items-center justify-between gap-3 rounded-xl border border-slate-800 bg-slate-900/80 px-3 py-2.5">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-10 h-10 rounded-xl bg-indigo-950/80 border border-indigo-500/40 flex items-center justify-center shrink-0">
+                    <UbuntuArtsLogo size={28} />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-[10px] uppercase tracking-[0.22em] text-indigo-300/80">Default institutional portal</p>
+                    <p className="text-sm font-bold text-white truncate">Ubuntu Arts NPO</p>
+                  </div>
+                </div>
+                <span className="text-[10px] font-bold text-indigo-300 border border-indigo-500/40 bg-indigo-950/80 px-2 py-1 rounded-full">Ready</span>
               </div>
 
               {/* Sub-tabs: Entity Sign In vs Register Entity */}
@@ -766,7 +696,7 @@ export const OfficialAuthPortal: React.FC<OfficialAuthPortalProps> = ({
                       : 'text-slate-400 hover:text-slate-200'
                   }`}
                 >
-                  Entity &amp; NPO Sign In
+                  Sign in
                 </button>
                 <button
                   type="button"
@@ -780,7 +710,7 @@ export const OfficialAuthPortal: React.FC<OfficialAuthPortalProps> = ({
                       : 'text-slate-400 hover:text-slate-200'
                   }`}
                 >
-                  Register New Entity / NPO
+                  Create account
                 </button>
               </div>
 
@@ -844,43 +774,12 @@ export const OfficialAuthPortal: React.FC<OfficialAuthPortalProps> = ({
                         type="submit"
                         className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-bold shadow-lg shadow-indigo-950 transition-all flex items-center justify-center gap-2 text-xs uppercase tracking-wider"
                       >
-                        <span>Sign In to Entity Portal</span>
+                        <span>Open portal</span>
                         <ArrowRight className="w-4 h-4" />
                       </button>
                     </div>
                   </form>
 
-                  {/* 1-Click Entity Instant Profiles */}
-                  <div className="pt-4 border-t border-slate-800">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                        1-Click Instant Entity Demo Accounts
-                      </span>
-                      <span className="text-[10px] text-indigo-400 font-mono">Auto-populates session</span>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      {quickEntityAccounts.map((acc) => (
-                        <button
-                          key={acc.email}
-                          type="button"
-                          onClick={() => handleQuickLogin(acc.email, acc.password, 'entity')}
-                          className="text-left p-2.5 rounded-xl border border-slate-800 bg-slate-900 hover:bg-indigo-950/40 hover:border-indigo-600/60 transition-all flex flex-col justify-between group"
-                        >
-                          <div className="flex items-center justify-between mb-1">
-                            <span className="font-bold text-xs text-white group-hover:text-indigo-300 truncate">
-                              {acc.entity}
-                            </span>
-                            <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded border ${acc.badgeClass}`}>
-                              {acc.badge}
-                            </span>
-                          </div>
-                          <div className="text-[11px] text-slate-300 truncate">{acc.name} • {acc.role}</div>
-                          <div className="text-[10px] text-slate-500 truncate mt-0.5">{acc.email}</div>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
                 </div>
               )}
 
@@ -993,7 +892,7 @@ export const OfficialAuthPortal: React.FC<OfficialAuthPortalProps> = ({
                       </label>
                       <input
                         type="number"
-                        placeholder="e.g. 3500000"
+                        placeholder="Budget you are requesting (optional)"
                         value={newBudgetAllocation}
                         onChange={(e) => setNewBudgetAllocation(e.target.value)}
                         className="w-full p-2.5 bg-slate-900 border border-slate-700 rounded-lg text-white placeholder-slate-500 focus:ring-2 focus:ring-indigo-500 focus:outline-hidden font-mono"
@@ -1117,9 +1016,9 @@ export const OfficialAuthPortal: React.FC<OfficialAuthPortalProps> = ({
           <div className="mt-5 pt-4 border-t border-slate-800/80 flex flex-wrap items-center justify-between text-[11px] text-slate-500 gap-2">
             <span className="flex items-center gap-1.5">
               <Shield className="w-3.5 h-3.5 text-emerald-400" />
-              <span>National Department of Sport, Arts and Culture</span>
+              <span>Department of Sport, Arts and Culture</span>
             </span>
-            <span className="font-mono text-slate-400">PFMA Vote 40 / Section 38 Statutory Gateway</span>
+            <span className="font-mono text-slate-400">Secure access portal</span>
           </div>
 
         </div>

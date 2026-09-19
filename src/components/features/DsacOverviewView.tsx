@@ -32,6 +32,17 @@ import {
 } from 'recharts';
 import { PublicEntity } from '../../types';
 import { store } from '../../services/store';
+import { isPortfolioMember } from '../../services/financialService';
+import {
+  QuarterSelection,
+  financialYearStart,
+  getCurrentReportingPeriod,
+  normalizeFinancialYear,
+  pct1,
+  quarterDueDate,
+  quarterIndex,
+  toLongFinancialYear
+} from '../../services/reportingPeriod';
 
 interface DsacOverviewViewProps {
   entities: PublicEntity[];
@@ -70,22 +81,27 @@ export const DsacOverviewView: React.FC<DsacOverviewViewProps> = ({
 }) => {
   const [tick, setTick] = useState(0);
   const [showWorkflowGuide, setShowWorkflowGuide] = useState(false);
-  const [selectedYear, setSelectedYear] = useState('2025/2026 (Current)');
-  const [selectedFinancialPeriod, setSelectedFinancialPeriod] = useState<'2025/26' | '2024/25' | '2023/24'>('2025/26');
+  const period = getCurrentReportingPeriod();
+  const [selectedFinancialPeriod, setSelectedFinancialPeriod] = useState<string>(period.financialYear);
   const [chartViewMode, setChartViewMode] = useState<'EXECUTION' | 'SECTORS'>('EXECUTION');
 
-  // Handle financial period selection change across all components
-  const handlePeriodChange = (period: '2025/26' | '2024/25' | '2023/24') => {
-    setSelectedFinancialPeriod(period);
-    if (period === '2025/26') {
-      setSelectedYear('2025/2026 (Current)');
-    } else if (period === '2024/25') {
-      setSelectedYear('2024/2025 (Audited)');
-    } else {
-      setSelectedYear('2023/2024 (Prior)');
-    }
-  };
+  // Current financial year plus the two before it, generated from the reporting period (never typed).
+  const periodOptions = useMemo(() => {
+    const start = financialYearStart(period.financialYear);
+    return [0, 1, 2].map(i => {
+      const fy = `${start - i}/${String((start - i + 1) % 100).padStart(2, '0')}`;
+      return {
+        value: fy,
+        label: i === 0 ? 'This Financial Year' : `${fy} Financial Year`,
+        headerLabel: `${toLongFinancialYear(fy)} (${i === 0 ? 'Current' : 'Closed'})`,
+      };
+    });
+  }, [period.financialYear]);
 
+  // Handle financial period selection change across all components
+  const handlePeriodChange = (fy: string) => {
+    setSelectedFinancialPeriod(fy);
+  };
   // Compact currency formatter matching South African National Treasury reporting standards (e.g., R 2.12B, R 1.59B, R 529.5M)
   const formatCompactZAR = (val: number): string => {
     if (val === undefined || val === null || isNaN(val)) return 'R 0';
@@ -113,169 +129,145 @@ export const DsacOverviewView: React.FC<DsacOverviewViewProps> = ({
     return () => unsub();
   }, []);
 
-  const normYear = selectedYear.includes('2024') 
-    ? '2024/25' 
-    : selectedYear.includes('2023') 
-    ? '2023/24' 
-    : '2025/26';
+  const isCurrentYear = normalizeFinancialYear(selectedFinancialPeriod) === period.financialYear;
+  const quarterForSelection: QuarterSelection = isCurrentYear ? period.quarter : 'FULL_YEAR';
 
-  // Dynamic financial aggregation recalculated automatically from all entities and NPOs
-  const dynamicAgg = useMemo(() => {
-    return store.getDepartmentFinancialAggregation(normYear, normYear === '2025/26' ? 'Q3' : 'FULL_YEAR');
-  }, [normYear, tick, propTotalApproved, propTotalTransferred, propTotalExpended]);
+  // Every figure on this dashboard comes from the same read-model as the finance and entity pages.
+  // Nothing is typed in: change any return, disbursement or KPI and these cards move with it.
+  const dynamicAgg = useMemo(
+    () => store.getDepartmentFinancialAggregation(selectedFinancialPeriod, quarterForSelection),
+    [selectedFinancialPeriod, quarterForSelection, tick]
+  );
+  const perfAgg = useMemo(
+    () => store.getDepartmentPerformanceAggregation(selectedFinancialPeriod, quarterForSelection),
+    [selectedFinancialPeriod, quarterForSelection, tick]
+  );
+  const pulse = useMemo(() => store.getPerformancePulse(), [tick, entities]);
 
-  // The 4 Core Figures updated automatically
-  const totalApprovedBudget = dynamicAgg.totalApprovedBudget || propTotalApproved || 0;
-  const totalAmountDisbursedToDate = dynamicAgg.totalTransferredToDate || propTotalTransferred || 0;
-  const totalAmountUtilisedToDate = dynamicAgg.totalReportedExpenditure || 0;
-  
-  const overallUtilisationPercentage = totalApprovedBudget > 0
-    ? ((totalAmountUtilisedToDate / totalApprovedBudget) * 100).toFixed(1)
-    : '0.0';
+  const totalApprovedBudget = dynamicAgg.totalApprovedBudget;
+  const totalAmountDisbursedToDate = dynamicAgg.totalTransferredToDate;
+  const totalAmountUtilisedToDate = dynamicAgg.totalReportedExpenditure;
+  const undisbursedAllocation = dynamicAgg.remainingDisbursement; // approved - disbursed
+  const disbursedUnutilised = dynamicAgg.unspentDisbursed; // disbursed - spent
 
-  const burnRateOfDisbursed = totalAmountDisbursedToDate > 0
-    ? ((totalAmountUtilisedToDate / totalAmountDisbursedToDate) * 100).toFixed(1)
-    : '0.0';
-
-  const disbursementRate = totalApprovedBudget > 0
-    ? ((totalAmountDisbursedToDate / totalApprovedBudget) * 100).toFixed(1)
-    : '0.0';
-
-  const undisbursedAllocation = Math.max(0, totalApprovedBudget - totalAmountDisbursedToDate);
-  const disbursedUnutilised = Math.max(0, totalAmountDisbursedToDate - totalAmountUtilisedToDate);
-
-  // Pulse metrics for the 3 top enhanced tabs
-  const pulse = useMemo(() => {
-    return store.getPerformancePulse();
-  }, [tick, entities]);
-
-  const reportsSubmittedCount = pulse.q3SubmittedCount || (32 - reportsOutstanding);
-  const totalInstitutions = entities.length || 32;
-  const submissionRate = Math.round((reportsSubmittedCount / totalInstitutions) * 100);
+  const totalInstitutions = pulse.totalEntities;
+  const reportsSubmittedCount = pulse.currentQuarterSubmittedCount;
+  const reportsOutstandingCount = pulse.currentQuarterOutstandingCount;
+  const submissionRate = totalInstitutions > 0 ? Math.round((reportsSubmittedCount / totalInstitutions) * 100) : 0;
 
   // Authoritative financial overview aggregation synchronized with the selected financial period
   const finSummary = useMemo(() => {
-    const periodAgg = store.getDepartmentFinancialAggregation(
-      selectedFinancialPeriod,
-      selectedFinancialPeriod === '2025/26' ? 'Q3' : 'FULL_YEAR'
-    );
+    const spent = dynamicAgg.totalReportedExpenditure;
+    const transferred = dynamicAgg.totalTransferredToDate;
+    const approved = dynamicAgg.totalApprovedBudget;
+    const unspentDisbursed = dynamicAgg.unspentDisbursed;
+    const balance = dynamicAgg.remainingDisbursement;
 
-    const approved = periodAgg.totalApprovedBudget;
-    const transferred = periodAgg.totalTransferredToDate;
-    const spent = periodAgg.totalReportedExpenditure;
-    const unspentDisbursed = Math.max(0, transferred - spent);
-    const burnRate = transferred > 0 ? (spent / transferred) * 100 : 0;
-    const unspentPct = Math.max(0, 100 - burnRate);
-    const balance = Math.max(0, approved - transferred);
-    const disbursedPct = approved > 0 ? (transferred / approved) * 100 : 0;
-    const balancePct = Math.max(0, 100 - disbursedPct);
-    const pe = periodAgg.peBudget;
-    const npo = periodAgg.npoBudget;
-    const pePct = periodAgg.pePercentage;
-    const npoPct = Math.max(0, 100 - pePct);
+    // Tranches released so far, counted from the disbursement ledger (not typed).
+    const upTo = quarterIndex(quarterForSelection);
+    const perEntity = new Map<string, number>();
+    store
+      .getDisbursements(undefined, selectedFinancialPeriod)
+      .filter(d => d.status === 'RELEASED' && (isCurrentYear || quarterIndex(d.tranche) <= upTo))
+      .forEach(d => perEntity.set(d.entityId, (perEntity.get(d.entityId) || 0) + 1));
+    const tranchesReleased = Math.max(0, ...perEntity.values());
 
-    if (selectedFinancialPeriod === '2024/25') {
-      return {
-        periodLabel: '2024/25 FINANCIAL YEAR',
-        dropdownLabel: '2024/25 Financial Year',
-        approved,
-        transferred,
-        spent,
-        unspentDisbursed,
-        burnRate,
-        unspentPct,
-        balance,
-        disbursedPct: 100,
-        balancePct: 0,
-        peApproved: pe,
-        npoApproved: npo,
-        pePct,
-        npoPct,
-        tranchesReleased: 4,
-        tranchePaidText: `Q1-Q4 Paid (${formatCompactZAR(transferred)})`,
-        trancheBalText: 'Audited Clearance (R 0)',
-        pieData: [
-          { name: 'Total Spent to Date', value: spent, color: '#059669', desc: 'Verified entity operational expenditure' },
-          { name: 'Unspent Disbursed Balance', value: unspentDisbursed, color: '#0284c7', desc: 'Surplus/retention cleared in audited financials' }
-        ]
-      };
-    } else if (selectedFinancialPeriod === '2023/24') {
-      return {
-        periodLabel: '2023/24 FINANCIAL YEAR',
-        dropdownLabel: '2023/24 Financial Year',
-        approved,
-        transferred,
-        spent,
-        unspentDisbursed,
-        burnRate,
-        unspentPct,
-        balance,
-        disbursedPct: 100,
-        balancePct: 0,
-        peApproved: pe,
-        npoApproved: npo,
-        pePct,
-        npoPct,
-        tranchesReleased: 4,
-        tranchePaidText: `Q1-Q4 Paid (${formatCompactZAR(transferred)})`,
-        trancheBalText: 'Audited Clearance (R 0)',
-        pieData: [
-          { name: 'Total Spent to Date', value: spent, color: '#059669', desc: 'Verified entity operational expenditure' },
-          { name: 'Unspent Disbursed Balance', value: unspentDisbursed, color: '#0284c7', desc: 'Surplus/retention cleared in audited financials' }
-        ]
-      };
-    } else {
-      // 2025/26 (Current)
-      return {
-        periodLabel: 'THIS FINANCIAL YEAR',
-        dropdownLabel: 'This Financial Year',
-        approved,
-        transferred,
-        spent,
-        unspentDisbursed,
-        burnRate,
-        unspentPct,
-        balance,
-        disbursedPct,
-        balancePct,
-        peApproved: pe,
-        npoApproved: npo,
-        pePct,
-        npoPct,
-        tranchesReleased: 3,
-        tranchePaidText: `Q1-Q3 Paid (${formatCompactZAR(transferred)})`,
-        trancheBalText: `Q4 Bal (${formatCompactZAR(balance)})`,
-        pieData: [
-          { name: 'Total Spent to Date', value: spent, color: '#059669', desc: 'Expenditure verified by entity accounting officers' },
-          { name: 'Unspent Disbursed Balance', value: unspentDisbursed, color: '#0284c7', desc: 'Disbursed funds in entity accounts for Q3-Q4 operations' }
-        ]
-      };
-    }
-  }, [selectedFinancialPeriod, tick, entities]);
-
-  // Sector breakdown data for Pie Chart mode
-  const sectorFinancialData = useMemo(() => {
-    const clusterMap: Record<string, { name: string; approved: number; disbursed: number; utilised: number; count: number; color: string }> = {
-      'Performing Arts & Theatres': { name: 'Performing Arts & Theatres', approved: 0, disbursed: 0, utilised: 0, count: 0, color: '#0d9488' },
-      'Heritage & Museums': { name: 'Heritage & Museums', approved: 0, disbursed: 0, utilised: 0, count: 0, color: '#0284c7' },
-      'Subsidized Cultural NPOs': { name: 'Subsidized Cultural NPOs', approved: 0, disbursed: 0, utilised: 0, count: 0, color: '#ec4899' },
-      'Creative Industries & Film': { name: 'Creative & Film', approved: 0, disbursed: 0, utilised: 0, count: 0, color: '#8b5cf6' },
-      'Sport & Recreation': { name: 'Sport & Recreation', approved: 0, disbursed: 0, utilised: 0, count: 0, color: '#f59e0b' },
+    return {
+      periodLabel: isCurrentYear ? 'THIS FINANCIAL YEAR' : `${selectedFinancialPeriod} FINANCIAL YEAR`,
+      approved,
+      transferred,
+      spent,
+      unspentDisbursed,
+      // Transfer Absorption: spent as a % of what has been disbursed.
+      burnRate: dynamicAgg.expenditureRate,
+      // Budget Utilisation: spent as a % of the approved annual budget.
+      budgetUtilisation: dynamicAgg.utilPercent,
+      unspentPct: transferred > 0 ? pct1(unspentDisbursed, transferred) : 0,
+      balance,
+      disbursedPct: dynamicAgg.transferRate,
+      balancePct: pct1(balance, approved),
+      peApproved: dynamicAgg.peBudget,
+      npoApproved: dynamicAgg.npoBudget,
+      pePct: dynamicAgg.pePercentage,
+      npoPct: dynamicAgg.npoPercentage,
+      tranchesReleased,
+      tranchePaidText: tranchesReleased > 0 ? `Q1-Q${tranchesReleased} Paid (${formatCompactZAR(transferred)})` : 'No tranche released',
+      trancheBalText: balance > 0 ? `Q${Math.min(4, tranchesReleased + 1)} Bal (${formatCompactZAR(balance)})` : 'Fully disbursed',
+      pieData: [
+        { name: 'Total Spent to Date', value: spent, color: '#059669', desc: 'Expenditure reported by entity accounting officers' },
+        { name: 'Unspent Disbursed Balance', value: unspentDisbursed, color: '#0284c7', desc: 'Disbursed funds held by entities and not yet spent' },
+      ].filter(d => d.value > 0),
     };
+  }, [dynamicAgg, selectedFinancialPeriod, quarterForSelection, isCurrentYear, tick]);
 
-    entities.forEach(ent => {
-      const clusterKey = ent.cluster || 'Heritage & Museums';
-      if (!clusterMap[clusterKey]) {
-        clusterMap[clusterKey] = { name: clusterKey, approved: 0, disbursed: 0, utilised: 0, count: 0, color: '#64748b' };
-      }
-      clusterMap[clusterKey].count += 1;
-      clusterMap[clusterKey].approved += ent.budgetAllocationZAR || 0;
-      clusterMap[clusterKey].disbursed += ent.transferredAmountZAR || 0;
-      clusterMap[clusterKey].utilised += ent.reportedExpenditureZAR || 0;
+  // Sector breakdown, from the same per-entity summaries as everything else on this page.
+  const sectorFinancialData = useMemo(() => {
+    const palette: Record<string, { name: string; color: string }> = {
+      'Performing Arts & Theatres': { name: 'Performing Arts & Theatres', color: '#0d9488' },
+      'Heritage & Museums': { name: 'Heritage & Museums', color: '#0284c7' },
+      'Subsidized Cultural NPOs': { name: 'Subsidized Cultural NPOs', color: '#ec4899' },
+      'Creative Industries & Film': { name: 'Creative & Film', color: '#8b5cf6' },
+      'Sport & Recreation': { name: 'Sport & Recreation', color: '#f59e0b' },
+    };
+    const clusterMap: Record<string, { name: string; approved: number; disbursed: number; utilised: number; count: number; color: string }> = {};
+    dynamicAgg.entitySummaries.forEach(s => {
+      const ent = entities.find(e => e.id === s.entityId);
+      const key = ent?.cluster || 'Heritage & Museums';
+      if (!clusterMap[key]) clusterMap[key] = { name: palette[key]?.name || key, approved: 0, disbursed: 0, utilised: 0, count: 0, color: palette[key]?.color || '#64748b' };
+      clusterMap[key].count += 1;
+      clusterMap[key].approved += s.approvedAmount;
+      clusterMap[key].disbursed += s.disbursedToDate;
+      clusterMap[key].utilised += s.ytdActual;
     });
-
     return Object.values(clusterMap);
-  }, [entities, tick]);
+  }, [entities, dynamicAgg]);
+
+  // Priority watchlist: the highest-risk institutions, with facts drawn from the engines.
+  const watchlist = useMemo(() => {
+    return store.entities
+      .filter(isPortfolioMember)
+      .slice()
+      .sort((a, b) => b.riskScore - a.riskScore)
+      .slice(0, 3)
+      .map(e => {
+        const fin = dynamicAgg.entitySummaries.find(s => s.entityId === e.id);
+        const perf = store.getEntityPerformanceSummary(e.id, selectedFinancialPeriod, quarterForSelection);
+        const worst = perf.items.slice().sort((a, b) => a.percentageAchieved - b.percentageAchieved)[0];
+        const overdue = store.reports.filter(r => r.entityId === e.id && r.submissionStatus === 'OVERDUE').length;
+        const facts: string[] = [];
+        if (overdue > 0) facts.push(`${overdue} statutory report${overdue === 1 ? '' : 's'} overdue`);
+        if (fin && fin.missingQuarters.length > 0) facts.push(`${fin.missingQuarters.join(', ')} finance return outstanding`);
+        if (fin && fin.isOverspent) facts.push(`overspent by ${formatCompactZAR(fin.overspendAmount)}`);
+        else if (fin && fin.disbursedToDate > 0) facts.push(`${fin.absorptionRate}% of funds received spent`);
+        if (e.trancheStatus === 'WITHHELD') facts.push('next tranche withheld under PFMA s38(1)(j)');
+        return { entity: e, fin, worst, facts };
+      });
+  }, [tick, dynamicAgg, selectedFinancialPeriod, quarterForSelection]);
+
+  // Recent statutory activity: the real audit trail, newest first.
+  const recentActivity = useMemo(() => store.auditLogs.slice(0, 3), [tick]);
+
+  const timeAgo = (iso: string): string => {
+    const mins = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+    if (mins < 60) return `${mins} min ago`;
+    const hours = Math.round(mins / 60);
+    if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+    const days = Math.round(hours / 24);
+    return `${days} day${days === 1 ? '' : 's'} ago`;
+  };
+
+  const aiInsight = useMemo(() => {
+    const top = watchlist.filter(w => w.entity.riskLevel === 'HIGH' || w.entity.riskLevel === 'CRITICAL').slice(0, 2);
+    const base = `Portfolio milestone attainment averages ${perfAgg.overallDeliveryPercent}% of year-to-date targets, with ${perfAgg.onTrackEntitiesCount} of ${perfAgg.totalEntities} institutions on track.`;
+    return { base, top };
+  }, [watchlist, perfAgg]);
+
+  const launchAnalystQuery = (query: string) => {
+    if (typeof window !== 'undefined') {
+      window.sessionStorage.setItem('dsac_analyst_query', query);
+    }
+    onNavigate('ai');
+  };
 
   // Chart data for Budget Execution Donut / Pie
   const executionChartData = useMemo(() => [
@@ -289,13 +281,13 @@ export const DsacOverviewView: React.FC<DsacOverviewViewProps> = ({
       name: 'Disbursed Balance (Unutilised)', 
       value: disbursedUnutilised, 
       color: '#4f46e5', 
-      desc: 'Transferred funds held by entities awaiting Q3 execution' 
+      desc: 'Transferred funds held by entities and not yet spent' 
     },
     { 
       name: 'Undisbursed Approved Allocation', 
       value: undisbursedAllocation, 
       color: '#94a3b8', 
-      desc: 'Remaining DSAC Vote 40 allocation for Q4 release' 
+      desc: 'Approved allocation not yet transferred to entities' 
     },
   ].filter(d => d.value > 0), [totalAmountUtilisedToDate, disbursedUnutilised, undisbursedAllocation]);
 
@@ -347,226 +339,187 @@ export const DsacOverviewView: React.FC<DsacOverviewViewProps> = ({
 
   return (
     <div className="p-4 sm:p-6 space-y-6 overflow-y-auto flex-1 w-full max-w-7xl mx-auto">
-      
-      {/* 1. TOP STATUTORY BANNER & QUICK WORKFLOW BAR */}
       <div className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 shadow-xs">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-[10px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800 border border-emerald-200 px-2.5 py-0.5 rounded-full">
-                Republic of South Africa
+                South Africa
               </span>
               <span className="text-xs font-semibold text-slate-500">
-                Department of Sport, Arts and Culture • Vote 40
-              </span>
-              <span className="text-xs text-slate-300">•</span>
-              <span className="text-xs font-bold text-slate-700">
-                2025/2026 Q3 Statutory Cycle
+                DSAC portfolio overview
               </span>
             </div>
-            <h1 className="text-xl sm:text-2xl font-black text-slate-900 mt-1 tracking-tight">
-              Executive Portfolio Oversight Dashboard
+            <h1 className="text-xl sm:text-2xl font-black text-slate-900 mt-2 tracking-tight">
+              Department Dashboard
             </h1>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Statutory monitoring, milestone verification, and early risk detection across all 32 institutions
+            <p className="text-xs text-slate-500 mt-1">
+              {toLongFinancialYear(period.financialYear)} • {period.quarter} reporting cycle
             </p>
           </div>
 
           <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
-            {/* Year Selector */}
             <select
               value={selectedFinancialPeriod}
               onChange={(e) => handlePeriodChange(e.target.value as any)}
               className="text-xs font-bold text-slate-700 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 cursor-pointer focus:ring-1 focus:ring-emerald-600 focus:outline-hidden"
             >
-              <option value="2025/26">2025/2026 (Current)</option>
-              <option value="2024/25">2024/2025 (Audited)</option>
-              <option value="2023/24">2023/2024 (Prior)</option>
+              {periodOptions.map(o => (
+                <option key={o.value} value={o.value}>{o.headerLabel}</option>
+              ))}
             </select>
 
-            {/* Toggleable Oversight Lifecycle */}
             <button
               onClick={() => setShowWorkflowGuide(!showWorkflowGuide)}
               className="inline-flex items-center gap-1 px-3 py-2 rounded-xl text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 border border-slate-200 transition-colors cursor-pointer"
             >
-              <span>{showWorkflowGuide ? 'Hide Cycle' : 'Oversight Cycle'}</span>
+              <span>{showWorkflowGuide ? 'Hide details' : 'Quick view'}</span>
               <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showWorkflowGuide ? 'rotate-180' : ''}`} />
             </button>
           </div>
         </div>
 
-        {/* Expandable Statutory Cycle Strip */}
         {showWorkflowGuide && (
-          <div className="mt-4 pt-4 border-t border-slate-100 animate-fadeIn">
+          <div className="mt-4 pt-4 border-t border-slate-100">
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-              <div 
-                onClick={() => onNavigate('reports')}
-                className="p-3 rounded-xl bg-slate-50 hover:bg-emerald-50/60 border border-slate-200/80 hover:border-emerald-300 cursor-pointer transition-all group"
-              >
-                <div className="flex items-center justify-between text-xs font-bold text-emerald-800">
-                  <span className="w-5 h-5 rounded-full bg-emerald-600 text-white text-[10px] flex items-center justify-center font-bold">1</span>
-                  <span className="text-[10px] uppercase tracking-wider text-slate-400 group-hover:text-emerald-700">Submissions</span>
-                </div>
-                <div className="font-black text-xs text-slate-900 mt-1 flex items-center justify-between">
-                  <span>1. REPORT</span>
-                  <ArrowRight className="w-3 h-3 text-slate-400 group-hover:translate-x-1 transition-transform" />
-                </div>
-                <p className="text-[11px] text-slate-500 mt-0.5">Entities submit quarterly KPI data, expenditure and PoEs.</p>
-              </div>
-
-              <div 
-                onClick={() => onNavigate('performance')}
-                className="p-3 rounded-xl bg-slate-50 hover:bg-emerald-50/60 border border-slate-200/80 hover:border-emerald-300 cursor-pointer transition-all group"
-              >
-                <div className="flex items-center justify-between text-xs font-bold text-emerald-800">
-                  <span className="w-5 h-5 rounded-full bg-emerald-600 text-white text-[10px] flex items-center justify-center font-bold">2</span>
-                  <span className="text-[10px] uppercase tracking-wider text-slate-400 group-hover:text-emerald-700">Tracking</span>
-                </div>
-                <div className="font-black text-xs text-slate-900 mt-1 flex items-center justify-between">
-                  <span>2. MONITOR</span>
-                  <ArrowRight className="w-3 h-3 text-slate-400 group-hover:translate-x-1 transition-transform" />
-                </div>
-                <p className="text-[11px] text-slate-500 mt-0.5">Live tracking of milestone delivery and Vote 40 transfers.</p>
-              </div>
-
-              <div 
-                onClick={() => onNavigate('risks')}
-                className="p-3 rounded-xl bg-slate-50 hover:bg-amber-50/60 border border-slate-200/80 hover:border-amber-300 cursor-pointer transition-all group"
-              >
-                <div className="flex items-center justify-between text-xs font-bold text-amber-800">
-                  <span className="w-5 h-5 rounded-full bg-amber-500 text-white text-[10px] flex items-center justify-center font-bold">3</span>
-                  <span className="text-[10px] uppercase tracking-wider text-slate-400 group-hover:text-amber-700">Radar</span>
-                </div>
-                <div className="font-black text-xs text-slate-900 mt-1 flex items-center justify-between">
-                  <span>3. IDENTIFY</span>
-                  <ArrowRight className="w-3 h-3 text-slate-400 group-hover:translate-x-1 transition-transform" />
-                </div>
-                <p className="text-[11px] text-slate-500 mt-0.5">System flags delivery variances and governance risks early.</p>
-              </div>
-
-              <div 
-                onClick={() => onNavigate('tasks')}
-                className="p-3 rounded-xl bg-slate-50 hover:bg-rose-50/60 border border-slate-200/80 hover:border-rose-300 cursor-pointer transition-all group"
-              >
-                <div className="flex items-center justify-between text-xs font-bold text-rose-800">
-                  <span className="w-5 h-5 rounded-full bg-rose-600 text-white text-[10px] flex items-center justify-center font-bold">4</span>
-                  <span className="text-[10px] uppercase tracking-wider text-slate-400 group-hover:text-rose-700">Action</span>
-                </div>
-                <div className="font-black text-xs text-slate-900 mt-1 flex items-center justify-between">
-                  <span>4. ACT</span>
-                  <ArrowRight className="w-3 h-3 text-slate-400 group-hover:translate-x-1 transition-transform" />
-                </div>
-                <p className="text-[11px] text-slate-500 mt-0.5">Issue formal directives, remedial tasks and PFMA resolutions.</p>
-              </div>
+              <button onClick={() => onNavigate('reports')} className="p-3 rounded-xl bg-slate-50 hover:bg-emerald-50 border border-slate-200 hover:border-emerald-300 text-left cursor-pointer">
+                <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-800">Reports</div>
+                <div className="font-black text-xs text-slate-900 mt-1">Submitted</div>
+              </button>
+              <button onClick={() => onNavigate('performance')} className="p-3 rounded-xl bg-slate-50 hover:bg-emerald-50 border border-slate-200 hover:border-emerald-300 text-left cursor-pointer">
+                <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-800">Performance</div>
+                <div className="font-black text-xs text-slate-900 mt-1">On track</div>
+              </button>
+              <button onClick={() => onNavigate('risks')} className="p-3 rounded-xl bg-slate-50 hover:bg-amber-50 border border-slate-200 hover:border-amber-300 text-left cursor-pointer">
+                <div className="text-[10px] font-bold uppercase tracking-wider text-amber-800">Risk</div>
+                <div className="font-black text-xs text-slate-900 mt-1">High risk</div>
+              </button>
+              <button onClick={() => onNavigate('tasks')} className="p-3 rounded-xl bg-slate-50 hover:bg-rose-50 border border-slate-200 hover:border-rose-300 text-left cursor-pointer">
+                <div className="text-[10px] font-bold uppercase tracking-wider text-rose-800">Action</div>
+                <div className="font-black text-xs text-slate-900 mt-1">Directives</div>
+              </button>
             </div>
           </div>
         )}
       </div>
 
-      {/* 2. THE 3 ENHANCED TABS ON TOP OF THE FINANCIAL OVERVIEW DASHBOARD */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {/* Tab 1: Number of Entities */}
-        <div 
-          onClick={() => onNavigate('entities')}
-          className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 flex flex-col justify-between hover:border-teal-500 hover:shadow-md cursor-pointer transition-all group relative overflow-hidden"
-        >
-          <div className="flex items-center justify-between">
-            <div className="w-13 h-13 rounded-xl bg-teal-50 text-teal-700 flex items-center justify-center group-hover:scale-105 transition-transform border border-teal-100">
-              <Building2 className="w-5 h-5" />
+      <div className="grid grid-cols-2 xl:grid-cols-7 gap-3">
+        {[
+          { label: 'Total Entities', value: totalInstitutions, icon: Building2, color: 'bg-teal-50 text-teal-700', action: () => onNavigate('entities') },
+          { label: 'Submitted', value: reportsSubmittedCount, icon: FileCheck, color: 'bg-emerald-50 text-emerald-700', action: () => onNavigate('reports') },
+          { label: 'Pending Verification', value: reportsOutstandingCount, icon: Clock, color: 'bg-amber-50 text-amber-700', action: () => onNavigate('risks') },
+          { label: 'Corrections Required', value: pulse.currentQuarterReturnedCount, icon: AlertTriangle, color: 'bg-rose-50 text-rose-700', action: () => onNavigate('tasks') },
+          { label: 'High Risk', value: highRiskEntitiesCount, icon: ShieldCheck, color: 'bg-violet-50 text-violet-700', action: () => onNavigate('risks') },
+          { label: 'Compliance', value: `${Math.min(100, Math.round((reportsSubmittedCount / Math.max(totalInstitutions, 1)) * 100))}%`, icon: CheckCircle2, color: 'bg-indigo-50 text-indigo-700', action: () => onNavigate('performance') },
+          { label: 'Budget Utilised', value: `${Math.round(expenditureRate)}%`, icon: Coins, color: 'bg-sky-50 text-sky-700', action: () => onNavigate('financials') },
+        ].map((card) => {
+          const Icon = card.icon;
+          return (
+            <button
+              key={card.label}
+              onClick={card.action}
+              className="bg-white border border-slate-200 rounded-2xl p-3 text-left hover:border-emerald-400 hover:shadow-sm transition-all cursor-pointer"
+            >
+              <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${card.color}`}>
+                <Icon className="w-4 h-4" />
+              </div>
+              <div className="mt-4 text-2xl font-black text-slate-900 tracking-tight">{card.value}</div>
+              <div className="text-[11px] text-slate-500 mt-1 leading-tight">{card.label}</div>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-12 gap-5">
+        <div className="xl:col-span-7 bg-white border border-slate-200 rounded-2xl p-5 shadow-xs">
+          <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+            <div>
+              <div className="text-[10px] font-black uppercase tracking-wider text-slate-500">Financial overview</div>
+              <h2 className="text-lg font-black text-slate-900 mt-1">Budget utilisation</h2>
             </div>
-            <span className="text-[11px] font-bold text-slate-600 bg-slate-100 px-2.5 py-0.5 rounded-full border border-slate-200">
-              PFMA 3A &amp; Subsidized
-            </span>
+            <button onClick={() => onNavigate('financials')} className="text-xs font-bold text-emerald-700 hover:text-emerald-800 cursor-pointer">
+              View details
+            </button>
           </div>
-          <div className="my-3">
-            <div className="flex items-baseline gap-2">
-              <span className="text-3xl sm:text-4xl font-black text-slate-900 tracking-tight leading-none">
-                {totalInstitutions}
-              </span>
-              <span className="text-xs font-bold text-slate-400 uppercase tracking-wide">
-                Total Organisations
-              </span>
+
+          <div className="mt-4 grid grid-cols-3 gap-3">
+            <div className="rounded-xl bg-slate-50 p-3 border border-slate-200">
+              <div className="text-[10px] uppercase tracking-wider text-slate-500">Approved</div>
+              <div className="text-xl font-black mt-1 text-slate-900">{formatCompactZAR(totalApprovedBudget)}</div>
             </div>
-            <div className="text-sm font-bold text-slate-800 mt-1.5">
-              Number of Entities
+            <div className="rounded-xl bg-emerald-50 p-3 border border-emerald-200">
+              <div className="text-[10px] uppercase tracking-wider text-emerald-700">Utilised</div>
+              <div className="text-xl font-black mt-1 text-emerald-800">{formatCompactZAR(totalAmountUtilisedToDate)}</div>
             </div>
-            <div className="text-xs text-slate-500 mt-0.5">
-              26 Public Entities • 6 Cultural Non-Profits (NPOs)
+            <div className="rounded-xl bg-sky-50 p-3 border border-sky-200">
+              <div className="text-[10px] uppercase tracking-wider text-sky-700">Remaining</div>
+              <div className="text-xl font-black mt-1 text-sky-800">{formatCompactZAR(remainingDisbursement)}</div>
             </div>
           </div>
-          <div className="pt-2.5 border-t border-slate-100 flex items-center justify-between text-xs font-bold text-teal-700 group-hover:text-teal-800">
-            <span>View Entities Tab</span>
-            <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+
+          <div className="mt-5 space-y-3">
+            <div>
+              <div className="flex items-center justify-between text-xs mb-1">
+                <span className="font-bold text-slate-700">Utilisation</span>
+                <span className="font-black text-slate-900">{Math.round(expenditureRate)}%</span>
+              </div>
+              <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden">
+                <div style={{ width: `${Math.min(100, Math.max(0, expenditureRate))}%` }} className="h-full bg-emerald-600 rounded-full" />
+              </div>
+            </div>
+            <div>
+              <div className="flex items-center justify-between text-xs mb-1">
+                <span className="font-bold text-slate-700">Transfer rate</span>
+                <span className="font-black text-slate-900">{Math.round(transferRate)}%</span>
+              </div>
+              <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden">
+                <div style={{ width: `${Math.min(100, Math.max(0, transferRate))}%` }} className="h-full bg-sky-500 rounded-full" />
+              </div>
+            </div>
           </div>
         </div>
 
-        {/* Tab 2: Reports Submitted */}
-        <div 
-          onClick={() => onNavigate('reports')}
-          className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 flex flex-col justify-between hover:border-emerald-500 hover:shadow-md cursor-pointer transition-all group relative overflow-hidden"
-        >
-          <div className="flex items-center justify-between">
-            <div className="w-13 h-13 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center group-hover:scale-105 transition-transform border border-emerald-100">
-              <FileCheck className="w-5 h-5" />
+        <div className="xl:col-span-5 bg-white border border-slate-200 rounded-2xl p-5 shadow-xs">
+          <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+            <div>
+              <div className="text-[10px] font-black uppercase tracking-wider text-slate-500">Performance</div>
+              <h2 className="text-lg font-black text-slate-900 mt-1">Portfolio status</h2>
             </div>
-            <span className="text-[11px] font-bold text-emerald-800 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200/60">
-              {submissionRate}% Compliant
-            </span>
+            <button onClick={() => onNavigate('performance')} className="text-xs font-bold text-emerald-700 hover:text-emerald-800 cursor-pointer">
+              Open KPI view
+            </button>
           </div>
-          <div className="my-3">
-            <div className="flex items-baseline gap-2">
-              <span className="text-3xl sm:text-4xl font-black text-slate-900 tracking-tight leading-none font-mono">
-                {reportsSubmittedCount}
-              </span>
-              <span className="text-sm font-black text-emerald-700 font-mono">
-                / {totalInstitutions}
-              </span>
-            </div>
-            <div className="text-sm font-bold text-slate-800 mt-1.5">
-              Reports Submitted
-            </div>
-            <div className="text-xs text-slate-500 mt-0.5">
-              This Quarter ({submissionRate}%) • {reportsOutstanding} Clearance Required
-            </div>
-          </div>
-          <div className="pt-2.5 border-t border-slate-100 flex items-center justify-between text-xs font-bold text-emerald-700 group-hover:text-emerald-800">
-            <span>Side View</span>
-            <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-          </div>
-        </div>
 
-        {/* Tab 3: Alerts on Overdue and High Risks */}
-        <div 
-          onClick={() => onNavigate('risks')}
-          className="bg-white border border-rose-200/80 rounded-2xl p-4 sm:p-5 flex flex-col justify-between hover:border-rose-500 hover:shadow-md cursor-pointer transition-all group relative overflow-hidden"
-        >
-          <div className="flex items-center justify-between">
-            <div className="w-13 h-13 rounded-xl bg-rose-50 text-rose-700 flex items-center justify-center group-hover:scale-105 transition-transform border border-rose-100">
-              <AlertTriangle className="w-5 h-5" />
+          <div className="mt-4 space-y-3">
+            <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-3">
+              <div className="text-[10px] uppercase tracking-wider text-emerald-700">Overall achievement</div>
+              <div className="text-3xl font-black text-emerald-800 mt-1">{perfAgg.overallDeliveryPercent}%</div>
             </div>
-            <span className="text-[11px] font-bold text-rose-800 bg-rose-50 px-2.5 py-0.5 rounded-full border border-rose-200/60">
-              Action Required
-            </span>
-          </div>
-          <div className="my-3">
-            <div className="flex items-baseline gap-2">
-              <span className="text-3xl sm:text-4xl font-black text-rose-700 tracking-tight leading-none">
-                {reportsOutstanding + highRiskEntitiesCount}
-              </span>
-              <span className="text-xs font-bold text-rose-600 uppercase tracking-wide">
-                {reportsOutstanding} Overdue • {highRiskEntitiesCount} High Risk
-              </span>
+            <div className="grid grid-cols-3 gap-2 text-center">
+              <div className="rounded-xl bg-slate-50 border border-slate-200 p-2">
+                <div className="text-emerald-700 text-lg font-black">✓</div>
+                <div className="text-[10px] text-slate-500">On track</div>
+              </div>
+              <div className="rounded-xl bg-slate-50 border border-slate-200 p-2">
+                <div className="text-amber-700 text-lg font-black">⚠</div>
+                <div className="text-[10px] text-slate-500">At risk</div>
+              </div>
+              <div className="rounded-xl bg-slate-50 border border-slate-200 p-2">
+                <div className="text-rose-700 text-lg font-black">✕</div>
+                <div className="text-[10px] text-slate-500">Missed</div>
+              </div>
             </div>
-            <div className="text-sm font-bold text-slate-800 mt-1.5">
-              Alerts on Overdue &amp; High Risks
+            <div className="rounded-xl bg-slate-50 border border-slate-200 p-3">
+              <div className="text-[10px] uppercase tracking-wider text-slate-500">Verification</div>
+              <div className="mt-2 flex items-center justify-between text-sm font-bold text-slate-800">
+                <span>Pending</span>
+                <span>{reportsOutstandingCount}</span>
+              </div>
+              <div className="mt-2 flex items-center justify-between text-sm font-bold text-slate-800">
+                <span>Verified</span>
+                <span>{reportsSubmittedCount}</span>
+              </div>
             </div>
-            <div className="text-xs text-slate-500 mt-0.5">
-              Statutory non-submissions &amp; Section 38 risk classifications
-            </div>
-          </div>
-          <div className="pt-2.5 border-t border-slate-100 flex items-center justify-between text-xs font-bold text-rose-700 group-hover:text-rose-800">
-            <span>Side View</span>
-            <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
           </div>
         </div>
       </div>
@@ -585,11 +538,11 @@ export const DsacOverviewView: React.FC<DsacOverviewViewProps> = ({
                     Budget Utilization
                   </h3>
                   <span className="text-[10px] font-bold bg-emerald-100 text-emerald-800 px-2.5 py-0.5 rounded-full uppercase">
-                    Vote 40
+                    Vote 37
                   </span>
                 </div>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Burn rate of total money spent vs. disbursed total
+                  Absorption (spent vs. disbursed) • {finSummary.budgetUtilisation}% of approved budget utilised
                 </p>
               </div>
 
@@ -600,9 +553,9 @@ export const DsacOverviewView: React.FC<DsacOverviewViewProps> = ({
                   onChange={(e) => handlePeriodChange(e.target.value as any)}
                   className="appearance-none cursor-pointer pl-3 pr-7 py-1.5 text-xs font-bold text-emerald-700 bg-white border border-emerald-500 rounded-lg hover:bg-emerald-50/50 focus:outline-hidden focus:ring-1 focus:ring-emerald-500 transition-colors shadow-xs"
                 >
-                  <option value="2025/26">This Financial Year</option>
-                  <option value="2024/25">2024/25 Financial Year</option>
-                  <option value="2023/24">2023/24 Financial Year</option>
+                  {periodOptions.map(o => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
                 </select>
                 <ChevronDown className="w-3.5 h-3.5 text-emerald-600 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" />
               </div>
@@ -632,18 +585,18 @@ export const DsacOverviewView: React.FC<DsacOverviewViewProps> = ({
               </ResponsiveContainer>
 
               {/* Inside the Pie Chart: Text + Amount + Percentage */}
-              <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-center px-4">
-                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
+              <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-center px-10">
+                <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wide">
                   {finSummary.periodLabel}
                 </span>
-                <span className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight leading-none mt-0.5">
+                <span className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight leading-none mt-0.5">
                   {formatCompactZAR(finSummary.spent)}
                 </span>
                 <span className="text-[11px] text-slate-500 font-medium mt-0.5">
                   Total Spent to Date
                 </span>
                 <span className="mt-1 px-2.5 py-0.5 rounded-full text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200">
-                  ({finSummary.burnRate.toFixed(1)}%)
+                  ({finSummary.burnRate}%)
                 </span>
               </div>
             </div>
@@ -671,7 +624,7 @@ export const DsacOverviewView: React.FC<DsacOverviewViewProps> = ({
                     <span className="w-2 h-2 rounded-full bg-emerald-600 shrink-0" />
                     {formatCompactZAR(finSummary.spent)} Total Spent to Date
                   </span>
-                  <span className="font-bold text-emerald-700 font-mono">{finSummary.burnRate.toFixed(1)}%</span>
+                  <span className="font-bold text-emerald-700 font-mono">{finSummary.burnRate}%</span>
                 </div>
                 <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
                   <div style={{ width: `${finSummary.burnRate}%` }} className="h-full bg-emerald-600 rounded-full" />
@@ -685,7 +638,7 @@ export const DsacOverviewView: React.FC<DsacOverviewViewProps> = ({
                     <span className="w-2 h-2 rounded-full bg-sky-500 shrink-0" />
                     {formatCompactZAR(finSummary.unspentDisbursed)} Unspent Balance
                   </span>
-                  <span className="font-bold text-sky-700 font-mono">{finSummary.unspentPct.toFixed(1)}%</span>
+                  <span className="font-bold text-sky-700 font-mono">{finSummary.unspentPct}%</span>
                 </div>
                 <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
                   <div style={{ width: `${finSummary.unspentPct}%` }} className="h-full bg-sky-500 rounded-full" />
@@ -722,7 +675,7 @@ export const DsacOverviewView: React.FC<DsacOverviewViewProps> = ({
                 </div>
                 
                 <div className="text-[11px] font-bold text-slate-500 mt-0.5">
-                  All 26 PEs &amp; 6 Subsidized NPOs
+                  All {pulse.publicEntitiesCount} PEs &amp; {pulse.nposCount} Subsidized NPOs
                 </div>
               </div>
 
@@ -731,11 +684,11 @@ export const DsacOverviewView: React.FC<DsacOverviewViewProps> = ({
                 <div className="flex items-center justify-between text-[11px] font-bold mb-1.5">
                   <span className="flex items-center gap-1 text-emerald-800">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-600" />
-                    26 PEs ({finSummary.pePct.toFixed(1)}%)
+                    {pulse.publicEntitiesCount} PEs ({finSummary.pePct}%)
                   </span>
                   <span className="flex items-center gap-1 text-sky-800">
                     <span className="w-1.5 h-1.5 rounded-full bg-sky-600" />
-                    6 NPOs ({finSummary.npoPct.toFixed(1)}%)
+                    {pulse.nposCount} NPOs ({finSummary.npoPct}%)
                   </span>
                 </div>
                 <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden flex">
@@ -766,7 +719,7 @@ export const DsacOverviewView: React.FC<DsacOverviewViewProps> = ({
                 <div className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight leading-none">
                   {formatCompactZAR(finSummary.transferred)}{' '}
                   <span className="text-base sm:text-lg font-bold text-indigo-600">
-                    ({finSummary.disbursedPct.toFixed(1)}%)
+                    ({finSummary.disbursedPct}%)
                   </span>
                 </div>
                 <div className="text-xs font-bold text-slate-800 mt-1">
@@ -811,17 +764,19 @@ export const DsacOverviewView: React.FC<DsacOverviewViewProps> = ({
 
       </div>
 
-      {/* 4. MILESTONE DELIVERY & ATTAINMENT (UNDER FINANCIALS, ABOVE PRIORITY WATCHLIST) */}
+      {/* 4. MILESTONE DELIVERY & ATTAINMENT: computed from the KPI engine (no typed figures) */}
       <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-100">
           <div>
             <div className="flex items-center gap-2">
               <h3 className="text-base font-black text-slate-900">Milestone Delivery &amp; Attainment</h3>
               <span className="text-[10px] font-bold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full uppercase">
-                Q3 Verified
+                {isCurrentYear ? `${period.quarter} Year-to-Date` : 'Full Year'}
               </span>
             </div>
-            <p className="text-xs text-slate-500 mt-0.5">Annual Performance Plan (APP) target delivery status across all 32 institutions</p>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Annual Performance Plan (APP) target delivery across {perfAgg.totalEntities} institutions and {perfAgg.totalKpis} indicators
+            </p>
           </div>
 
           <button
@@ -836,24 +791,26 @@ export const DsacOverviewView: React.FC<DsacOverviewViewProps> = ({
         {/* Delivery Progress Bar */}
         <div>
           <div className="flex items-center justify-between text-xs mb-1.5">
-            <span className="font-bold text-slate-700">Portfolio Target Delivery Rate</span>
-            <span className="font-black text-slate-900 font-mono text-sm">64.2%</span>
+            <span className="font-bold text-slate-700">Portfolio Target Delivery Rate <span className="font-medium text-slate-400">(average achievement vs year-to-date target)</span></span>
+            <span className="font-black text-slate-900 font-mono text-sm">{perfAgg.overallDeliveryPercent}%</span>
           </div>
           <div className="w-full h-3.5 bg-slate-100 rounded-full overflow-hidden flex shadow-inner">
-            <div style={{ width: '64.2%' }} className="h-full bg-emerald-500" title="Achieved (64.2%)" />
-            <div style={{ width: '18%' }} className="h-full bg-amber-400" title="In Progress (18.0%)" />
-            <div style={{ width: '17.8%' }} className="h-full bg-rose-500" title="Lagging (17.8%)" />
+            {perfAgg.statusDistribution.map(seg => (
+              <div
+                key={seg.name}
+                style={{ width: `${perfAgg.totalKpis > 0 ? (seg.value / perfAgg.totalKpis) * 100 : 0}%`, backgroundColor: seg.color }}
+                className="h-full"
+                title={`${seg.name} (${seg.percent}%)`}
+              />
+            ))}
           </div>
           <div className="flex items-center justify-between text-[11px] text-slate-500 mt-2 font-medium flex-wrap gap-2">
-            <span className="flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span> Achieved (64.2% • 312 Indicators)
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-amber-400"></span> In Progress (18.0% • 86 Indicators)
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-rose-500"></span> Lagging (17.8% • 82 Indicators)
-            </span>
+            {perfAgg.statusDistribution.map(seg => (
+              <span key={seg.name} className="flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: seg.color }}></span>
+                {seg.name === 'Completed' ? 'Achieved' : seg.name === 'Missed' ? 'Not Achieved' : seg.name} ({seg.percent}% • {seg.value} Indicators)
+              </span>
+            ))}
           </div>
         </div>
 
@@ -862,62 +819,34 @@ export const DsacOverviewView: React.FC<DsacOverviewViewProps> = ({
           <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-2.5">
             Attainment Rate by Cluster:
           </span>
-          
+
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 text-xs">
-            <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/80">
-              <div className="flex justify-between text-slate-800 mb-1 font-semibold">
-                <span>Performing Arts &amp; Theatres (5)</span>
-                <span className="font-bold font-mono text-emerald-700">72.4%</span>
-              </div>
-              <div className="w-full h-1.5 bg-slate-200 rounded-full overflow-hidden">
-                <div style={{ width: '72.4%' }} className="h-full bg-emerald-500 rounded-full" />
-              </div>
-            </div>
-
-            <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/80">
-              <div className="flex justify-between text-slate-800 mb-1 font-semibold">
-                <span>Heritage &amp; Museums (13)</span>
-                <span className="font-bold font-mono text-emerald-700">68.1%</span>
-              </div>
-              <div className="w-full h-1.5 bg-slate-200 rounded-full overflow-hidden">
-                <div style={{ width: '68.1%' }} className="h-full bg-emerald-500 rounded-full" />
-              </div>
-            </div>
-
-            <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/80">
-              <div className="flex justify-between text-slate-800 mb-1 font-semibold">
-                <span>Subsidized Cultural NPOs (6)</span>
-                <span className="font-bold font-mono text-emerald-700">65.0%</span>
-              </div>
-              <div className="w-full h-1.5 bg-slate-200 rounded-full overflow-hidden">
-                <div style={{ width: '65.0%' }} className="h-full bg-emerald-500 rounded-full" />
-              </div>
-            </div>
-
-            <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/80">
-              <div className="flex justify-between text-slate-800 mb-1 font-semibold">
-                <span>Creative Industries &amp; Film (4)</span>
-                <span className="font-bold font-mono text-amber-700">61.5%</span>
-              </div>
-              <div className="w-full h-1.5 bg-slate-200 rounded-full overflow-hidden">
-                <div style={{ width: '61.5%' }} className="h-full bg-amber-500 rounded-full" />
-              </div>
-            </div>
-
-            <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/80">
-              <div className="flex justify-between text-slate-800 mb-1 font-semibold">
-                <span>Sport &amp; Recreation (2)</span>
-                <span className="font-bold font-mono text-rose-700">48.2%</span>
-              </div>
-              <div className="w-full h-1.5 bg-slate-200 rounded-full overflow-hidden">
-                <div style={{ width: '48.2%' }} className="h-full bg-rose-500 rounded-full" />
-              </div>
-            </div>
+            {perfAgg.clusterBreakdown.map(c => {
+              const tone = c.achievementRate >= 75 ? 'emerald' : c.achievementRate >= 60 ? 'amber' : 'rose';
+              return (
+                <div key={c.cluster} className="p-3 rounded-xl bg-slate-50 border border-slate-200/80">
+                  <div className="flex justify-between text-slate-800 mb-1 font-semibold">
+                    <span>{c.cluster} ({c.entityCount})</span>
+                    <span className={`font-bold font-mono ${tone === 'emerald' ? 'text-emerald-700' : tone === 'amber' ? 'text-amber-700' : 'text-rose-700'}`}>
+                      {c.achievementRate}%
+                    </span>
+                  </div>
+                  <div className="w-full h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                    <div
+                      style={{ width: `${Math.min(100, c.achievementRate)}%` }}
+                      className={`h-full rounded-full ${tone === 'emerald' ? 'bg-emerald-500' : tone === 'amber' ? 'bg-amber-500' : 'bg-rose-500'}`}
+                    />
+                  </div>
+                </div>
+              );
+            })}
 
             <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/80 flex items-center justify-between">
               <div>
                 <span className="text-[10px] text-slate-400 font-bold uppercase block">Statutory Cut-Off</span>
-                <span className="text-xs font-black text-slate-800">31 Jan 2026 (Q3 Clearance)</span>
+                <span className="text-xs font-black text-slate-800">
+                  {new Date(quarterDueDate(period.financialYear, period.quarter)).toLocaleDateString('en-ZA', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' })} ({period.quarter} Clearance)
+                </span>
               </div>
               <span className="text-[10px] font-bold bg-amber-100 text-amber-900 px-2 py-0.5 rounded-full">
                 Active Cycle
@@ -927,7 +856,7 @@ export const DsacOverviewView: React.FC<DsacOverviewViewProps> = ({
         </div>
       </div>
 
-      {/* 5. PRIORITY ATTENTION WATCHLIST (BELOW MILESTONE DELIVERY & ATTAINMENT) */}
+      {/* 5. PRIORITY ATTENTION WATCHLIST: highest-risk institutions, computed */}
       <div className="bg-white border border-rose-200/90 rounded-2xl p-5 shadow-xs">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-rose-100">
           <div className="flex items-center gap-2.5">
@@ -936,13 +865,13 @@ export const DsacOverviewView: React.FC<DsacOverviewViewProps> = ({
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h2 className="text-base font-black text-slate-900">Priority Attention Watchlist</h2>
+                <h2 className="text-base font-black text-slate-900">Needs attention</h2>
                 <span className="text-[10px] font-black bg-rose-100 text-rose-800 px-2 py-0.5 rounded-full">
-                  3 Flagged Institutions
+                  {pulse.interventionCount} to review
                 </span>
               </div>
               <p className="text-xs text-slate-500 mt-0.5">
-                Target delivery variances, expenditure pacing anomalies, and statutory compliance issues
+                Organisations with the clearest delivery, finance, or reporting concerns
               </p>
             </div>
           </div>
@@ -951,144 +880,71 @@ export const DsacOverviewView: React.FC<DsacOverviewViewProps> = ({
             onClick={() => onNavigate('risks')}
             className="text-xs font-bold text-rose-700 hover:text-rose-800 flex items-center gap-1 cursor-pointer"
           >
-            <span>Full Risk Radar</span>
+            <span>See all risks</span>
             <ChevronRight className="w-3.5 h-3.5" />
           </button>
         </div>
 
-        {/* 3 Structured Attention Cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
-          {/* Card 1: Boxing South Africa */}
-          <div className="border border-rose-200 rounded-xl p-4 bg-rose-50/30 flex flex-col justify-between hover:shadow-xs transition-shadow">
-            <div>
-              <div className="flex items-start justify-between gap-2">
+          {watchlist.map(({ entity, worst, facts }) => {
+            const critical = entity.riskLevel === 'CRITICAL';
+            const high = entity.riskLevel === 'HIGH';
+            const border = critical ? 'border-rose-200 bg-rose-50/30' : high ? 'border-amber-200 bg-amber-50/30' : 'border-slate-200 bg-slate-50/50';
+            const pill = critical ? 'bg-rose-100 text-rose-800' : high ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-700';
+            const label = critical ? 'Critical Risk' : high ? 'High Risk' : entity.riskLevel === 'MEDIUM' ? 'Monitor' : 'Low Risk';
+            return (
+              <div key={entity.id} className={`border rounded-xl p-4 flex flex-col justify-between hover:shadow-xs transition-shadow ${border}`}>
                 <div>
-                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Sport &amp; Recreation</span>
-                  <h3 className="text-sm font-black text-slate-900 mt-0.5">Boxing South Africa (BSA)</h3>
-                </div>
-                <span className="text-[10px] font-black px-2 py-0.5 rounded bg-rose-100 text-rose-800 shrink-0">
-                  Critical Risk
-                </span>
-              </div>
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">{entity.cluster}</span>
+                      <h3 className="text-sm font-black text-slate-900 mt-0.5">{entity.name}</h3>
+                    </div>
+                    <span className={`text-[10px] font-black px-2 py-0.5 rounded shrink-0 ${pill}`}>
+                        {label} · {entity.riskScore}/100
+                    </span>
+                  </div>
 
-              <div className="mt-3 space-y-2 text-xs">
-                <div>
-                  <span className="text-[11px] font-bold text-rose-900 block">Variance:</span>
-                  <p className="text-slate-800 font-medium leading-snug">
-                    40% target delivery rate (4 of 10 sanctioned bouts delivered).
-                  </p>
+                  <div className="mt-3 space-y-2 text-xs">
+                    <div>
+                        <span className="text-[11px] font-bold text-slate-900 block">Main gap</span>
+                        <p className="text-slate-800 font-medium leading-snug mt-0.5">
+                        {worst
+                            ? `${worst.percentageAchieved}% delivered against the year-to-date target for ${worst.name}.`
+                          : 'No indicators reported for this period.'}
+                      </p>
+                    </div>
+                      <div className="bg-white/80 p-2.5 rounded-lg border border-slate-200 text-[11px] text-slate-700 leading-snug">
+                        <span className="font-bold text-slate-900">Why review it:</span>{' '}
+                        {facts.length > 0 ? facts.slice(0, 2).join(' • ') : 'No statutory or expenditure exceptions recorded.'}
+                        {facts.length > 2 && <span className="text-slate-500"> + {facts.length - 2} more issue{facts.length - 2 === 1 ? '' : 's'}</span>}
+                    </div>
+                  </div>
                 </div>
-                <div className="bg-white/80 p-2.5 rounded-lg border border-rose-100 text-[11px] text-slate-700 leading-snug">
-                  Promoter licensing dispute halted scheduled tournaments; Q3 governance report 18 days overdue.
-                </div>
-              </div>
-            </div>
 
-            <div className="mt-4 pt-3 border-t border-rose-200/60 flex items-center gap-2">
-              <button
-                onClick={() => onNavigate('reports')}
-                className="flex-1 py-1.5 rounded-lg text-xs font-bold bg-white hover:bg-slate-50 text-slate-800 border border-slate-200 text-center transition-colors cursor-pointer"
-              >
-                Review Report
-              </button>
-              <button
-                onClick={() => onNavigate('tasks')}
-                className="flex-1 py-1.5 rounded-lg text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white text-center transition-colors cursor-pointer"
-              >
-                Directive
-              </button>
-            </div>
-          </div>
-
-          {/* Card 2: National Arts Council */}
-          <div className="border border-amber-200 rounded-xl p-4 bg-amber-50/30 flex flex-col justify-between hover:shadow-xs transition-shadow">
-            <div>
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Creative &amp; Film</span>
-                  <h3 className="text-sm font-black text-slate-900 mt-0.5">National Arts Council (NAC)</h3>
-                </div>
-                <span className="text-[10px] font-black px-2 py-0.5 rounded bg-amber-100 text-amber-800 shrink-0">
-                  Requires Review
-                </span>
-              </div>
-
-              <div className="mt-3 space-y-2 text-xs">
-                <div>
-                  <span className="text-[11px] font-bold text-amber-900 block">Variance:</span>
-                  <p className="text-slate-800 font-medium leading-snug">
-                    Grant disbursement at 82% pacing vs 58% project evidence dossiers.
-                  </p>
-                </div>
-                <div className="bg-white/80 p-2.5 rounded-lg border border-amber-100 text-[11px] text-slate-700 leading-snug">
-                  Expenditure burn rate outpacing verified deliverables; review recommended prior to Q4 tranche release.
+                <div className="mt-4 pt-3 border-t border-slate-200/70 flex items-center gap-2">
+                  <button
+                    onClick={() => onNavigate('risks')}
+                    className="flex-1 py-1.5 rounded-lg text-xs font-bold bg-white hover:bg-slate-50 text-slate-800 border border-slate-200 text-center transition-colors cursor-pointer"
+                  >
+                    View details
+                  </button>
+                  <button
+                    onClick={() => onNavigate('tasks')}
+                    className={`flex-1 py-1.5 rounded-lg text-xs font-bold text-white text-center transition-colors cursor-pointer ${critical ? 'bg-rose-600 hover:bg-rose-700' : high ? 'bg-amber-600 hover:bg-amber-700' : 'bg-slate-900 hover:bg-slate-800'}`}
+                  >
+                    Take action
+                  </button>
                 </div>
               </div>
-            </div>
-
-            <div className="mt-4 pt-3 border-t border-amber-200/60 flex items-center gap-2">
-              <button
-                onClick={() => onNavigate('financials')}
-                className="flex-1 py-1.5 rounded-lg text-xs font-bold bg-white hover:bg-slate-50 text-slate-800 border border-slate-200 text-center transition-colors cursor-pointer"
-              >
-                Audit Tranche
-              </button>
-              <button
-                onClick={() => onNavigate('reports')}
-                className="flex-1 py-1.5 rounded-lg text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white text-center transition-colors cursor-pointer"
-              >
-                Review Report
-              </button>
-            </div>
-          </div>
-
-          {/* Card 3: PACOFS */}
-          <div className="border border-slate-200 rounded-xl p-4 bg-slate-50/50 flex flex-col justify-between hover:shadow-xs transition-shadow">
-            <div>
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Performing Arts</span>
-                  <h3 className="text-sm font-black text-slate-900 mt-0.5">PACOFS (Free State)</h3>
-                </div>
-                <span className="text-[10px] font-black px-2 py-0.5 rounded bg-rose-100 text-rose-800 shrink-0">
-                  Audit Findings
-                </span>
-              </div>
-
-              <div className="mt-3 space-y-2 text-xs">
-                <div>
-                  <span className="text-[11px] font-bold text-slate-900 block">Variance:</span>
-                  <p className="text-slate-800 font-medium leading-snug">
-                    3 unresolved AGSA audit findings outstanding &gt;90 days.
-                  </p>
-                </div>
-                <div className="bg-white/80 p-2.5 rounded-lg border border-slate-200 text-[11px] text-slate-700 leading-snug">
-                  Theatre sound and stage lighting assets valuation reconciliation delayed past statutory timeline.
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-4 pt-3 border-t border-slate-200 flex items-center gap-2">
-              <button
-                onClick={() => onNavigate('risks')}
-                className="flex-1 py-1.5 rounded-lg text-xs font-bold bg-white hover:bg-slate-50 text-slate-800 border border-slate-200 text-center transition-colors cursor-pointer"
-              >
-                Risk Profile
-              </button>
-              <button
-                onClick={() => onNavigate('tasks')}
-                className="flex-1 py-1.5 rounded-lg text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white text-center transition-colors cursor-pointer"
-              >
-                Directive
-              </button>
-            </div>
-          </div>
+            );
+          })}
         </div>
       </div>
 
       {/* 6. RECENT STATUTORY ACTIVITY & AI EXECUTIVE INSIGHTS */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-        {/* Left Column: Recent Activity Feed (lg:col-span-7) */}
+        {/* Left Column: Recent Activity Feed (lg:col-span-7), read from the real audit trail */}
         <div className="lg:col-span-7 bg-white rounded-2xl p-5 border border-slate-200 shadow-xs flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
@@ -1106,50 +962,32 @@ export const DsacOverviewView: React.FC<DsacOverviewViewProps> = ({
             </div>
 
             <div className="mt-3.5 space-y-2.5">
-              <div className="flex items-start gap-3 p-3 rounded-xl bg-slate-50 border border-slate-100 text-xs">
-                <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0 mt-0.5">
-                  <CheckCircle2 className="w-4 h-4" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold text-slate-900 truncate">Artscape Theatre Centre</span>
-                    <span className="text-[10px] text-slate-400">1 hour ago</span>
+              {recentActivity.length === 0 && (
+                <p className="text-xs text-slate-500 p-3">No activity has been recorded yet.</p>
+              )}
+              {recentActivity.map(entry => {
+                const negative = /CORRECTION|REJECTED|WITHHELD|NOTICE|DENIED|FAILED|DELETED/.test(entry.action);
+                const positive = /APPROVED|VERIFIED|RELEASED|DISBURSED/.test(entry.action);
+                const tone = negative ? 'rose' : positive ? 'emerald' : 'blue';
+                const Icon = negative ? AlertCircle : positive ? CheckCircle2 : FileText;
+                return (
+                  <div
+                    key={entry.id}
+                    className={`flex items-start gap-3 p-3 rounded-xl border text-xs ${tone === 'rose' ? 'bg-rose-50/40 border-rose-100' : 'bg-slate-50 border-slate-100'}`}
+                  >
+                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 mt-0.5 ${tone === 'rose' ? 'bg-rose-100 text-rose-700' : tone === 'emerald' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'}`}>
+                      <Icon className="w-4 h-4" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-bold text-slate-900 truncate">{entry.entityName || 'DSAC National Headquarters'}</span>
+                        <span className="text-[10px] text-slate-400 shrink-0">{timeAgo(entry.timestamp)}</span>
+                      </div>
+                      <p className="text-[11px] text-slate-600 mt-0.5 line-clamp-2">{entry.details}</p>
+                    </div>
                   </div>
-                  <p className="text-[11px] text-slate-600 mt-0.5">
-                    Q3 Performance and Expenditure report reviewed and cleared by departmental oversight reviewer.
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex items-start gap-3 p-3 rounded-xl bg-rose-50/40 border border-rose-100 text-xs">
-                <div className="w-8 h-8 rounded-lg bg-rose-100 text-rose-700 flex items-center justify-center shrink-0 mt-0.5">
-                  <AlertCircle className="w-4 h-4" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold text-slate-900 truncate">Boxing South Africa</span>
-                    <span className="text-[10px] text-rose-600 font-bold">Directive Issued</span>
-                  </div>
-                  <p className="text-[11px] text-slate-600 mt-0.5">
-                    Ministerial corrective directive #DIR-2026-08 issued regarding sanctioned bout delivery and reporting.
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex items-start gap-3 p-3 rounded-xl bg-slate-50 border border-slate-100 text-xs">
-                <div className="w-8 h-8 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center shrink-0 mt-0.5">
-                  <FileText className="w-4 h-4" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold text-slate-900 truncate">National Film &amp; Video Foundation</span>
-                    <span className="text-[10px] text-slate-400">Yesterday</span>
-                  </div>
-                  <p className="text-[11px] text-slate-600 mt-0.5">
-                    Tranche 2 development grant verification approved following beneficiary evidence dossier clearance.
-                  </p>
-                </div>
-              </div>
+                );
+              })}
             </div>
           </div>
 
@@ -1165,7 +1003,7 @@ export const DsacOverviewView: React.FC<DsacOverviewViewProps> = ({
           </div>
         </div>
 
-        {/* Right Column: AI Performance Analyst Insights (lg:col-span-5) */}
+        {/* Right Column: Analyst Insights (lg:col-span-5). Rule-based, generated from the same figures as above. */}
         <div className="lg:col-span-5 bg-gradient-to-br from-[#044332] to-[#02281e] text-white rounded-2xl p-5 shadow-xs flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between pb-3 border-b border-emerald-700/60">
@@ -1174,12 +1012,12 @@ export const DsacOverviewView: React.FC<DsacOverviewViewProps> = ({
                   <Sparkles className="w-4 h-4" />
                 </div>
                 <div>
-                  <h3 className="text-sm font-black text-white">AI Performance Analyst</h3>
-                  <p className="text-[11px] text-emerald-200/70">Cross-Portfolio Intelligence</p>
+                  <h3 className="text-sm font-black text-white">Performance Analyst</h3>
+                  <p className="text-[11px] text-emerald-200/70">Cross-Portfolio Intelligence (rule-based)</p>
                 </div>
               </div>
               <button
-                onClick={() => onNavigate('ai')}
+                onClick={() => launchAnalystQuery('Which public entities currently require urgent management attention?')}
                 className="text-xs text-emerald-300 hover:text-white font-bold flex items-center gap-1 cursor-pointer"
               >
                 <span>Launch</span>
@@ -1188,29 +1026,44 @@ export const DsacOverviewView: React.FC<DsacOverviewViewProps> = ({
             </div>
 
             <div className="mt-4 p-3.5 rounded-xl bg-emerald-950/60 border border-emerald-700/40 text-xs text-emerald-100 leading-relaxed">
-              "Portfolio milestone attainment is healthy across 29 of 32 institutions. Early departmental intervention is recommended for <strong className="text-white">Boxing South Africa</strong> and <strong className="text-white">National Arts Council</strong> to prevent year-end subvention retentions."
+              {aiInsight.base}{' '}
+              {aiInsight.top.length > 0 ? (
+                <>
+                  Early departmental intervention is recommended for{' '}
+                  {aiInsight.top.map((w, i) => (
+                    <React.Fragment key={w.entity.id}>
+                      {i > 0 && ' and '}
+                      <strong className="text-white">{w.entity.name}</strong>
+                    </React.Fragment>
+                  ))}.
+                </>
+              ) : (
+                'No institution currently requires intervention.'
+              )}
             </div>
 
             <div className="mt-4 space-y-2">
               <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-300 block">Suggested Inquiries:</span>
               <div className="space-y-1.5">
                 <button
-                  onClick={() => onNavigate('ai')}
+                  onClick={() => launchAnalystQuery('Which public entities currently require urgent management attention?')}
                   className="w-full text-left px-3 py-1.5 rounded-lg text-xs bg-white/10 hover:bg-white/20 border border-white/15 text-white transition-all cursor-pointer truncate"
                 >
                   → Which entities require immediate intervention?
                 </button>
+                {watchlist[0] && (
+                  <button
+                    onClick={() => launchAnalystQuery(`Why is ${watchlist[0].entity.shortCode} flagged?`)}
+                    className="w-full text-left px-3 py-1.5 rounded-lg text-xs bg-white/10 hover:bg-white/20 border border-white/15 text-white transition-all cursor-pointer truncate"
+                  >
+                    → Why is {watchlist[0].entity.shortCode} flagged?
+                  </button>
+                )}
                 <button
-                  onClick={() => onNavigate('ai')}
+                  onClick={() => launchAnalystQuery('Analyse funding expenditure versus service delivery output variance')}
                   className="w-full text-left px-3 py-1.5 rounded-lg text-xs bg-white/10 hover:bg-white/20 border border-white/15 text-white transition-all cursor-pointer truncate"
                 >
-                  → Why is Boxing SA flagged for delivery delay?
-                </button>
-                <button
-                  onClick={() => onNavigate('ai')}
-                  className="w-full text-left px-3 py-1.5 rounded-lg text-xs bg-white/10 hover:bg-white/20 border border-white/15 text-white transition-all cursor-pointer truncate"
-                >
-                  → Compare grant disbursements with evidence dossiers
+                  → Compare spending against delivery
                 </button>
               </div>
             </div>

@@ -1,29 +1,23 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { 
-  FileText, 
-  Download, 
-  CheckCircle2, 
-  Clock, 
-  AlertTriangle, 
-  Search, 
-  Filter, 
-  ExternalLink, 
-  FileSpreadsheet, 
-  Check, 
+import React, { useEffect, useMemo, useState } from 'react';
+import {
+  FileText,
+  Download,
+  CheckCircle2,
+  Search,
+  ExternalLink,
+  Check,
   RotateCcw,
-  Eye,
-  Building2,
-  Calendar,
-  Layers,
-  Send,
   FolderLock,
   Inbox,
-  ShieldCheck,
-  AlertCircle
+  AlertCircle,
+  Clock,
 } from 'lucide-react';
-import { PublicEntity, QuarterlyReport, EntityDocument } from '../../types';
+import { PublicEntity } from '../../types';
 import { store } from '../../services/store';
+import { formatZAR, isPortfolioMember } from '../../services/financialService';
 import { downloadStatutoryDocument } from '../../services/downloadHelper';
+import { getCurrentReportingPeriod, normalizeFinancialYear } from '../../services/reportingPeriod';
+import { getEvidenceSummary } from '../../services/evidenceStatus';
 
 interface DsacReportsViewProps {
   entities: PublicEntity[];
@@ -32,338 +26,238 @@ interface DsacReportsViewProps {
   initialSubtab?: 'submissions' | 'documents' | 'review';
 }
 
-interface ReportItemRecord {
+type RecordStatus = 'VERIFIED' | 'UNDER_REVIEW' | 'REQUIRES_AMENDMENT' | 'OVERDUE';
+type RecordQuarter = 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'ANNUAL';
+
+/**
+ * One row of the reporting centre. Every row is derived from the store: structured quarterly returns and the
+ * documents entities have actually uploaded. (The previous version appended a typed list of invented reports and
+ * showed the same "all verified" evidence checklist for every report, even overdue ones.)
+ */
+interface ReportRecord {
   id: string;
+  kind: 'REPORT' | 'DOCUMENT';
   entityId: string;
   entityName: string;
-  quarter: 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'ANNUAL';
+  quarter: RecordQuarter;
   year: string;
   title: string;
-  type: 'Quarterly Performance Report (QPR)' | 'Annual Performance Plan (APP)' | 'Portfolio of Evidence (PoE)' | 'Audited Financial Statements (AFS)' | 'Strategic Plan';
-  status: 'VERIFIED' | 'UNDER_REVIEW' | 'REQUIRES_AMENDMENT';
+  type: string;
+  status: RecordStatus;
   submittedDate: string;
-  fileFormat: 'PDF' | 'XLSX';
-  fileSize: string;
-  reportingOfficer: string;
-  executiveSummary: string;
+  format: string;
+  sizeLabel: string;
+  officer: string;
+  summary: string;
 }
 
-const INITIAL_REPORTS_LIST: ReportItemRecord[] = [
-  {
-    id: 'rep-001',
-    entityId: 'ent-ubuntu-arts',
-    entityName: 'Ubuntu Arts NPO',
-    quarter: 'Q2',
-    year: '2024/25',
-    title: 'Ubuntu Arts NPO - Q2 Statutory Performance & Expenditure Report',
-    type: 'Quarterly Performance Report (QPR)',
-    status: 'VERIFIED',
-    submittedDate: '28 Jul 2026',
-    fileFormat: 'PDF',
-    fileSize: '4.8 MB',
-    reportingOfficer: 'Lerato Phiri',
-    executiveSummary: 'Full reconciliation of Q2 youth theater masterclasses, audience outreach metrics across 12 township centers, and grant expenditure against approved budget vote.'
-  },
-  {
-    id: 'rep-002',
-    entityId: 'ent-ubuntu-arts',
-    entityName: 'Ubuntu Arts NPO',
-    quarter: 'Q2',
-    year: '2024/25',
-    title: 'Ubuntu Arts NPO - Q2 Portfolio of Evidence (PoE) Dossier',
-    type: 'Portfolio of Evidence (PoE)',
-    status: 'VERIFIED',
-    submittedDate: '28 Jul 2026',
-    fileFormat: 'PDF',
-    fileSize: '18.4 MB',
-    reportingOfficer: 'Lerato Phiri',
-    executiveSummary: 'Comprehensive portfolio containing participant attendance registers, photo documentation of performances, independent auditor expenditure vouchers, and tax compliance receipts.'
-  },
-  {
-    id: 'rep-003',
-    entityId: 'ent-sahra',
-    entityName: 'South African Heritage Resources Agency (SAHRA)',
-    quarter: 'Q2',
-    year: '2024/25',
-    title: 'SAHRA Q2 National Heritage Grading & SAHRIS Registry Report',
-    type: 'Quarterly Performance Report (QPR)',
-    status: 'VERIFIED',
-    submittedDate: '30 Jul 2026',
-    fileFormat: 'PDF',
-    fileSize: '6.2 MB',
-    reportingOfficer: 'Kagiso Mokoena',
-    executiveSummary: 'Audit of 14 national heritage landmarks inspected, 42 export permits evaluated, and maritime archaeology surveys along the Agulhas coastline.'
-  },
-  {
-    id: 'rep-004',
-    entityId: 'ent-sahra',
-    entityName: 'South African Heritage Resources Agency (SAHRA)',
-    quarter: 'Q3',
-    year: '2024/25',
-    title: 'SAHRA Q3 Interim Performance & Statutory Compliance Report',
-    type: 'Quarterly Performance Report (QPR)',
-    status: 'UNDER_REVIEW',
-    submittedDate: '10 Sep 2026',
-    fileFormat: 'PDF',
-    fileSize: '5.1 MB',
-    reportingOfficer: 'Kagiso Mokoena',
-    executiveSummary: 'Draft Q3 delivery status covering Section 27 site gazetting, community consultative forums in Limpopo, and expenditure tracking.'
-  },
-  {
-    id: 'rep-005',
-    entityId: 'ent-nac',
-    entityName: 'National Arts Council of South Africa (NAC)',
-    quarter: 'Q2',
-    year: '2024/25',
-    title: 'NAC Q2 Grant Disbursements & Sector Beneficiaries Report',
-    type: 'Quarterly Performance Report (QPR)',
-    status: 'VERIFIED',
-    submittedDate: '31 Jul 2026',
-    fileFormat: 'PDF',
-    fileSize: '7.9 MB',
-    reportingOfficer: 'Sibusiso Ndlovu',
-    executiveSummary: 'Statistical breakdown of individual artist project grants, provincial allocation quotas, and transformation benchmarks.'
-  },
-  {
-    id: 'rep-006',
-    entityId: 'ent-nac',
-    entityName: 'National Arts Council of South Africa (NAC)',
-    quarter: 'Q3',
-    year: '2024/25',
-    title: 'NAC Q3 Interim Financial Statements & Grant Audit Reconciliation',
-    type: 'Audited Financial Statements (AFS)',
-    status: 'REQUIRES_AMENDMENT',
-    submittedDate: '02 Sep 2026',
-    fileFormat: 'XLSX',
-    fileSize: '3.4 MB',
-    reportingOfficer: 'Sibusiso Ndlovu',
-    executiveSummary: 'Quarterly ledger reconciliation returned by DSAC Oversight due to discrepancy between provincial commitments and National Treasury disbursement thresholds.'
-  },
-  {
-    id: 'rep-007',
-    entityId: 'ent-nfvf',
-    entityName: 'National Film and Video Foundation (NFVF)',
-    quarter: 'Q2',
-    year: '2024/25',
-    title: 'NFVF Q2 Feature Film & Documentary Production Funding Report',
-    type: 'Quarterly Performance Report (QPR)',
-    status: 'VERIFIED',
-    submittedDate: '29 Jul 2026',
-    fileFormat: 'PDF',
-    fileSize: '5.8 MB',
-    reportingOfficer: 'Thabang Phetla',
-    executiveSummary: 'Review of 22 South African motion pictures supported, international market delegations, and employment creation in scriptwriting and cinematography.'
-  },
-  {
-    id: 'rep-008',
-    entityId: 'ent-bsa',
-    entityName: 'Boxing South Africa (BSA)',
-    quarter: 'Q2',
-    year: '2024/25',
-    title: 'BSA Q2 Tournament Sanctioning & Boxer Safety Compliance Report',
-    type: 'Quarterly Performance Report (QPR)',
-    status: 'UNDER_REVIEW',
-    submittedDate: '12 Aug 2026',
-    fileFormat: 'PDF',
-    fileSize: '3.1 MB',
-    reportingOfficer: 'Lwazi Mwandla',
-    executiveSummary: 'Overview of 18 professional boxing tournaments sanctioned across 5 provinces, medical clearance compliance, and ringside safety audits.'
-  },
-  {
-    id: 'rep-009',
-    entityId: 'ent-artscape',
-    entityName: 'Artscape Theatre Centre',
-    quarter: 'Q2',
-    year: '2024/25',
-    title: 'Artscape Q2 Performing Arts & Audience Diversity Report',
-    type: 'Quarterly Performance Report (QPR)',
-    status: 'VERIFIED',
-    submittedDate: '25 Jul 2026',
-    fileFormat: 'PDF',
-    fileSize: '8.2 MB',
-    reportingOfficer: 'Simone Adams',
-    executiveSummary: 'Staging of 64 theatre productions, youth accessibility school buses, and operational venue safety audits.'
-  },
-  {
-    id: 'rep-010',
-    entityId: 'ent-iziko',
-    entityName: 'Iziko Museums of South Africa',
-    quarter: 'Q2',
-    year: '2024/25',
-    title: 'Iziko Museums Q2 Curatorial & Visitor Metrics Report',
-    type: 'Quarterly Performance Report (QPR)',
-    status: 'VERIFIED',
-    submittedDate: '27 Jul 2026',
-    fileFormat: 'PDF',
-    fileSize: '9.5 MB',
-    reportingOfficer: 'Fatima Davids',
-    executiveSummary: 'Curatorial exhibitions, educational visits by 14,000 learners, and heritage artifact conservation audits.'
-  }
-];
+const DOCUMENT_TYPE_LABEL: Record<string, string> = {
+  STRATEGIC_PLAN: 'Strategic Plan',
+  ANNUAL_PERFORMANCE_PLAN: 'Annual Performance Plan (APP)',
+  OPERATIONAL_PLAN: 'Operational Plan',
+  QUARTERLY_REPORT: 'Quarterly Report (document)',
+  ANNUAL_REPORT: 'Annual Report',
+  FINANCIAL_REPORT: 'Financial Statements (AFS)',
+  PORTFOLIO_OF_EVIDENCE: 'Portfolio of Evidence (PoE)',
+  GOVERNANCE_CHARTER: 'Governance Document',
+  TAX_AND_BANKING: 'Tax & Banking Record',
+};
+const QPR_TYPE = 'Quarterly Performance Report (QPR)';
+const QUARTER_RANK: Record<RecordQuarter, number> = { ANNUAL: 5, Q4: 4, Q3: 3, Q2: 2, Q1: 1 };
+
+const fmtDate = (iso?: string) =>
+  iso ? new Date(iso).toLocaleDateString('en-ZA', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' }) : '—';
+
+const STATUS_BADGE: Record<RecordStatus, { label: string; cls: string }> = {
+  VERIFIED: { label: 'Verified', cls: 'bg-emerald-100 text-emerald-800' },
+  UNDER_REVIEW: { label: 'Reviewing', cls: 'bg-amber-100 text-amber-800' },
+  REQUIRES_AMENDMENT: { label: 'Amendment', cls: 'bg-rose-100 text-rose-800' },
+  OVERDUE: { label: 'Overdue', cls: 'bg-slate-800 text-white' },
+};
+
+const SLOT_BADGE: Record<string, { label: string; cls: string }> = {
+  VERIFIED: { label: 'Verified', cls: 'text-emerald-700 bg-emerald-100' },
+  MANUAL_REVIEW: { label: 'Manual review', cls: 'text-amber-800 bg-amber-100' },
+  VALIDATING: { label: 'Validating', cls: 'text-amber-800 bg-amber-100' },
+  REJECTED: { label: 'Rejected', cls: 'text-rose-800 bg-rose-100' },
+  MISSING: { label: 'Missing', cls: 'text-rose-800 bg-rose-100' },
+};
 
 export const DsacReportsView: React.FC<DsacReportsViewProps> = ({
-  entities,
-  onSelectEntity,
   onOpenWorkspace,
-  initialSubtab = 'submissions'
+  initialSubtab = 'submissions',
 }) => {
-  const [, setTick] = useState(0);
-  useEffect(() => {
-    return store.subscribe(() => setTick(t => t + 1));
-  }, []);
+  const [tick, setTick] = useState(0);
+  useEffect(() => store.subscribe(() => setTick(t => t + 1)), []);
 
+  const period = getCurrentReportingPeriod();
   const [activeTab, setActiveTab] = useState<'submissions' | 'documents' | 'review'>(initialSubtab);
-
-  // Merge store documents & reports with baseline list to give a 100% comprehensive view
-  const reports: ReportItemRecord[] = useMemo(() => {
-    // 1. Documents from store (e.g. uploaded statutory PoE and governance files)
-    const storeDocRecords: ReportItemRecord[] = store.documents.map(d => {
-      const ent = store.entities.find(e => e.id === d.entityId);
-      const fileName = d.fileName || d.title || '';
-      const isPdf = fileName.toLowerCase().endsWith('.pdf');
-      const formattedStatus: 'VERIFIED' | 'UNDER_REVIEW' | 'REQUIRES_AMENDMENT' = 
-        d.approvalStatus === 'APPROVED' ? 'VERIFIED' :
-        d.approvalStatus === 'REQUIRES_AMENDMENT' ? 'REQUIRES_AMENDMENT' : 'UNDER_REVIEW';
-
-      const typeMap: Record<string, ReportItemRecord['type']> = {
-        'PORTFOLIO_OF_EVIDENCE': 'Portfolio of Evidence (PoE)',
-        'OPERATIONAL_PLAN': 'Annual Performance Plan (APP)',
-        'FINANCIAL_REPORT': 'Audited Financial Statements (AFS)',
-        'ANNUAL_REPORT': 'Quarterly Performance Report (QPR)',
-        'GOVERNANCE_CHARTER': 'Quarterly Performance Report (QPR)'
-      };
-
-      return {
-        id: d.id,
-        entityId: d.entityId,
-        entityName: ent ? ent.name : d.entityName,
-        quarter: 'Q2',
-        year: d.financialYear || '2024/25',
-        title: d.title,
-        type: typeMap[d.category] || 'Portfolio of Evidence (PoE)',
-        status: formattedStatus,
-        submittedDate: d.uploadedAt ? d.uploadedAt.split('T')[0] : '14 Jul 2025',
-        fileFormat: isPdf ? 'PDF' : 'PDF',
-        fileSize: d.fileSize || '3.5 MB',
-        reportingOfficer: d.uploadedBy || 'Institutional Admin',
-        executiveSummary: d.verificationSummary || `Statutory evidence submission uploaded under Section 38 audit verification. Verified against public entity grant covenants.`
-      };
-    });
-
-    // 2. Reports from store (quarterly statutory reports)
-    const storeReportRecords: ReportItemRecord[] = store.reports.map(r => {
-      const ent = store.entities.find(e => e.id === r.entityId);
-      const formattedStatus: 'VERIFIED' | 'UNDER_REVIEW' | 'REQUIRES_AMENDMENT' =
-        r.submissionStatus === 'APPROVED' ? 'VERIFIED' :
-        r.submissionStatus === 'CORRECTION_REQUIRED' ? 'REQUIRES_AMENDMENT' : 'UNDER_REVIEW';
-
-      return {
-        id: r.id,
-        entityId: r.entityId,
-        entityName: ent ? ent.name : r.entityName,
-        quarter: r.quarter,
-        year: r.financialYear || '2024/25',
-        title: `${ent?.shortCode || ent?.name || 'Institutional'} ${r.quarter} Statutory Performance & Expenditure Report`,
-        type: 'Quarterly Performance Report (QPR)',
-        status: formattedStatus,
-        submittedDate: r.submittedAt ? r.submittedAt.split('T')[0] : '14 Jul 2025',
-        fileFormat: 'PDF',
-        fileSize: '4.2 MB',
-        reportingOfficer: r.submittedByName || r.submittedBy || 'Reporting Officer',
-        executiveSummary: r.varianceExplanations || `Statutory quarterly report covering programmatic milestones and expenditure reconciliation of R ${((r.fundsSpentThisQuarterZAR || 0) / 1_000_000).toFixed(1)}M under PFMA Vote 40.`
-      };
-    });
-
-    // 3. Baseline records, filtered so we do not duplicate IDs
-    const existingIds = new Set([...storeDocRecords.map(d => d.id), ...storeReportRecords.map(r => r.id)]);
-    const filteredBaseline = INITIAL_REPORTS_LIST.filter(b => !existingIds.has(b.id));
-
-    return [...storeDocRecords, ...storeReportRecords, ...filteredBaseline];
-  }, [store.documents, store.reports, store.entities]);
-
-  const [selectedReportId, setSelectedReportId] = useState<string>('rep-001');
+  const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
   const [quarterFilter, setQuarterFilter] = useState<string>('ALL');
   const [typeFilter, setTypeFilter] = useState<string>('ALL');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [searchTerm, setSearchTerm] = useState('');
   const [actionNotice, setActionNotice] = useState<string | null>(null);
+  const [reviewNote, setReviewNote] = useState('');
+
+  const notify = (message: string) => {
+    setActionNotice(message);
+    setTimeout(() => setActionNotice(null), 4500);
+  };
+
+  const reports: ReportRecord[] = useMemo(() => {
+    const members = new Set(store.entities.filter(isPortfolioMember).map(e => e.id));
+    const nameOf = (id: string, fallback: string) => store.entities.find(e => e.id === id)?.name || fallback;
+
+    const documentRecords: ReportRecord[] = store.documents
+      .filter(d => members.has(d.entityId))
+      .map(d => {
+        const status: RecordStatus =
+          d.approvalStatus === 'APPROVED' || d.verificationStatus === 'VERIFIED' ? 'VERIFIED'
+          : d.approvalStatus === 'REQUIRES_AMENDMENT' || d.verificationStatus === 'REJECTED' ? 'REQUIRES_AMENDMENT'
+          : 'UNDER_REVIEW';
+        const fileName = d.fileName || d.title;
+        return {
+          id: d.id,
+          kind: 'DOCUMENT',
+          entityId: d.entityId,
+          entityName: nameOf(d.entityId, d.entityName),
+          quarter: d.quarter ?? 'ANNUAL',
+          year: normalizeFinancialYear(d.financialYear),
+          title: d.title,
+          type: DOCUMENT_TYPE_LABEL[d.category] || 'Document',
+          status,
+          submittedDate: fmtDate(d.uploadedAt),
+          format: (fileName.split('.').pop() || 'FILE').toUpperCase().slice(0, 5),
+          sizeLabel: d.fileSize || '—',
+          officer: d.uploadedBy || '—',
+          summary: d.verificationSummary || 'No verification summary has been recorded for this document.',
+        };
+      });
+
+    const reportRecords: ReportRecord[] = store.reports
+      .filter(r => members.has(r.entityId))
+      .map(r => {
+        const ent = store.entities.find(e => e.id === r.entityId);
+        const status: RecordStatus =
+          r.submissionStatus === 'APPROVED' ? 'VERIFIED'
+          : r.submissionStatus === 'CORRECTION_REQUIRED' ? 'REQUIRES_AMENDMENT'
+          : r.submissionStatus === 'OVERDUE' || r.submissionStatus === 'DRAFT' ? 'OVERDUE'
+          : 'UNDER_REVIEW';
+        const achieved = r.items.filter(i => i.status === 'COMPLETED' || i.status === 'ON_TRACK').length;
+        const facts = r.items.length > 0
+          ? `${r.items.length} indicators reported, ${achieved} achieved or on track; expenditure ${formatZAR(r.fundsSpentThisQuarterZAR || 0)}.`
+          : 'No indicators have been reported yet.';
+        return {
+          id: r.id,
+          kind: 'REPORT',
+          entityId: r.entityId,
+          entityName: ent ? ent.name : r.entityName,
+          quarter: r.quarter,
+          year: normalizeFinancialYear(r.financialYear),
+          title: `${ent?.shortCode || ent?.name || 'Institution'} ${r.quarter} Statutory Performance & Expenditure Report`,
+          type: QPR_TYPE,
+          status,
+          submittedDate: fmtDate(r.submittedAt),
+          format: 'Return',
+          sizeLabel: `${r.items.length} ${r.items.length === 1 ? 'indicator' : 'indicators'}`,
+          officer: r.submittedByName || r.submittedBy || '—',
+          summary: [r.varianceExplanations || r.reviewNotes, facts].filter(Boolean).join(' '),
+        };
+      });
+
+    return [...reportRecords, ...documentRecords].sort(
+      (a, b) => b.year.localeCompare(a.year) || QUARTER_RANK[b.quarter] - QUARTER_RANK[a.quarter] || a.entityName.localeCompare(b.entityName)
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tick]);
+
+  const typeOptions = useMemo(() => Array.from(new Set(reports.map(r => r.type))).sort(), [reports]);
 
   const filteredReports = reports.filter(rep => {
-    const matchesSearch = 
-      rep.entityName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      rep.title.toLowerCase().includes(searchTerm.toLowerCase());
+    const term = searchTerm.toLowerCase();
+    const matchesSearch = rep.entityName.toLowerCase().includes(term) || rep.title.toLowerCase().includes(term);
     const matchesQuarter = quarterFilter === 'ALL' || rep.quarter === quarterFilter;
     const matchesType = typeFilter === 'ALL' || rep.type === typeFilter;
     const matchesStatus = statusFilter === 'ALL' || rep.status === statusFilter;
-    
-    // Subtab alignment
-    const matchesSubtab = 
-      activeTab === 'submissions' ? rep.type === 'Quarterly Performance Report (QPR)' :
-      activeTab === 'documents' ? rep.type !== 'Quarterly Performance Report (QPR)' :
-      (rep.status === 'UNDER_REVIEW' || rep.status === 'REQUIRES_AMENDMENT');
-
+    const matchesSubtab =
+      activeTab === 'submissions' ? rep.kind === 'REPORT'
+      : activeTab === 'documents' ? rep.kind === 'DOCUMENT'
+      : rep.status === 'UNDER_REVIEW' || rep.status === 'REQUIRES_AMENDMENT';
     return matchesSearch && matchesQuarter && matchesType && matchesStatus && matchesSubtab;
   });
 
-  const selectedReport = reports.find(r => r.id === selectedReportId) || filteredReports[0] || reports[0];
+  const selectedReport = filteredReports.find(r => r.id === selectedReportId) || filteredReports[0];
 
-  const handleVerify = (id: string) => {
-    const doc = store.documents.find(d => d.id === id);
-    if (doc) {
-      store.verifyDocument(id, 'APPROVED');
+  // Evidence required for the selected period, with the real status of each requirement.
+  const checklist = useMemo(() => {
+    if (!selectedReport) return null;
+    const q = selectedReport.quarter === 'ANNUAL' ? period.quarter : selectedReport.quarter;
+    return getEvidenceSummary(selectedReport.entityId, q, selectedReport.year);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedReport?.id, tick]);
+
+  const canDecide =
+    !!selectedReport && (selectedReport.kind === 'DOCUMENT' || selectedReport.status === 'UNDER_REVIEW');
+
+  const handleVerify = () => {
+    if (!selectedReport) return;
+    const note = reviewNote.trim();
+    if (selectedReport.kind === 'DOCUMENT') {
+      store.verifyDocument(selectedReport.id, 'APPROVED', note || undefined);
+      const after = store.documents.find(d => d.id === selectedReport.id);
+      notify(after?.approvalStatus === 'APPROVED' ? 'Document verified and logged in the statutory repository.' : 'Only DSAC officials can verify documents.');
     } else {
-      const rep = store.reports.find(r => r.id === id);
-      if (rep) {
-        rep.submissionStatus = 'APPROVED';
-        rep.reviewedAt = new Date().toISOString();
-        rep.reviewedByName = 'DSAC National Oversight Reviewer';
-        const ent = store.entities.find(e => e.id === rep.entityId);
-        if (ent) {
-          ent.overallComplianceScore = Math.min(100, ent.overallComplianceScore + 2);
-          store.recalculateEntityRisk(ent.id);
-        }
-        store.persistAll();
-      }
+      const report = store.reports.find(r => r.id === selectedReport.id);
+      if (!report) return;
+      const before = report.submissionStatus;
+      store.reviewReport(report.id, 'APPROVE', note || 'Approved by DSAC oversight reviewer.');
+      notify(
+        before !== 'APPROVED' && report.submissionStatus === 'APPROVED'
+          ? 'Report approved and logged in the statutory repository.'
+          : `The report is ${before.replace(/_/g, ' ').toLowerCase()} and cannot be approved in that state.`
+      );
     }
-    setActionNotice(`Report formally verified and logged in statutory repository.`);
-    setTimeout(() => setActionNotice(null), 4000);
+    setReviewNote('');
   };
 
-  const handleRequestRevision = (id: string) => {
-    const doc = store.documents.find(d => d.id === id);
-    if (doc) {
-      store.verifyDocument(id, 'REQUIRES_AMENDMENT', 'Clarification required regarding Section 38 PoE vouchers.');
-    } else {
-      const rep = store.reports.find(r => r.id === id);
-      if (rep) {
-        rep.submissionStatus = 'CORRECTION_REQUIRED';
-        const ent = store.entities.find(e => e.id === rep.entityId);
-        if (ent) {
-          store.recalculateEntityRisk(ent.id);
-        }
-        store.persistAll();
-      }
+  const handleRequestRevision = () => {
+    if (!selectedReport) return;
+    const note = reviewNote.trim();
+    if (!note) {
+      notify('Please enter the correction required before returning it.');
+      return;
     }
-    setActionNotice(`Report flagged for clarification. Notification sent to ${selectedReport?.reportingOfficer}.`);
-    setTimeout(() => setActionNotice(null), 4000);
+    if (selectedReport.kind === 'DOCUMENT') {
+      store.verifyDocument(selectedReport.id, 'REQUIRES_AMENDMENT', note);
+      notify(`Document returned to ${selectedReport.officer} for amendment.`);
+    } else {
+      const report = store.reports.find(r => r.id === selectedReport.id);
+      if (!report) return;
+      const before = report.submissionStatus;
+      store.reviewReport(report.id, 'REQUEST_CORRECTION', note);
+      notify(
+        report.submissionStatus === 'CORRECTION_REQUIRED' && before !== 'CORRECTION_REQUIRED'
+          ? `Report returned to ${selectedReport.officer} for correction. A corrective task was created.`
+          : `The report is ${before.replace(/_/g, ' ').toLowerCase()} and cannot be returned in that state.`
+      );
+    }
+    setReviewNote('');
   };
 
   const handleDownload = () => {
     if (!selectedReport) return;
     downloadStatutoryDocument(
-      `${selectedReport.title.replace(/[^a-zA-Z0-9_-]/g, '_')}.pdf`,
+      `${selectedReport.title.replace(/[^a-zA-Z0-9_-]/g, '_')}.txt`,
       selectedReport.title,
       selectedReport.type,
       selectedReport.entityName
     );
-    setActionNotice(`Downloaded authentic departmental copy of "${selectedReport.title}".`);
-    setTimeout(() => setActionNotice(null), 3500);
+    notify(`Downloaded a summary of "${selectedReport.title}".`);
   };
 
-  const totalRepoCount = reports.length;
-  const verifiedCount = reports.filter(r => r.status === 'VERIFIED').length;
-  const underReviewCount = reports.filter(r => r.status === 'UNDER_REVIEW').length;
-  const amendmentCount = reports.filter(r => r.status === 'REQUIRES_AMENDMENT').length;
+  const count = (s: RecordStatus) => reports.filter(r => r.status === s).length;
+  const institutions = new Set(reports.map(r => r.entityId)).size;
 
   return (
     <div className="space-y-4">
@@ -376,18 +270,15 @@ export const DsacReportsView: React.FC<DsacReportsViewProps> = ({
                 <FileText className="w-5 h-5" />
               </span>
               <div>
-                <h2 className="text-lg font-black text-slate-900">
-                  Reporting Centre
-                </h2>
+                <h2 className="text-lg font-black text-slate-900">Reporting Centre</h2>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Submissions, evidence dossiers, and statutory review across 32 institutions
+                  Submissions, evidence dossiers, and statutory review across {store.entities.filter(isPortfolioMember).length} institutions
                 </p>
               </div>
             </div>
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
-            {/* 3 Sub-tabs */}
             <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-xl border border-slate-200/80">
               <button
                 onClick={() => { setActiveTab('submissions'); setTypeFilter('ALL'); setStatusFilter('ALL'); }}
@@ -416,13 +307,13 @@ export const DsacReportsView: React.FC<DsacReportsViewProps> = ({
                 <AlertCircle className="w-3.5 h-3.5 text-amber-600" />
                 <span>Review Queue</span>
                 <span className="text-[10px] px-1.5 py-0.2 bg-amber-100 text-amber-900 rounded-full font-black">
-                  {underReviewCount + amendmentCount}
+                  {count('UNDER_REVIEW') + count('REQUIRES_AMENDMENT')}
                 </span>
               </button>
             </div>
 
             {actionNotice && (
-              <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-medium animate-fadeIn">
+              <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-medium animate-fadeIn" role="status">
                 <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                 <span>{actionNotice}</span>
               </div>
@@ -430,27 +321,32 @@ export const DsacReportsView: React.FC<DsacReportsViewProps> = ({
           </div>
         </div>
 
-        {/* 4 Summary Document Metrics */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-3">
+        {/* Summary metrics */}
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 pt-3">
           <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200/70">
-            <div className="text-[11px] font-semibold text-slate-500">Repository Documents</div>
-            <div className="text-xl font-black text-slate-900 mt-0.5">{totalRepoCount} Reports</div>
-            <div className="text-[10px] text-slate-400">All 32 Institutions</div>
+            <div className="text-[11px] font-semibold text-slate-500">Repository</div>
+            <div className="text-xl font-black text-slate-900 mt-0.5">{reports.length} Records</div>
+            <div className="text-[10px] text-slate-400">{institutions} institutions</div>
           </div>
           <div className="p-2.5 rounded-lg bg-emerald-50/70 border border-emerald-200/70">
             <div className="text-[11px] font-semibold text-emerald-800">Verified &amp; Approved</div>
-            <div className="text-xl font-black text-emerald-700 mt-0.5">{verifiedCount} Reports</div>
-            <div className="text-[10px] text-emerald-600 font-medium">PoE Validated</div>
+            <div className="text-xl font-black text-emerald-700 mt-0.5">{count('VERIFIED')}</div>
+            <div className="text-[10px] text-emerald-600 font-medium">Accepted by DSAC</div>
           </div>
           <div className="p-2.5 rounded-lg bg-amber-50/70 border border-amber-200/70">
             <div className="text-[11px] font-semibold text-amber-800">Under DSAC Review</div>
-            <div className="text-xl font-black text-amber-700 mt-0.5">{underReviewCount} Reports</div>
-            <div className="text-[10px] text-amber-600 font-medium">In Evaluation</div>
+            <div className="text-xl font-black text-amber-700 mt-0.5">{count('UNDER_REVIEW')}</div>
+            <div className="text-[10px] text-amber-600 font-medium">Awaiting a decision</div>
           </div>
           <div className="p-2.5 rounded-lg bg-rose-50/70 border border-rose-200/70">
             <div className="text-[11px] font-semibold text-rose-800">Requires Amendment</div>
-            <div className="text-xl font-black text-rose-700 mt-0.5">{amendmentCount} Reports</div>
-            <div className="text-[10px] text-rose-600 font-medium">Feedback Issued</div>
+            <div className="text-xl font-black text-rose-700 mt-0.5">{count('REQUIRES_AMENDMENT')}</div>
+            <div className="text-[10px] text-rose-600 font-medium">Returned to the entity</div>
+          </div>
+          <div className="p-2.5 rounded-lg bg-slate-100 border border-slate-300/70">
+            <div className="text-[11px] font-semibold text-slate-700">Overdue / Not Lodged</div>
+            <div className="text-xl font-black text-slate-900 mt-0.5">{count('OVERDUE')}</div>
+            <div className="text-[10px] text-slate-500 font-medium">No submission yet</div>
           </div>
         </div>
       </div>
@@ -477,10 +373,11 @@ export const DsacReportsView: React.FC<DsacReportsViewProps> = ({
             className="px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white font-semibold text-slate-700 focus:outline-none focus:ring-1 focus:ring-emerald-500"
           >
             <option value="ALL">All Periods</option>
-            <option value="Q1">Q1 Performance</option>
-            <option value="Q2">Q2 Performance</option>
-            <option value="Q3">Q3 Performance</option>
-            <option value="ANNUAL">Annual Report</option>
+            <option value="Q1">Q1</option>
+            <option value="Q2">Q2</option>
+            <option value="Q3">Q3</option>
+            <option value="Q4">Q4</option>
+            <option value="ANNUAL">Annual</option>
           </select>
 
           <select
@@ -489,10 +386,9 @@ export const DsacReportsView: React.FC<DsacReportsViewProps> = ({
             className="px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white font-semibold text-slate-700 focus:outline-none focus:ring-1 focus:ring-emerald-500"
           >
             <option value="ALL">All Report Types</option>
-            <option value="Quarterly Performance Report (QPR)">Quarterly Reports (QPR)</option>
-            <option value="Portfolio of Evidence (PoE)">Portfolios of Evidence (PoE)</option>
-            <option value="Audited Financial Statements (AFS)">Financial Statements (AFS)</option>
-            <option value="Annual Performance Plan (APP)">Annual Performance Plans</option>
+            {typeOptions.map(t => (
+              <option key={t} value={t}>{t}</option>
+            ))}
           </select>
 
           <select
@@ -504,26 +400,29 @@ export const DsacReportsView: React.FC<DsacReportsViewProps> = ({
             <option value="VERIFIED">Verified &amp; Approved</option>
             <option value="UNDER_REVIEW">Under Review</option>
             <option value="REQUIRES_AMENDMENT">Requires Amendment</option>
+            <option value="OVERDUE">Overdue / Not Lodged</option>
           </select>
         </div>
       </div>
 
-      {/* MASTER-DETAIL SIDE VIEW LAYOUT */}
+      {/* MASTER-DETAIL LAYOUT */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
-        
-        {/* LEFT PANE: Master List of Reports (5 cols on lg) */}
+        {/* LEFT PANE: master list */}
         <div className="lg:col-span-5 bg-white rounded-xl border border-slate-200 p-3 shadow-xs flex flex-col h-[740px]">
           <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-100">
             <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">
-              Reports ({filteredReports.length})
+              Records ({filteredReports.length})
             </span>
-            <span className="text-[11px] text-slate-400 font-medium">Click to inspect in side view</span>
+            <span className="text-[11px] text-slate-400 font-medium">Click to inspect</span>
           </div>
 
           <div className="flex-1 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
+            {filteredReports.length === 0 && (
+              <div className="text-center py-16 text-xs text-slate-400">No records match the current filters.</div>
+            )}
             {filteredReports.map((rep) => {
-              const isSelected = rep.id === selectedReportId;
-
+              const isSelected = rep.id === selectedReport?.id;
+              const badge = STATUS_BADGE[rep.status];
               return (
                 <div
                   key={rep.id}
@@ -540,31 +439,21 @@ export const DsacReportsView: React.FC<DsacReportsViewProps> = ({
                         <span className="text-[9px] font-bold text-emerald-800 bg-emerald-100 px-1.5 py-0.5 rounded-sm">
                           {rep.quarter} {rep.year}
                         </span>
-                        <span className="text-[10px] text-slate-400 font-semibold">{rep.fileFormat}</span>
+                        <span className="text-[10px] text-slate-400 font-semibold">{rep.format}</span>
                       </div>
-                      <h5 className="font-bold text-xs text-slate-900 mt-1 line-clamp-1">
-                        {rep.title}
-                      </h5>
-                      <p className="text-[11px] text-slate-500 font-medium truncate">
-                        {rep.entityName}
-                      </p>
+                      <h5 className="font-bold text-xs text-slate-900 mt-1 line-clamp-1">{rep.title}</h5>
+                      <p className="text-[11px] text-slate-500 font-medium truncate">{rep.entityName}</p>
                     </div>
 
                     <div className="text-right shrink-0">
-                      <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${
-                        rep.status === 'VERIFIED' ? 'bg-emerald-100 text-emerald-800' :
-                        rep.status === 'UNDER_REVIEW' ? 'bg-amber-100 text-amber-800' :
-                        'bg-rose-100 text-rose-800'
-                      }`}>
-                        {rep.status === 'VERIFIED' ? 'Verified' : rep.status === 'UNDER_REVIEW' ? 'Reviewing' : 'Amendment'}
-                      </span>
-                      <div className="text-[9px] text-slate-400 mt-1">{rep.fileSize}</div>
+                      <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${badge.cls}`}>{badge.label}</span>
+                      <div className="text-[9px] text-slate-400 mt-1">{rep.sizeLabel}</div>
                     </div>
                   </div>
 
                   <div className="flex items-center justify-between mt-2 pt-2 border-t border-slate-100 text-[10px] text-slate-400">
                     <span>Submitted: {rep.submittedDate}</span>
-                    <span>Officer: {rep.reportingOfficer}</span>
+                    <span className="truncate ml-2">Officer: {rep.officer}</span>
                   </div>
                 </div>
               );
@@ -572,12 +461,10 @@ export const DsacReportsView: React.FC<DsacReportsViewProps> = ({
           </div>
         </div>
 
-        {/* RIGHT PANE: Side View Detail Dossier (7 cols on lg) */}
+        {/* RIGHT PANE: detail */}
         <div className="lg:col-span-7 bg-white rounded-xl border border-slate-200 p-5 shadow-xs sticky top-20">
           {selectedReport ? (
             <div className="space-y-5">
-              
-              {/* Header */}
               <div className="flex items-start justify-between gap-4 pb-4 border-b border-slate-200">
                 <div>
                   <div className="flex items-center gap-2">
@@ -588,133 +475,122 @@ export const DsacReportsView: React.FC<DsacReportsViewProps> = ({
                       Period: <strong className="text-slate-800">{selectedReport.quarter} {selectedReport.year}</strong>
                     </span>
                   </div>
-                  <h3 className="text-lg font-black text-slate-900 mt-1.5">
-                    {selectedReport.title}
-                  </h3>
+                  <h3 className="text-lg font-black text-slate-900 mt-1.5">{selectedReport.title}</h3>
                   <p className="text-xs text-slate-600 mt-0.5">
-                    Submitting Entity: <strong className="text-slate-800">{selectedReport.entityName}</strong> • Submitted: {selectedReport.submittedDate}
+                    Submitting entity: <strong className="text-slate-800">{selectedReport.entityName}</strong> • Submitted: {selectedReport.submittedDate}
                   </p>
                 </div>
 
                 <div className="text-center p-3 rounded-xl bg-slate-50 border border-slate-200 shrink-0">
-                  <div className="text-lg font-black text-slate-900 leading-none">
-                    {selectedReport.fileSize}
-                  </div>
-                  <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mt-1">
-                    {selectedReport.fileFormat} File
-                  </div>
+                  <div className="text-lg font-black text-slate-900 leading-none">{selectedReport.sizeLabel}</div>
+                  <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mt-1">{selectedReport.format}</div>
                 </div>
               </div>
 
-              {/* Action Toolbar */}
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  onClick={handleDownload}
-                  className="px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-semibold flex items-center gap-1.5 shadow-xs transition-colors"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>Download Official File</span>
-                </button>
-
-                {selectedReport.status !== 'VERIFIED' && (
+              {/* Actions */}
+              <div className="space-y-2.5">
+                <div className="flex flex-wrap items-center gap-2">
                   <button
-                    onClick={() => handleVerify(selectedReport.id)}
-                    className="px-3 py-1.5 rounded-lg bg-teal-50 hover:bg-teal-100 border border-teal-200 text-teal-800 text-xs font-semibold flex items-center gap-1.5 transition-colors"
+                    onClick={handleDownload}
+                    className="px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-semibold flex items-center gap-1.5 shadow-xs transition-colors"
                   >
-                    <Check className="w-3.5 h-3.5 text-teal-600" />
-                    <span>Verify &amp; Sign-Off</span>
+                    <Download className="w-3.5 h-3.5" />
+                    <span>{selectedReport.kind === 'DOCUMENT' ? 'Download Document Summary' : 'Download Return Summary'}</span>
                   </button>
+
+                  {canDecide && selectedReport.status !== 'VERIFIED' && (
+                    <button
+                      onClick={handleVerify}
+                      className="px-3 py-1.5 rounded-lg bg-teal-50 hover:bg-teal-100 border border-teal-200 text-teal-800 text-xs font-semibold flex items-center gap-1.5 transition-colors"
+                    >
+                      <Check className="w-3.5 h-3.5 text-teal-600" />
+                      <span>Verify &amp; Sign-Off</span>
+                    </button>
+                  )}
+
+                  {canDecide && selectedReport.status !== 'REQUIRES_AMENDMENT' && (
+                    <button
+                      onClick={handleRequestRevision}
+                      className="px-3 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-800 text-xs font-semibold flex items-center gap-1.5 transition-colors"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5 text-rose-600" />
+                      <span>Return for Amendment</span>
+                    </button>
+                  )}
+
+                  {onOpenWorkspace && (
+                    <button
+                      onClick={() => onOpenWorkspace(selectedReport.entityId)}
+                      className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold flex items-center gap-1.5 transition-colors ml-auto"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5 text-slate-500" />
+                      <span>Open Entity Workspace</span>
+                    </button>
+                  )}
+                </div>
+
+                {canDecide && selectedReport.status !== 'VERIFIED' && (
+                  <textarea
+                    value={reviewNote}
+                    onChange={(e) => setReviewNote(e.target.value)}
+                    placeholder="Reviewer note (required when returning for amendment)"
+                    rows={2}
+                    className="w-full text-xs p-2.5 rounded-lg border border-slate-200 bg-slate-50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  />
                 )}
 
-                {selectedReport.status !== 'REQUIRES_AMENDMENT' && (
-                  <button
-                    onClick={() => handleRequestRevision(selectedReport.id)}
-                    className="px-3 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-800 text-xs font-semibold flex items-center gap-1.5 transition-colors"
-                  >
-                    <RotateCcw className="w-3.5 h-3.5 text-rose-600" />
-                    <span>Return for Amendment</span>
-                  </button>
-                )}
-
-                {onOpenWorkspace && (
-                  <button
-                    onClick={() => onOpenWorkspace(selectedReport.entityId)}
-                    className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold flex items-center gap-1.5 transition-colors ml-auto"
-                  >
-                    <ExternalLink className="w-3.5 h-3.5 text-slate-500" />
-                    <span>Open Entity Workspace</span>
-                  </button>
+                {selectedReport.status === 'OVERDUE' && (
+                  <div className="flex items-center gap-2 p-2.5 rounded-lg bg-slate-100 border border-slate-200 text-xs text-slate-700">
+                    <Clock className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                    <span>This return has not been lodged, so there is nothing to review yet.</span>
+                  </div>
                 )}
               </div>
 
-              {/* Executive Summary */}
+              {/* Summary */}
               <div className="p-4 rounded-xl bg-slate-50 border border-slate-200/80">
-                <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider mb-1.5">
-                  Executive Summary &amp; Statutory Scope
-                </h4>
-                <p className="text-xs text-slate-600 leading-relaxed">
-                  {selectedReport.executiveSummary}
-                </p>
+                <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider mb-1.5">Summary</h4>
+                <p className="text-xs text-slate-600 leading-relaxed">{selectedReport.summary}</p>
               </div>
 
-              {/* Portfolio of Evidence Verification Details */}
-              <div className="p-4 rounded-xl border border-slate-200 bg-white">
-                <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider mb-2.5 flex items-center justify-between">
-                  <span>Portfolio of Evidence (PoE) Verification Checklist</span>
-                  <span className="text-[11px] text-emerald-700 font-semibold">AGSA Compliant</span>
-                </h4>
+              {/* Portfolio of Evidence: the real requirement slots for this entity and period */}
+              {checklist && (
+                <div className="p-4 rounded-xl border border-slate-200 bg-white">
+                  <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider mb-2.5 flex items-center justify-between">
+                    <span>Portfolio of Evidence (PoE) Checklist</span>
+                    <span className={`text-[11px] font-semibold ${checklist.verifiedMandatory === checklist.totalMandatory && checklist.totalMandatory > 0 ? 'text-emerald-700' : 'text-amber-700'}`}>
+                      {checklist.verifiedMandatory} of {checklist.totalMandatory} mandatory items verified
+                    </span>
+                  </h4>
 
-                <div className="space-y-2 text-xs">
-                  <div className="flex items-center justify-between p-2 rounded-lg bg-slate-50 border border-slate-100">
-                    <span className="flex items-center gap-2 text-slate-700">
-                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                      Audited Attendance Registers &amp; Participant Rosters
-                    </span>
-                    <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
-                      Verified
-                    </span>
-                  </div>
-
-                  <div className="flex items-center justify-between p-2 rounded-lg bg-slate-50 border border-slate-100">
-                    <span className="flex items-center gap-2 text-slate-700">
-                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                      Financial Invoices, Payroll Proof &amp; Bank Statements
-                    </span>
-                    <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
-                      Verified
-                    </span>
-                  </div>
-
-                  <div className="flex items-center justify-between p-2 rounded-lg bg-slate-50 border border-slate-100">
-                    <span className="flex items-center gap-2 text-slate-700">
-                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                      Executive Director / CEO Sign-off Certificate
-                    </span>
-                    <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
-                      Attached &amp; Signed
-                    </span>
-                  </div>
-
-                  <div className="flex items-center justify-between p-2 rounded-lg bg-slate-50 border border-slate-100">
-                    <span className="flex items-center gap-2 text-slate-700">
-                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                      MTSF Alignment &amp; Job Creation Vouchers
-                    </span>
-                    <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
-                      Compliant
-                    </span>
+                  <div className="space-y-2 text-xs">
+                    {checklist.slots.map(slot => {
+                      const badge = slot.status === 'MISSING' && !slot.mandatory
+                        ? { label: 'Not provided', cls: 'text-slate-600 bg-slate-100' }
+                        : SLOT_BADGE[slot.status];
+                      return (
+                        <div key={slot.id} className="flex items-center justify-between gap-3 p-2 rounded-lg bg-slate-50 border border-slate-100">
+                          <span className="flex items-center gap-2 text-slate-700 min-w-0">
+                            <CheckCircle2 className={`w-4 h-4 shrink-0 ${slot.status === 'VERIFIED' ? 'text-emerald-600' : 'text-slate-300'}`} />
+                            <span className="min-w-0">
+                              <span className="block truncate">{slot.title}</span>
+                              {slot.detail && <span className="block text-[10px] text-slate-400 truncate">{slot.detail}</span>}
+                            </span>
+                            {slot.mandatory && <span className="text-[9px] font-bold text-slate-400 uppercase shrink-0">Mandatory</span>}
+                          </span>
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${badge.cls}`}>{badge.label}</span>
+                        </div>
+                      );
+                    })}
+                    {checklist.slots.length === 0 && <p className="text-slate-400">No evidence requirements are defined for this period.</p>}
                   </div>
                 </div>
-              </div>
-
+              )}
             </div>
           ) : (
-            <div className="text-center py-20 text-slate-400">
-              Select a report to preview in side view
-            </div>
+            <div className="text-center py-20 text-slate-400">Select a record to inspect</div>
           )}
         </div>
-
       </div>
     </div>
   );

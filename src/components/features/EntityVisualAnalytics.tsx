@@ -32,6 +32,7 @@ import {
 import { store } from '../../services/store';
 import { FinancialQuarter } from '../../types/financial';
 import { formatZAR, normalizeFinancialYear, normalizeQuarter } from '../../services/calculationEngine';
+import { getCurrentReportingPeriod, isFinancialYearClosed } from '../../services/reportingPeriod';
 
 interface EntityVisualAnalyticsProps {
   entityId: string;
@@ -54,8 +55,8 @@ interface EntityVisualAnalyticsProps {
 
 export const EntityVisualAnalytics: React.FC<EntityVisualAnalyticsProps> = ({
   entityId,
-  financialYear = '2025/26',
-  initialQuarter = 'Q3',
+  financialYear = getCurrentReportingPeriod().financialYear,
+  initialQuarter = getCurrentReportingPeriod().quarter,
   selectedQuarter: propQuarter,
   onQuarterChange,
   className = '',
@@ -229,7 +230,7 @@ export const EntityVisualAnalytics: React.FC<EntityVisualAnalyticsProps> = ({
     return null;
   };
 
-  const isAuditedYear = activeYear === '2024/25' || activeYear === '2023/24';
+  const isAuditedYear = isFinancialYearClosed(normalizeFinancialYear(activeYear));
 
   return (
     <div className={`space-y-4 ${className}`} id="entity-visual-analytics-section">

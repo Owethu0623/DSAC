@@ -1,3 +1,4 @@
+import { getCurrentReportingPeriod } from '../services/reportingPeriod';
 import React, { useState, useEffect } from 'react';
 import {
   FileText,
@@ -37,7 +38,7 @@ interface DocumentVerificationDossierProps {
 
 export const DocumentVerificationDossier: React.FC<DocumentVerificationDossierProps> = ({
   entityId,
-  quarter = 'Q3',
+  quarter = getCurrentReportingPeriod().quarter,
   financialYear = '2025/2026',
   isDSACReviewer = false,
 }) => {
@@ -101,6 +102,17 @@ export const DocumentVerificationDossier: React.FC<DocumentVerificationDossierPr
         return;
       }
 
+      const contentDataUrl = selectedFile
+        ? await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => typeof reader.result === 'string'
+              ? resolve(reader.result)
+              : reject(new Error('The selected file could not be read.'));
+            reader.onerror = () => reject(new Error('The selected file could not be read.'));
+            reader.readAsDataURL(selectedFile);
+          })
+        : undefined;
+
       // Run verification via store
       const response = await store.submitDocumentForRequirement({
         requirementId: activeUploadReq.id,
@@ -109,6 +121,7 @@ export const DocumentVerificationDossier: React.FC<DocumentVerificationDossierPr
         financialYear,
         file: fileToVerify,
         simulatedContent,
+        contentDataUrl,
         changeSummary: auditNotes || (isReplacement ? 'Statutory replacement for rejected evidence' : 'Statutory submission under PFMA Section 38 audit verification.'),
       });
 
@@ -204,13 +217,13 @@ export const DocumentVerificationDossier: React.FC<DocumentVerificationDossierPr
           <div>
             <div className="flex items-center gap-2 text-xs font-bold text-indigo-700 uppercase tracking-wider">
               <ShieldCheck className="w-4 h-4 text-indigo-600" />
-              <span>PFMA Section 38 Statutory Evidence Dossier</span>
+              <span>PFMA Section 38 Evidence</span>
             </div>
             <h2 className="text-xl sm:text-2xl font-black text-slate-900 mt-1">
-              Document Submission &amp; Automated Verification
+              Upload &amp; Verify Documents
             </h2>
             <p className="text-xs text-slate-600 mt-1 max-w-2xl">
-              Strict document verification engine enforcing statutory matching between DSAC required document specifications and entity uploads. Disregards file names; enforces content integrity, ledger checks, and tamper-evident SHA-256 hashes.
+              Upload the required file. We check its type, content, and integrity.
             </p>
           </div>
 
@@ -225,7 +238,7 @@ export const DocumentVerificationDossier: React.FC<DocumentVerificationDossierPr
               className="px-3.5 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-800 rounded-xl text-xs font-bold border border-indigo-200 transition-colors flex items-center gap-1.5"
             >
               <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
-              <span>Launch Verification Test Scenarios</span>
+              <span>Run Test Scenarios</span>
             </button>
           </div>
         </div>
@@ -233,7 +246,7 @@ export const DocumentVerificationDossier: React.FC<DocumentVerificationDossierPr
         {/* Compliance Progress Bar & Metrics */}
         <div className="pt-4 border-t border-slate-100 grid grid-cols-2 sm:grid-cols-5 gap-3">
           <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
-            <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Statutory Slots</div>
+            <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Required</div>
             <div className="text-lg font-black text-slate-900 mt-0.5">{checklist.totalRequired} Required</div>
             <div className="text-[10px] text-slate-500">{quarter} {financialYear}</div>
           </div>
@@ -247,19 +260,19 @@ export const DocumentVerificationDossier: React.FC<DocumentVerificationDossierPr
           <div className="p-3 bg-rose-50 rounded-xl border border-rose-200">
             <div className="text-[11px] font-bold text-rose-800 uppercase tracking-wider">Rejected</div>
             <div className="text-lg font-black text-rose-700 mt-0.5">{checklist.rejectedCount}</div>
-            <div className="text-[10px] text-rose-700 font-semibold">Remedial Action Due</div>
+            <div className="text-[10px] text-rose-700 font-semibold">Action needed</div>
           </div>
 
           <div className="p-3 bg-amber-50 rounded-xl border border-amber-200">
             <div className="text-[11px] font-bold text-amber-900 uppercase tracking-wider">Manual Review</div>
             <div className="text-lg font-black text-amber-800 mt-0.5">{checklist.pendingCount}</div>
-            <div className="text-[10px] text-amber-800 font-semibold">DSAC Adjudication</div>
+            <div className="text-[10px] text-amber-800 font-semibold">DSAC review</div>
           </div>
 
           <div className="p-3 bg-slate-100 rounded-xl border border-slate-300">
             <div className="text-[11px] font-bold text-slate-600 uppercase tracking-wider">Missing Slots</div>
             <div className="text-lg font-black text-slate-800 mt-0.5">{checklist.missingCount}</div>
-            <div className="text-[10px] text-slate-500">Unfulfilled Requirement</div>
+            <div className="text-[10px] text-slate-500">Not uploaded</div>
           </div>
         </div>
       </div>
@@ -269,7 +282,7 @@ export const DocumentVerificationDossier: React.FC<DocumentVerificationDossierPr
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-black text-slate-900 uppercase tracking-wider flex items-center gap-2">
             <FileCheck2 className="w-4 h-4 text-indigo-600" />
-            <span>Quarterly Statutory Evidence Requirements ({quarter} {financialYear})</span>
+            <span>Required Files ({quarter} {financialYear})</span>
           </h3>
           <span className="text-xs text-slate-500 font-medium">
             Entity: <strong className="text-slate-800">{entity.name}</strong>
@@ -442,10 +455,10 @@ export const DocumentVerificationDossier: React.FC<DocumentVerificationDossierPr
                       <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs space-y-1">
                         <div className="font-bold text-rose-900 flex items-center gap-1.5">
                           <XCircle className="w-4 h-4 text-rose-600" />
-                          <span>Automated Verification Rejection Notice</span>
+                          <span>File rejected</span>
                         </div>
                         <p className="text-rose-800">
-                          {(doc.activeVerification?.reasons && doc.activeVerification.reasons.join(' ')) || doc.verificationSummary || 'The uploaded file does not match the mandatory statutory criteria for this requirement slot.'}
+                          {(doc.activeVerification?.reasons && doc.activeVerification.reasons.join(' ')) || doc.verificationSummary || 'The file does not meet this requirement.'}
                         </p>
                         <p className="text-[11px] text-rose-700 italic">
                           A remedial task has been logged for this entity. Please upload an authentic {req.requiredDocumentType} to restore compliance.
@@ -458,10 +471,10 @@ export const DocumentVerificationDossier: React.FC<DocumentVerificationDossierPr
                       <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs space-y-1">
                         <div className="font-bold text-amber-900 flex items-center gap-1.5">
                           <Clock className="w-4 h-4 text-amber-600" />
-                          <span>Under DSAC National Reviewer Adjudication</span>
+                          <span>Waiting for DSAC review</span>
                         </div>
                         <p className="text-amber-800">
-                          The document was flagged for manual review due to borderline confidence thresholds or contextual variations. A DSAC Governance Official will adjudicate the submission.
+                          This file needs a DSAC official to review it.
                         </p>
                       </div>
                     )}
@@ -532,7 +545,7 @@ export const DocumentVerificationDossier: React.FC<DocumentVerificationDossierPr
 
             {/* Requirement Details Pill */}
             <div className="p-3 bg-indigo-50/70 border border-indigo-200 rounded-xl space-y-1">
-              <div className="font-semibold text-indigo-900">Mandatory Document Criteria:</div>
+              <div className="font-semibold text-indigo-900">File requirements:</div>
               <div className="text-slate-700">{activeUploadReq.description}</div>
               <div className="text-[11px] text-indigo-800 font-medium">
                 Target Type: <strong className="font-mono">{activeUploadReq.requiredDocumentType}</strong>

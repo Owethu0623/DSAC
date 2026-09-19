@@ -20,6 +20,7 @@ import {
   BadgeCheck
 } from 'lucide-react';
 import { store } from '../services/store';
+import { DEMO_MODE, DEMO_PASSWORD, DEMO_DSAC_ADMIN_EMAIL } from '../config/demoMode';
 import { EntityType, EntityCluster } from '../types';
 import { UbuntuArtsLogo } from './UbuntuArtsLogo';
 import { SouthAfricanCoatOfArms } from './SouthAfricanCoatOfArms';
@@ -48,8 +49,8 @@ export const EntityAuthPortal: React.FC<EntityAuthPortalProps> = ({
   const handleClose = onClose || onCancel;
 
   // Sign In State
-  const [loginEmail, setLoginEmail] = useState('l.phiri@ubuntuarts.org.za');
-  const [loginPassword, setLoginPassword] = useState('Password123!');
+  const [loginEmail, setLoginEmail] = useState(DEMO_MODE ? 'l.phiri@ubuntuarts.org.za' : '');
+  const [loginPassword, setLoginPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
 
@@ -64,7 +65,7 @@ export const EntityAuthPortal: React.FC<EntityAuthPortalProps> = ({
   const [signupEmail, setSignupEmail] = useState('');
   const [signupPassword, setSignupPassword] = useState('');
   const [signupConfirmPassword, setSignupConfirmPassword] = useState('');
-  const [budgetAllocation, setBudgetAllocation] = useState('3500000');
+  const [budgetAllocation, setBudgetAllocation] = useState('');
   const [acceptedPfma, setAcceptedPfma] = useState(true);
   const [signupError, setSignupError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -76,16 +77,16 @@ export const EntityAuthPortal: React.FC<EntityAuthPortalProps> = ({
       name: 'Lerato Phiri',
       role: 'Organisation Admin',
       email: 'l.phiri@ubuntuarts.org.za',
-      password: 'Password123!',
+      password: DEMO_PASSWORD,
       badge: 'Subsidized NPO',
       badgeColor: 'bg-indigo-50 text-indigo-700 border-indigo-200',
     },
     {
       label: 'SAHRA (Heritage)',
-      name: 'Sipho Nkosi',
-      role: 'Chief Heritage Officer',
-      email: 's.nkosi@sahra.org.za',
-      password: 'Password123!',
+      name: 'Kagiso Mokoena',
+      role: 'Chief Performance & Reporting Officer',
+      email: 'kmokoena@sahra.org.za',
+      password: DEMO_PASSWORD,
       badge: 'Schedule 3A',
       badgeColor: 'bg-amber-50 text-amber-700 border-amber-200',
     },
@@ -94,7 +95,7 @@ export const EntityAuthPortal: React.FC<EntityAuthPortalProps> = ({
       name: 'Palesa Dlamini',
       role: 'Finance & Compliance',
       email: 'p.dlamini@nac.org.za',
-      password: 'Password123!',
+      password: DEMO_PASSWORD,
       badge: 'Statutory Body',
       badgeColor: 'bg-emerald-50 text-emerald-700 border-emerald-200',
     },
@@ -102,8 +103,8 @@ export const EntityAuthPortal: React.FC<EntityAuthPortalProps> = ({
       label: 'DSAC Oversight Headquarters',
       name: 'Sicelo Sakhile Mkhize',
       role: 'Chief Director: Oversight',
-      email: 'sakhilesicelo94@gmail.com',
-      password: 'Mkhize@550',
+      email: DEMO_DSAC_ADMIN_EMAIL,
+      password: DEMO_PASSWORD,
       badge: 'DSAC Admin',
       badgeColor: 'bg-emerald-50 text-emerald-800 border-emerald-200',
     },
@@ -184,7 +185,7 @@ export const EntityAuthPortal: React.FC<EntityAuthPortalProps> = ({
     setIsSubmitting(true);
 
     try {
-      const budgetNum = parseFloat(budgetAllocation) || 3_500_000;
+      const budgetNum = Math.max(0, parseFloat(budgetAllocation) || 0);
 
       const result = store.registerEntityAndUser({
         entityName: entityName.trim(),
@@ -376,7 +377,7 @@ export const EntityAuthPortal: React.FC<EntityAuthPortalProps> = ({
             </form>
 
             {/* Quick 1-Click Demo Profiles */}
-            <div className="pt-4 border-t border-slate-200">
+            <div className={`pt-4 border-t border-slate-200 ${DEMO_MODE ? '' : 'hidden'}`}>
               <div className="flex items-center justify-between mb-2">
                 <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
                   1-Click Instant Demo Login
@@ -510,7 +511,7 @@ export const EntityAuthPortal: React.FC<EntityAuthPortalProps> = ({
                   </label>
                   <input
                     type="number"
-                    placeholder="e.g. 3500000"
+                    placeholder="Budget you are requesting (optional)"
                     value={budgetAllocation}
                     onChange={(e) => setBudgetAllocation(e.target.value)}
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 focus:bg-white focus:ring-2 focus:ring-indigo-600 focus:outline-hidden"

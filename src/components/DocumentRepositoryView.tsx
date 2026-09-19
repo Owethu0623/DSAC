@@ -22,6 +22,25 @@ import {
 import { store } from '../services/store';
 import { EntityDocument, DocumentCategory, PublicEntity } from '../types';
 
+const MAX_UPLOAD_SIZE_BYTES = 25 * 1024 * 1024;
+const ACCEPTED_UPLOAD_TYPES = [
+  'application/pdf',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/msword',
+  'application/vnd.ms-excel',
+  'image/png',
+  'image/jpeg',
+  'text/plain',
+];
+const ACCEPTED_UPLOAD_LABEL = 'PDF, DOC, DOCX, XLS, XLSX, PNG, JPG or TXT';
+
+const isAcceptedFile = (file: File) => {
+  const extension = file.name.toLowerCase().split('.').pop();
+  const acceptedExtensions = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'png', 'jpg', 'jpeg', 'txt'];
+  return ACCEPTED_UPLOAD_TYPES.includes(file.type) || (!!extension && acceptedExtensions.includes(extension));
+};
+
 export const DocumentRepositoryView: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
@@ -41,7 +60,10 @@ export const DocumentRepositoryView: React.FC = () => {
   const [uploadCategory, setUploadCategory] = useState<DocumentCategory>('ANNUAL_PERFORMANCE_PLAN');
   const [uploadTitle, setUploadTitle] = useState('');
   const [uploadFileName, setUploadFileName] = useState('');
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploadError, setUploadError] = useState('');
   const [uploadYear, setUploadYear] = useState('2025/2026');
+  const [previewDocument, setPreviewDocument] = useState<EntityDocument | null>(null);
 
   // Comment state
   const [activeCommentDocId, setActiveCommentDocId] = useState<string | null>(null);
@@ -59,31 +81,54 @@ export const DocumentRepositoryView: React.FC = () => {
 
   const handleExecuteUpload = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!uploadTitle.trim() || !uploadFileName.trim()) return;
+    if (!uploadTitle.trim() || !uploadFile) {
+      setUploadError('Choose a document file before submitting.');
+      return;
+    }
+    if (uploadFile.size > MAX_UPLOAD_SIZE_BYTES) {
+      setUploadError('The selected file is larger than the 25 MB limit.');
+      return;
+    }
+    if (!isAcceptedFile(uploadFile)) {
+      setUploadError(`Unsupported file type. Use ${ACCEPTED_UPLOAD_LABEL}.`);
+      return;
+    }
 
     const chosenEntity = entities.find(e => e.id === uploadEntityId);
     const receiptNum = `DSAC-REC-2026-${Math.floor(100000 + Math.random() * 900000)}`;
     const randomHash = Array.from({length: 16}, () => Math.floor(Math.random()*16).toString(16)).join('');
 
-    store.uploadDocument(
-      uploadEntityId,
-      uploadTitle.trim(),
-      uploadCategory,
-      uploadFileName.trim(),
-      `Statutory document upload for ${uploadYear} financial oversight.`
-    );
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = typeof reader.result === 'string' ? reader.result : '';
+      if (!dataUrl) {
+        setUploadError('The selected file could not be read. Please try again.');
+        return;
+      }
+      store.uploadDocument(
+        uploadEntityId,
+        uploadTitle.trim(),
+        uploadCategory,
+        uploadFile.name,
+        `Statutory document upload for ${uploadYear} financial oversight.`,
+        { size: uploadFile.size, type: uploadFile.type || 'application/octet-stream', dataUrl }
+      );
 
-    setUploadReceipt({
-      receiptNumber: receiptNum,
-      docTitle: uploadTitle.trim(),
-      entityName: chosenEntity ? chosenEntity.name : 'Public Entity',
-      timestamp: new Date().toLocaleString(),
-      fileHash: `sha256:${randomHash}...`
-    });
-
-    setShowUploadModal(false);
-    setUploadTitle('');
-    setUploadFileName('');
+      setUploadReceipt({
+        receiptNumber: receiptNum,
+        docTitle: uploadTitle.trim(),
+        entityName: chosenEntity ? chosenEntity.name : 'Public Entity',
+        timestamp: new Date().toLocaleString(),
+        fileHash: `sha256:${randomHash}...`
+      });
+      setShowUploadModal(false);
+      setUploadTitle('');
+      setUploadFileName('');
+      setUploadFile(null);
+      setUploadError('');
+    };
+    reader.onerror = () => setUploadError('The selected file could not be read. Please try again.');
+    reader.readAsDataURL(uploadFile);
   };
 
   const handleAddComment = (docId: string) => {
@@ -299,6 +344,13 @@ export const DocumentRepositoryView: React.FC = () => {
                 </button>
 
                 <button
+                  onClick={() => setPreviewDocument(doc)}
+                  className="px-3 py-1 rounded-lg text-xs font-semibold text-slate-700 hover:bg-slate-100 flex items-center gap-1 cursor-pointer transition-colors"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  <span>Preview</span>
+                </button>
+                <button
                   onClick={() => {
                     store.downloadDocument(doc.id);
                   }}
@@ -425,19 +477,25 @@ export const DocumentRepositoryView: React.FC = () => {
 
               <div>
                 <label className="font-bold text-slate-700 block mb-1">
-                  File Attachment (PDF, DOCX, XLSX)
+                  File Attachment ({ACCEPTED_UPLOAD_LABEL}, max 25 MB)
                 </label>
                 <input
-                  type="text"
+                type="file"
                   required
-                  placeholder="e.g. APP_2026_27_Final_Signoff.pdf"
-                  value={uploadFileName}
-                  onChange={(e) => setUploadFileName(e.target.value)}
-                  className="w-full p-2.5 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.txt"
+                onChange={(e) => {
+                  const file = e.target.files?.[0] ?? null;
+                  setUploadFile(file);
+                  setUploadFileName(file?.name ?? '');
+                  setUploadError('');
+                }}
+                className="w-full p-2.5 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500"
                 />
                 <div className="text-[10px] text-slate-400 mt-1">
-                  Automatically integrated with Microsoft SharePoint Online &amp; verified via SHA-256 hash.
+                Selected file is stored with its MIME type and size for DSAC review and download.
                 </div>
+                {uploadFile && <div className="text-[10px] text-slate-600 mt-1">{uploadFile.name} • {(uploadFile.size / (1024 * 1024)).toFixed(2)} MB</div>}
+                {uploadError && <div className="text-[11px] text-rose-700 mt-1 font-semibold">{uploadError}</div>}
               </div>
 
               <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2">
@@ -456,6 +514,42 @@ export const DocumentRepositoryView: React.FC = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {previewDocument && (
+        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl max-w-5xl w-full h-[85vh] p-5 shadow-2xl border border-slate-200 flex flex-col gap-3">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-base font-black text-slate-900">{previewDocument.title}</h3>
+                <p className="text-xs text-slate-500">{previewDocument.fileName} • {previewDocument.mimeType || 'Stored document'}</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button onClick={() => store.downloadDocument(previewDocument.id)} className="px-3 py-1.5 rounded-lg bg-emerald-800 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer">
+                  <Download className="w-3.5 h-3.5" /> Download
+                </button>
+                <button onClick={() => setPreviewDocument(null)} className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500 cursor-pointer" aria-label="Close preview">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 min-h-0 rounded-xl border border-slate-200 bg-slate-50 overflow-hidden flex items-center justify-center">
+              {(() => {
+                const version = previewDocument.versions.find(v => v.versionNumber === previewDocument.currentVersion) ?? previewDocument.versions[previewDocument.versions.length - 1];
+                const dataUrl = version?.contentDataUrl;
+                const mimeType = previewDocument.mimeType || version?.mimeType || '';
+                if (!dataUrl) return <p className="text-sm text-slate-500 p-6 text-center">Preview is unavailable for this legacy record. Download the document to inspect it.</p>;
+                if (mimeType === 'application/pdf' || previewDocument.fileName?.toLowerCase().endsWith('.pdf') || mimeType.startsWith('image/')) {
+                  if (mimeType.startsWith('image/')) {
+                    return <img src={dataUrl} alt={`Preview of ${previewDocument.fileName}`} className="max-w-full max-h-full object-contain" />;
+                  }
+                  return <iframe title={`Preview of ${previewDocument.fileName}`} src={dataUrl} className="w-full h-full bg-white" />;
+                }
+                return <p className="text-sm text-slate-600 p-6 text-center">This file type cannot be rendered in the browser. Use Download to open the original {previewDocument.fileName} file.</p>;
+              })()}
+            </div>
           </div>
         </div>
       )}

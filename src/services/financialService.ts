@@ -1,25 +1,49 @@
-import { 
-  ExpenseCategory, 
-  EntityBudgetProfile, 
-  QuarterlyFinancialSubmission, 
-  CategoryQuarterlyPerformance, 
-  EntityFinancialSummary, 
+import {
+  ExpenseCategory,
+  EntityBudgetProfile,
+  QuarterlyFinancialSubmission,
+  CategoryQuarterlyPerformance,
+  EntityFinancialSummary,
   DepartmentFinancialKPIs,
+  DisbursementRecord,
   FinancialQuarter,
-  FinancialTransaction
+  FinancialStatus,
+  QuarterlyTimelinePoint,
+  REPORTED_RETURN_STATUSES,
+  VERIFIED_RETURN_STATUSES,
 } from '../types/financial';
 import { PublicEntity, KPIRecord } from '../types';
-import { filterTransactions, sumTransactions } from './financialTransactionService';
+import {
+  DEFAULT_REPORTING_PERIOD,
+  QUARTER_ORDER,
+  QuarterSelection,
+  ReportingPeriod,
+  financialYearStart,
+  getCurrentReportingPeriod,
+  isFinancialYearClosed,
+  isQuarterDue,
+  normalizeFinancialYear,
+  pct1,
+  quarterIndex,
+} from './reportingPeriod';
+import { calculateKpiItemProgress } from './kpiProgress';
 
-export const QUARTER_ORDER: FinancialQuarter[] = ['Q1', 'Q2', 'Q3', 'Q4'];
+export { QUARTER_ORDER };
 
-export const DEFAULT_FINANCIAL_YEAR = '2026/27';
+export const DEFAULT_FINANCIAL_YEAR = DEFAULT_REPORTING_PERIOD.financialYear;
 
-/**
- * Returns formatted statutory date range for a given financial quarter
- */
-export function getQuarterDates(quarter: FinancialQuarter | string, financialYear = '2026/27'): string {
-  const startYear = parseInt(financialYear.slice(0, 4)) || 2026;
+/** Variance tolerance band against the approved spending trajectory. */
+export const OVERSPEND_PACE_THRESHOLD_PCT = 15;
+export const UNDERSPEND_PACE_THRESHOLD_PCT = -25;
+
+/** Self-registered organisations awaiting DSAC verification are not part of the monitored portfolio. */
+export const isPortfolioMember = (e: PublicEntity): boolean => e.registrationStatus !== 'PENDING_VERIFICATION';
+
+const DEFAULT_TRAJECTORY = { q1Percent: 25, q2Percent: 50, q3Percent: 75, q4Percent: 100 };
+
+/** Returns formatted statutory date range for a given financial quarter */
+export function getQuarterDates(quarter: FinancialQuarter | string, financialYear = getCurrentReportingPeriod().financialYear): string {
+  const startYear = financialYearStart(financialYear);
   const nextYear = startYear + 1;
   switch (quarter) {
     case 'Q1': return `01 Apr ${startYear} – 30 Jun ${startYear}`;
@@ -30,9 +54,7 @@ export function getQuarterDates(quarter: FinancialQuarter | string, financialYea
   }
 }
 
-/**
- * Returns full descriptive name for a financial quarter
- */
+/** Returns full descriptive name for a financial quarter */
 export function getQuarterName(quarter: FinancialQuarter | string): string {
   switch (quarter) {
     case 'Q1': return 'Quarter 1 (Apr – Jun)';
@@ -43,9 +65,7 @@ export function getQuarterName(quarter: FinancialQuarter | string): string {
   }
 }
 
-/**
- * Returns visual badge styling and label for financial status
- */
+/** Returns visual badge styling and label for financial status */
 export function getFinancialStatusBadge(status: string): { label: string; color: string } {
   switch (status) {
     case 'ON_TRACK':
@@ -57,440 +77,257 @@ export function getFinancialStatusBadge(status: string): { label: string; color:
     case 'UNDER_UTILISING':
       return { label: 'Under-Utilising', color: 'bg-orange-100 text-orange-800 border-orange-300' };
     case 'MISSING_SUBMISSION':
-      return { label: 'Missing Return', color: 'bg-slate-100 text-slate-700 border-slate-300' };
+      return { label: 'Return Outstanding', color: 'bg-slate-100 text-slate-700 border-slate-300' };
+    case 'NOT_DUE':
+      return { label: 'Not Yet Due', color: 'bg-sky-50 text-sky-700 border-sky-200' };
     default:
       return { label: status, color: 'bg-slate-100 text-slate-700 border-slate-200' };
   }
 }
 
-/**
- * Format currency in South African Rands (ZAR)
- * Presentation formatting only; full precision is preserved in calculation models
- */
-export function formatZAR(
-  val: number,
-  options?: {
-    compact?: boolean;
-    minimumFractionDigits?: number;
-    maximumFractionDigits?: number;
-  }
-): string {
-  if (val === undefined || val === null || isNaN(val)) return 'R 0';
-  
+/** Format currency in South African Rands (ZAR) */
+export function formatZAR(val: number, options?: { compact?: boolean }): string {
+  if (val === undefined || val === null || !Number.isFinite(val)) return 'R 0';
+
   if (options?.compact) {
     const abs = Math.abs(val);
     const sign = val < 0 ? '-' : '';
-    if (abs >= 1000000000) {
-      return `${sign}R${(abs / 1000000000).toFixed(1)}B`;
-    }
-    if (abs >= 1000000) {
-      return `${sign}R${(abs / 1000000).toFixed(1)}M`;
-    }
-    if (abs >= 1000) {
-      return `${sign}R${(abs / 1000).toFixed(0)}k`;
-    }
+    if (abs >= 1000000000) return `${sign}R${(abs / 1000000000).toFixed(1)}B`;
+    if (abs >= 1000000) return `${sign}R${(abs / 1000000).toFixed(1)}M`;
+    if (abs >= 1000) return `${sign}R${(abs / 1000).toFixed(0)}k`;
     return `${sign}R${abs.toLocaleString('en-ZA')}`;
   }
-
-  const hasFractions = val % 1 !== 0;
-  const maxDigits = options?.maximumFractionDigits !== undefined
-    ? options.maximumFractionDigits
-    : (hasFractions ? 3 : 0);
-  const minDigits = options?.minimumFractionDigits !== undefined
-    ? options.minimumFractionDigits
-    : (hasFractions ? 2 : 0);
 
   return new Intl.NumberFormat('en-ZA', {
     style: 'currency',
     currency: 'ZAR',
-    minimumFractionDigits: minDigits,
-    maximumFractionDigits: maxDigits,
+    maximumFractionDigits: 0,
   }).format(val).replace('ZAR', 'R');
 }
 
-/**
- * Authoritative Compact ZAR Currency Formatter matching National Treasury reporting standards
- * (e.g., R 2.13B, R 1.60B, R 596.4M, R 1.00B)
- */
-export function formatCompactZAR(val: number): string {
-  if (val === undefined || val === null || isNaN(val)) return 'R 0';
-  const abs = Math.abs(val);
-  const sign = val < 0 ? '-' : '';
-  if (abs >= 1_000_000_000) {
-    const num = abs / 1_000_000_000;
-    return `${sign}R ${num.toFixed(2)}B`;
-  }
-  if (abs >= 1_000_000) {
-    const num = abs / 1_000_000;
-    return `${sign}R ${num % 1 === 0 ? num.toFixed(0) : num.toFixed(1)}M`;
-  }
-  if (abs >= 1_000) {
-    return `${sign}R ${(abs / 1_000).toFixed(0)}k`;
-  }
-  return `${sign}R ${abs.toLocaleString('en-ZA')}`;
+function latestSubmission(subs: QuarterlyFinancialSubmission[]): QuarterlyFinancialSubmission | undefined {
+  return subs.slice().sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''))[0];
+}
+
+/** A return's amount is ALWAYS the sum of its expense lines, so line totals can never disagree with the quarter total. */
+export function returnTotal(s: QuarterlyFinancialSubmission): number {
+  return s.lines && s.lines.length > 0
+    ? s.lines.reduce((sum, l) => sum + (l.actualAmount || 0), 0)
+    : s.totalQuarterlyActual || 0;
 }
 
 /**
- * Single Authoritative Financial Calculation Layer
- * Calculates the exact financial position for an entity across quarters and categories
- * Strictly adheres to Section 5: NO INTERNAL ROUNDING. Preserves full floating-point precision.
+ * Single Authoritative Financial Calculation Layer.
+ *
+ * Inputs are the three sources of truth: the approved budget profile, the lodged quarterly returns, and the
+ * disbursement ledger. Nothing is inferred or back-filled: a missing return is reported as missing, not
+ * synthesised from another field, and a budget is only "approved" when a real approval says so.
  */
 export function calculateEntityFinancialSummary(
   entityId: string,
   financialYear: string,
-  selectedQuarter: FinancialQuarter | 'FULL_YEAR',
+  selectedQuarter: QuarterSelection,
   budgetProfiles: EntityBudgetProfile[],
   quarterlySubmissions: QuarterlyFinancialSubmission[],
   categories: ExpenseCategory[],
   entityMeta?: PublicEntity,
   kpiRecords?: KPIRecord[],
-  transactions?: FinancialTransaction[]
+  disbursements: DisbursementRecord[] = [],
+  period: ReportingPeriod = getCurrentReportingPeriod()
 ): EntityFinancialSummary {
-  // Normalize year (e.g. 'FY 2024/25' or '2024/2025' -> '2024/25')
-  const normYear = financialYear.includes('2023') ? '2023/24' :
-                   financialYear.includes('2024') ? '2024/25' :
-                   financialYear.includes('2026') ? '2026/27' : '2025/26';
+  const fy = normalizeFinancialYear(financialYear);
+  const qi = quarterIndex(selectedQuarter);
+  const upto = QUARTER_ORDER.slice(0, qi);
 
-  const profile = budgetProfiles.find(
-    bp => bp.entityId === entityId && (bp.financialYear === normYear || bp.financialYear === financialYear)
-  );
-
+  const profile = budgetProfiles.find(bp => bp.entityId === entityId && normalizeFinancialYear(bp.financialYear) === fy);
   const entityName = profile?.entityName || entityMeta?.name || 'Public Entity';
   const shortCode = entityMeta?.shortCode || entityName.slice(0, 4).toUpperCase();
-  let requestedAmount = profile?.requestedAmount || entityMeta?.budgetAllocationZAR || 0;
-  let approvedAmount = profile?.approvedAmount || entityMeta?.budgetAllocationZAR || 0;
 
-  // Align multi-year baseline figures if profile not explicitly created
-  // NO ROUNDING: preserve exact mathematical multipliers
-  if (!profile) {
-    if (normYear === '2024/25') {
-      if (entityId === 'ent-ubuntu-arts') {
-        requestedAmount = 5000000;
-        approvedAmount = 4800000;
-      } else {
-        requestedAmount = (entityMeta?.budgetAllocationZAR || 10000000) * 0.95;
-        approvedAmount = (entityMeta?.budgetAllocationZAR || 10000000) * 0.95;
-      }
-    } else if (normYear === '2023/24') {
-      if (entityId === 'ent-ubuntu-arts') {
-        requestedAmount = 4700000;
-        approvedAmount = 4500000;
-      } else {
-        requestedAmount = (entityMeta?.budgetAllocationZAR || 10000000) * 0.90;
-        approvedAmount = (entityMeta?.budgetAllocationZAR || 10000000) * 0.90;
-      }
-    } else if (normYear === '2025/26' || normYear === '2026/27') {
-      requestedAmount = entityMeta?.budgetAllocationZAR || 10000000;
-      approvedAmount = entityMeta?.budgetAllocationZAR || 10000000;
-    }
-  }
+  // Approved budget exists ONLY through an approval. No legacy fallback, no synthesised history.
+  const approvedAmount = profile ? Math.max(0, profile.approvedAmount || 0) : 0;
+  const requestedAmount = profile?.requestedAmount || 0;
+  const fundingGap = requestedAmount > 0 ? requestedAmount - approvedAmount : 0;
+  const budgetStatus = profile?.status ?? 'DRAFT';
 
-  const fundingGap = requestedAmount - approvedAmount;
-  const budgetStatus = profile?.status || 'APPROVED';
+  // --- Quarterly returns ------------------------------------------------------------------------
+  const entitySubs = quarterlySubmissions.filter(s => s.entityId === entityId && normalizeFinancialYear(s.financialYear) === fy);
+  const sub: Partial<Record<FinancialQuarter, QuarterlyFinancialSubmission>> = {};
+  QUARTER_ORDER.forEach(q => { sub[q] = latestSubmission(entitySubs.filter(s => s.quarter === q)); });
 
-  // Find all quarterly submissions for this entity and financial year
-  const entitySubmissions = quarterlySubmissions.filter(
-    qs => qs.entityId === entityId && (qs.financialYear === normYear || qs.financialYear === financialYear)
-  );
+  const isCounted = (s?: QuarterlyFinancialSubmission) => !!s && REPORTED_RETURN_STATUSES.includes(s.status);
+  const isVerified = (s?: QuarterlyFinancialSubmission) => !!s && VERIFIED_RETURN_STATUSES.includes(s.status);
 
-  const q1Sub = entitySubmissions.find(s => s.quarter === 'Q1');
-  const q2Sub = entitySubmissions.find(s => s.quarter === 'Q2');
-  const q3Sub = entitySubmissions.find(s => s.quarter === 'Q3');
-  const q4Sub = entitySubmissions.find(s => s.quarter === 'Q4');
+  const qActual: Record<FinancialQuarter, number> = { Q1: 0, Q2: 0, Q3: 0, Q4: 0 };
+  const qVerified: Record<FinancialQuarter, number> = { Q1: 0, Q2: 0, Q3: 0, Q4: 0 };
+  QUARTER_ORDER.forEach(q => {
+    const s = sub[q];
+    if (isCounted(s)) qActual[q] = returnTotal(s!);
+    if (isVerified(s)) qVerified[q] = returnTotal(s!);
+  });
 
-  // Baseline fallback calculations per quarter (unrounded)
-  let baseQ1 = 0, baseQ2 = 0, baseQ3 = 0, baseQ4 = 0;
-  if (financialYear.includes('2024') || financialYear.includes('2023')) {
-    if (entityId === 'ent-ubuntu-arts') {
-      if (financialYear.includes('2024')) {
-        baseQ1 = 1200000; baseQ2 = 1200000; baseQ3 = 1150000; baseQ4 = 1170000;
-      } else {
-        baseQ1 = 1120000; baseQ2 = 1120000; baseQ3 = 1120000; baseQ4 = 1120000;
-      }
-    } else {
-      const fullYearSpend = approvedAmount * 0.98;
-      const qSpend = fullYearSpend / 4;
-      baseQ1 = qSpend; baseQ2 = qSpend; baseQ3 = qSpend; baseQ4 = fullYearSpend - (qSpend * 3);
-    }
-  } else {
-    // Current financial year cycle (2025/26 / 2026/27): corresponds to Vote 40 dashboard figures
-    const activeYtd = entityMeta?.reportedExpenditureZAR ?? ((entityMeta?.transferredAmountZAR || approvedAmount * 0.75) * 0.6264);
-    baseQ1 = activeYtd * 0.32;
-    baseQ2 = activeYtd * 0.34;
-    baseQ3 = Math.max(0, activeYtd - baseQ1 - baseQ2);
-    baseQ4 = 0;
-  }
+  const ytdActual = upto.reduce((acc, q) => acc + qActual[q], 0);
+  const verifiedYtdActual = upto.reduce((acc, q) => acc + qVerified[q], 0);
+  const fullYearActual = QUARTER_ORDER.reduce((acc, q) => acc + qActual[q], 0);
 
-  const q1Actual = q1Sub ? q1Sub.totalQuarterlyActual : baseQ1;
-  const q2Actual = q2Sub ? q2Sub.totalQuarterlyActual : baseQ2;
-  const q3Actual = q3Sub ? q3Sub.totalQuarterlyActual : baseQ3;
-  const q4Actual = q4Sub ? q4Sub.totalQuarterlyActual : baseQ4;
+  const dueQuarters = upto.filter(q => isQuarterDue(fy, q, period));
+  const missingQuarters = dueQuarters.filter(q => !isCounted(sub[q]));
+  const returnedQuarters = dueQuarters.filter(q => sub[q]?.status === 'CORRECTION_REQUIRED');
 
-  const q1Submitted = !!q1Sub || baseQ1 > 0;
-  const q2Submitted = !!q2Sub || baseQ2 > 0;
-  const q3Submitted = !!q3Sub || (baseQ3 > 0 && !financialYear.includes('2026'));
-  const q4Submitted = !!q4Sub || (baseQ4 > 0 && !financialYear.includes('2025') && !financialYear.includes('2026'));
+  // --- Disbursements (ledger) -------------------------------------------------------------------
+  const released = disbursements.filter(d => d.entityId === entityId && normalizeFinancialYear(d.financialYear) === fy && d.status === 'RELEASED');
+  const disbursedInQuarter = (q: FinancialQuarter) => released.filter(d => d.tranche === q).reduce((a, d) => a + d.amountZAR, 0);
+  // Cash already paid is disbursed "as at now" even if it was scheduled for a later quarter (an early tranche).
+  // Looking back at an earlier quarter, only the tranches due by then count.
+  const asAtNow = fy === period.financialYear && qi >= quarterIndex(period.quarter);
+  const disbursedToDate = asAtNow
+    ? released.reduce((acc, d) => acc + d.amountZAR, 0)
+    : upto.reduce((acc, q) => acc + disbursedInQuarter(q), 0);
 
-  // Cumulative YTD calculations strictly up to selected quarter
-  let ytdActual = 0;
-  if (selectedQuarter === 'Q1') {
-    ytdActual = q1Actual;
-  } else if (selectedQuarter === 'Q2') {
-    ytdActual = q1Actual + q2Actual;
-  } else if (selectedQuarter === 'Q3') {
-    ytdActual = q1Actual + q2Actual + q3Actual;
-  } else {
-    // Q4 or FULL_YEAR
-    ytdActual = q1Actual + q2Actual + q3Actual + q4Actual;
-  }
+  // --- Budget position --------------------------------------------------------------------------
+  const remainingBudget = approvedAmount - ytdActual;
+  const isOverspent = ytdActual > approvedAmount;
+  const overspendAmount = isOverspent ? ytdActual - approvedAmount : 0;
+  // NOT capped at 100% so overspend stays visible (e.g. 105%)
+  const utilisationPercent = pct1(ytdActual, approvedAmount);
 
-  const fullYearActual = q1Actual + q2Actual + q3Actual + q4Actual;
+  const trajectory = profile?.expectedSpendingTrajectory || DEFAULT_TRAJECTORY;
+  const trajectoryPct = [trajectory.q1Percent, trajectory.q2Percent, trajectory.q3Percent, trajectory.q4Percent];
+  const expectedPercent = trajectoryPct[qi - 1];
+  const expectedYtd = (approvedAmount * expectedPercent) / 100;
+  const variance = ytdActual - expectedYtd;
+  const variancePercent = expectedYtd > 0 ? Math.round((variance / expectedYtd) * 1000) / 10 : 0;
 
-  // Transaction-level integration & fallback derivation
-  // Filter transactions matching entity, year, and quarter (adhering to Section 1-5, 8-11)
-  const matchingTransactions = transactions 
-    ? filterTransactions(transactions, { entityId, financialYear, quarter: selectedQuarter })
-    : [];
-
-  const allocTxs = matchingTransactions.filter(t => t.type === 'ALLOCATION');
-  const disbTxs = matchingTransactions.filter(t => t.type === 'DISBURSEMENT');
-  const transTxs = matchingTransactions.filter(t => t.type === 'TRANSFER');
-  const comTxs = matchingTransactions.filter(t => t.type === 'COMMITMENT');
-  const expTxs = matchingTransactions.filter(t => t.type === 'EXPENDITURE');
-
-  // Authoritative Core Financial Totals (NO ROUNDING)
-  const budgetAllocated = allocTxs.length > 0 ? sumTransactions(allocTxs) : approvedAmount;
-
-  const totalDisbursedToDate = disbTxs.length > 0 
-    ? sumTransactions(disbTxs)
-    : (
-        normYear === '2024/25' || normYear === '2023/24'
-          ? budgetAllocated
-          : (entityMeta?.trancheStatus === 'WITHHELD' ? budgetAllocated * 0.50 : (entityMeta?.transferredAmountZAR || budgetAllocated * 0.75))
-      );
-
-  const totalTransferredToDate = transTxs.length > 0
-    ? sumTransactions(transTxs)
-    : (
-        normYear === '2024/25' || normYear === '2023/24'
-          ? budgetAllocated
-          : (entityMeta?.transferredAmountZAR || budgetAllocated * 0.75)
-      );
-
-  const totalCommittedToDate = comTxs.length > 0
-    ? sumTransactions(comTxs)
-    : (
-        normYear === '2024/25' || normYear === '2023/24' ? 0 : budgetAllocated * 0.15
-      );
-
-  // If transaction-level expenditures exist, use them as authoritative; otherwise use ytdActual
-  const totalSpentToDate = expTxs.length > 0 ? sumTransactions(expTxs) : ytdActual;
-  
-  // Keep ytdActual strictly synchronized
-  ytdActual = totalSpentToDate;
-
-  // Remaining Budget = Budget Allocated - Total Spent To Date
-  const remainingBudget = budgetAllocated - totalSpentToDate;
-  const isOverspent = totalSpentToDate > budgetAllocated && budgetAllocated > 0;
-  const overspendAmount = isOverspent ? totalSpentToDate - budgetAllocated : 0;
-
-  // Unspent Disbursed Balance = Transferred - Spent
-  const unspentDisbursedBalance = totalTransferredToDate - totalSpentToDate;
-
-  // Undisbursed Allocation = Allocated - Transferred
-  const undisbursedAllocation = budgetAllocated - totalTransferredToDate;
-
-  // Utilisation % = (Total Spent To Date / Budget Allocated) * 100
-  // NO ROUNDING: preserve exact precision
-  const utilisationPercent = budgetAllocated > 0 
-    ? (totalSpentToDate / budgetAllocated) * 100 
-    : 0;
-
-  // Rate calculations
-  const disbursementRate = budgetAllocated > 0 ? (totalDisbursedToDate / budgetAllocated) * 100 : 0;
-  const transferRate = budgetAllocated > 0 ? (totalTransferredToDate / budgetAllocated) * 100 : 0;
-  const absorptionRate = totalTransferredToDate > 0 ? (totalSpentToDate / totalTransferredToDate) * 100 : 0;
-
-  // Section 10 Variances
-  const disbursementVariance = budgetAllocated - totalDisbursedToDate;
-  const transferVariance = totalDisbursedToDate - totalTransferredToDate;
-  const commitmentVsSpendingDifference = totalCommittedToDate - totalSpentToDate;
-  const budgetVsSpendingDifference = budgetAllocated - totalSpentToDate;
-
-  // Trajectory benchmark
-  const trajectory = profile?.expectedSpendingTrajectory || {
-    q1Percent: 25,
-    q2Percent: 50,
-    q3Percent: 75,
-    q4Percent: 100,
-  };
-
-  let expectedPercent = 100;
-  if (selectedQuarter === 'Q1') expectedPercent = trajectory.q1Percent;
-  else if (selectedQuarter === 'Q2') expectedPercent = trajectory.q2Percent;
-  else if (selectedQuarter === 'Q3') expectedPercent = trajectory.q3Percent;
-  else expectedPercent = trajectory.q4Percent;
-
-  const expectedYtd = (budgetAllocated * expectedPercent) / 100;
-  // Variance = Actual - Planned (Expected)
-  const variance = totalSpentToDate - expectedYtd;
-  const absoluteVariance = Math.abs(variance);
-  const variancePercent = expectedYtd > 0 
-    ? (variance / expectedYtd) * 100 
-    : 0;
-
-  // Determine financial status & explanation
-  let financialStatus: 'ON_TRACK' | 'REQUIRES_REVIEW' | 'OVERSPENDING' | 'UNDER_UTILISING' | 'MISSING_SUBMISSION' = 'ON_TRACK';
-  let statusExplanation = 'Expenditure aligns within statutory variance tolerance (±10%) against approved trajectory.';
+  // --- Status -----------------------------------------------------------------------------------
+  const closed = isFinancialYearClosed(fy, period);
+  let financialStatus: FinancialStatus = 'ON_TRACK';
+  let statusExplanation = `Expenditure is within the +${OVERSPEND_PACE_THRESHOLD_PCT}% / ${UNDERSPEND_PACE_THRESHOLD_PCT}% tolerance band of the approved spending trajectory.`;
 
   if (isOverspent) {
     financialStatus = 'OVERSPENDING';
-    statusExplanation = `Actual cumulative expenditure exceeds approved annual budget by ${formatZAR(overspendAmount)} (${utilisationPercent.toFixed(1)}% utilisation).`;
-  } else if (financialYear.includes('2024') || financialYear.includes('2023')) {
-    financialStatus = 'ON_TRACK';
-    statusExplanation = `Audited AFS closed with ${utilisationPercent.toFixed(1)}% budget utilisation under PFMA Section 38 oversight.`;
-  } else if (
-    (selectedQuarter === 'Q2' && !q2Submitted) ||
-    (selectedQuarter === 'Q3' && !q3Submitted) ||
-    (selectedQuarter === 'Q4' && !q4Submitted && !financialYear.includes('2025'))
-  ) {
+    statusExplanation = approvedAmount > 0
+      ? `Reported cumulative expenditure exceeds the approved annual budget by ${formatZAR(overspendAmount)} (${utilisationPercent}% utilisation).`
+      : `Expenditure of ${formatZAR(ytdActual)} has been reported with no approved budget on record for ${fy}.`;
+  } else if (missingQuarters.length > 0) {
     financialStatus = 'MISSING_SUBMISSION';
-    statusExplanation = `Statutory expenditure return for ${selectedQuarter} has not been lodged by the Accounting Officer.`;
-  } else if (variancePercent > 15) {
+    const returned = missingQuarters.filter(q => returnedQuarters.includes(q));
+    const notLodged = missingQuarters.filter(q => !returnedQuarters.includes(q));
+    const parts: string[] = [];
+    if (notLodged.length) parts.push(`${notLodged.join(', ')} return not yet lodged by the Accounting Officer`);
+    if (returned.length) parts.push(`${returned.join(', ')} return sent back for correction and excluded from reported totals until resubmitted`);
+    statusExplanation = parts.join('; ') + '.';
+  } else if (closed) {
+    statusExplanation = `Financial year ${fy} is closed: ${utilisationPercent}% of the approved budget was utilised.`;
+  } else if (dueQuarters.length === 0) {
+    financialStatus = 'NOT_DUE';
+    statusExplanation = `Reporting for ${fy} has not yet opened.`;
+  } else if (variancePercent > OVERSPEND_PACE_THRESHOLD_PCT) {
     financialStatus = 'REQUIRES_REVIEW';
-    statusExplanation = `Expenditure pace (+${variancePercent.toFixed(1)}%) is accelerating materially faster than approved quarterly trajectory.`;
-  } else if (variancePercent < -25) {
+    statusExplanation = `Expenditure pace (+${variancePercent}%) is running materially ahead of the approved quarterly trajectory.`;
+  } else if (variancePercent < UNDERSPEND_PACE_THRESHOLD_PCT) {
     financialStatus = 'UNDER_UTILISING';
-    statusExplanation = `Low financial absorption rate (${variancePercent.toFixed(1)}% below trajectory). Potential procurement bottlenecks or programme execution lag.`;
+    statusExplanation = `Low absorption of the approved budget (${variancePercent}% against trajectory). Possible procurement bottlenecks or programme execution lag.`;
   }
 
-  // Category breakdown calculation (unrounded)
-  const categoryBreakdown: CategoryQuarterlyPerformance[] = categories.map(cat => {
-    // Budget line for this category
-    const budgetLine = profile?.lines.find(l => l.categoryId === cat.id);
-    const catAnnualBudget = budgetLine?.annualBudget || 0;
+  // --- Expense-line breakdown -------------------------------------------------------------------
+  const catNames = new Map<string, string>();
+  categories.forEach(c => catNames.set(c.id, c.name));
+  profile?.lines.forEach(l => { if (!catNames.has(l.categoryId)) catNames.set(l.categoryId, l.categoryName); });
+  QUARTER_ORDER.forEach(q => {
+    if (isCounted(sub[q])) sub[q]!.lines.forEach(l => { if (!catNames.has(l.categoryId)) catNames.set(l.categoryId, l.categoryName); });
+  });
 
-    // Actuals from each quarter
-    const getCatActual = (submission?: QuarterlyFinancialSubmission) => {
-      if (!submission) return 0;
-      const line = submission.lines.find(l => l.categoryId === cat.id);
-      return line?.actualAmount || 0;
-    };
-
-    const cQ1 = getCatActual(q1Sub);
-    const cQ2 = getCatActual(q2Sub);
-    const cQ3 = getCatActual(q3Sub);
-    const cQ4 = getCatActual(q4Sub);
-
-    let cYtd = 0;
-    if (selectedQuarter === 'Q1') cYtd = cQ1;
-    else if (selectedQuarter === 'Q2') cYtd = cQ1 + cQ2;
-    else if (selectedQuarter === 'Q3') cYtd = cQ1 + cQ2 + cQ3;
-    else cYtd = cQ1 + cQ2 + cQ3 + cQ4;
-
+  const categoryBreakdown: CategoryQuarterlyPerformance[] = [...catNames.entries()].map(([catId, catName]) => {
+    const catAnnualBudget = (profile?.lines || []).filter(l => l.categoryId === catId).reduce((a, l) => a + (l.annualBudget || 0), 0);
+    const catQ = (q: FinancialQuarter) =>
+      isCounted(sub[q]) ? sub[q]!.lines.filter(l => l.categoryId === catId).reduce((a, l) => a + (l.actualAmount || 0), 0) : 0;
+    const cQ: Record<FinancialQuarter, number> = { Q1: catQ('Q1'), Q2: catQ('Q2'), Q3: catQ('Q3'), Q4: catQ('Q4') };
+    const cYtd = upto.reduce((acc, q) => acc + cQ[q], 0);
     const cPlannedYtd = (catAnnualBudget * expectedPercent) / 100;
     const cRemaining = catAnnualBudget - cYtd;
-    const cIsOverspent = cYtd > catAnnualBudget && catAnnualBudget > 0;
-    const cOverspendAmount = cIsOverspent ? cYtd - catAnnualBudget : 0;
-    const cUtilisation = catAnnualBudget > 0 
-      ? (cYtd / catAnnualBudget) * 100 
-      : 0;
-    const cVariance = cYtd - cPlannedYtd;
-
+    const isUnbudgeted = catAnnualBudget === 0 && cYtd > 0;
+    const cIsOverspent = isUnbudgeted || (catAnnualBudget > 0 && cYtd > catAnnualBudget);
     return {
-      categoryId: cat.id,
-      categoryName: cat.name,
+      categoryId: catId,
+      categoryName: catName,
+      isUnbudgeted,
       annualBudget: catAnnualBudget,
-      q1Actual: cQ1,
-      q2Actual: cQ2,
-      q3Actual: cQ3,
-      q4Actual: cQ4,
+      q1Actual: cQ.Q1,
+      q2Actual: cQ.Q2,
+      q3Actual: cQ.Q3,
+      q4Actual: cQ.Q4,
       ytdActual: cYtd,
       remaining: cRemaining,
       remainingBudget: cRemaining,
-      utilisationPercent: cUtilisation,
+      utilisationPercent: pct1(cYtd, catAnnualBudget),
       plannedYtd: cPlannedYtd,
-      variance: cVariance,
+      variance: cYtd - cPlannedYtd,
       isOverspent: cIsOverspent,
-      overspendAmount: cOverspendAmount,
+      overspendAmount: isUnbudgeted ? cYtd : cIsOverspent ? cYtd - catAnnualBudget : 0,
     };
-  });
+  }).filter(c => c.annualBudget > 0 || c.ytdActual > 0);
 
-  // Calculate Performance Achievement Rate connection
+  // --- Integrity ---------------------------------------------------------------------------------
+  const lineBudgetTotal = (profile?.lines || []).reduce((a, l) => a + (l.annualBudget || 0), 0);
+  const lineBudgetVariance = profile ? approvedAmount - lineBudgetTotal : 0;
+  const categoryYtdTotal = categoryBreakdown.reduce((a, c) => a + c.ytdActual, 0);
+  const linesReconcile = lineBudgetVariance === 0 && categoryYtdTotal === ytdActual;
+
+  // --- Forecast: run-rate of reported quarters projected to year end -----------------------------
+  const reportedCount = upto.filter(q => isCounted(sub[q])).length;
+  const projectedYearEndSpend = closed
+    ? fullYearActual
+    : reportedCount > 0 ? Math.round((ytdActual / reportedCount) * 4) : 0;
+
+  // --- Link to performance: is delivery keeping pace with spend? ---------------------------------
   let targetAchievementRate: number | undefined;
-  let performanceFinanceSignal: { status: 'ALIGNED' | 'REQUIRES_REVIEW' | 'DISCONNECTED' | 'COMMENDABLE'; commentary: string } | undefined;
-
+  let performanceFinanceSignal: EntityFinancialSummary['performanceFinanceSignal'];
   if (kpiRecords && kpiRecords.length > 0) {
-    const entityKpis = kpiRecords.filter(k => k.entityId === entityId);
-    if (entityKpis.length > 0) {
-      const avgAchieved = entityKpis.reduce((acc, k) => acc + (k.percentageAchieved || 0), 0) / entityKpis.length;
+    const items = kpiRecords.filter(k => k.entityId === entityId).map(k => calculateKpiItemProgress(k, fy, selectedQuarter));
+    if (items.length > 0) {
+      const avgAchieved = Math.round(items.reduce((acc, i) => acc + i.cappedPercentage, 0) / items.length);
       targetAchievementRate = avgAchieved;
-
-      // Section 23: Connect financial information to performance
-      if (utilisationPercent >= 70 && avgAchieved <= 50) {
+      // Both measures are expressed against the year-to-date PLAN, so they are comparable.
+      const spendVsPlan = expectedYtd > 0 ? Math.round((ytdActual / expectedYtd) * 100) : 0;
+      const gap = spendVsPlan - avgAchieved;
+      if (ytdActual > 0 && gap > 20) {
         performanceFinanceSignal = {
           status: 'REQUIRES_REVIEW',
-          commentary: `Budget utilisation (${utilisationPercent.toFixed(1)}%) is substantially ahead of reported target achievement (${avgAchieved.toFixed(1)}%). Review expenditure and performance evidence for this reporting period.`
+          commentary: `Spend is at ${spendVsPlan}% of the year-to-date plan while delivery is only at ${avgAchieved}% of year-to-date targets. Review expenditure and performance evidence for this period.`,
         };
-      } else if (Math.abs(utilisationPercent - avgAchieved) <= 20) {
+      } else if (ytdActual > 0 && gap < -20) {
         performanceFinanceSignal = {
-          status: 'ALIGNED',
-          commentary: `Financial absorption (${utilisationPercent.toFixed(1)}%) corresponds proportionally with operational delivery achievement (${avgAchieved.toFixed(1)}%).`
+          status: 'COMMENDABLE',
+          commentary: `Delivery (${avgAchieved}% of year-to-date targets) is running ahead of spend (${spendVsPlan}% of plan).`,
         };
       } else {
         performanceFinanceSignal = {
-          status: 'REQUIRES_REVIEW',
-          commentary: `Financial utilisation is at ${utilisationPercent.toFixed(1)}% while operational delivery reflects ${avgAchieved.toFixed(1)}%. Monitor milestone progression.`
+          status: 'ALIGNED',
+          commentary: `Spend (${spendVsPlan}% of year-to-date plan) corresponds proportionally with delivery (${avgAchieved}% of year-to-date targets).`,
         };
       }
     }
   }
 
-  // Build quarterly timeline progression
-  const quarterlyTimeline = (['Q1', 'Q2', 'Q3', 'Q4'] as FinancialQuarter[]).map((q) => {
-    let qActual = 0;
-    let isSubmitted = false;
-    let submissionStatus: string | undefined;
-
-    if (q === 'Q1') {
-      qActual = q1Actual;
-      isSubmitted = q1Submitted;
-      submissionStatus = q1Sub?.status;
-    } else if (q === 'Q2') {
-      qActual = q2Actual;
-      isSubmitted = q2Submitted;
-      submissionStatus = q2Sub?.status;
-    } else if (q === 'Q3') {
-      qActual = q3Actual;
-      isSubmitted = q3Submitted;
-      submissionStatus = q3Sub?.status;
-    } else {
-      qActual = q4Actual;
-      isSubmitted = q4Submitted;
-      submissionStatus = q4Sub?.status;
-    }
-
-    const qPlanned = (budgetAllocated * 0.25);
-    
-    let cumulativeYtd = 0;
-    if (q === 'Q1') cumulativeYtd = q1Actual;
-    else if (q === 'Q2') cumulativeYtd = q1Actual + q2Actual;
-    else if (q === 'Q3') cumulativeYtd = q1Actual + q2Actual + q3Actual;
-    else cumulativeYtd = q1Actual + q2Actual + q3Actual + q4Actual;
-
-    const remaining = budgetAllocated - cumulativeYtd;
-    const utilisation = budgetAllocated > 0 ? (cumulativeYtd / budgetAllocated) * 100 : 0;
-
+  // --- Quarterly timeline ------------------------------------------------------------------------
+  let cumulativeYtd = 0;
+  let cumulativeDisbursed = 0;
+  const quarterlyTimeline: QuarterlyTimelinePoint[] = QUARTER_ORDER.map((q, i) => {
+    cumulativeYtd += qActual[q];
+    const dq = disbursedInQuarter(q);
+    cumulativeDisbursed += dq;
+    const planned = (approvedAmount * (trajectoryPct[i] - (i > 0 ? trajectoryPct[i - 1] : 0))) / 100;
     return {
       quarter: q,
       quarterName: getQuarterName(q),
-      actualExpenditure: qActual,
-      plannedExpenditure: qPlanned,
+      actualExpenditure: qActual[q],
+      plannedExpenditure: planned,
       cumulativeYtdExpenditure: cumulativeYtd,
-      remainingBudget: remaining,
-      utilisationPercent: utilisation,
-      isSubmitted,
-      status: submissionStatus,
+      remainingBudget: approvedAmount - cumulativeYtd,
+      utilisationPercent: pct1(cumulativeYtd, approvedAmount),
+      isSubmitted: isCounted(sub[q]),
+      status: sub[q]?.status,
+      disbursedInQuarter: dq,
+      cumulativeDisbursed,
     };
   });
 
@@ -499,187 +336,129 @@ export function calculateEntityFinancialSummary(
     entityName,
     shortCode,
     entityType: entityMeta?.type || 'PUBLIC_ENTITY',
-    financialYear,
+    financialYear: fy,
     budgetProfileId: profile?.id,
     requestedAmount,
-    approvedAmount: budgetAllocated,
+    approvedAmount,
     fundingGap,
     budgetStatus,
-    q1Actual,
-    q2Actual,
-    q3Actual,
-    q4Actual,
-    q1Submitted,
-    q2Submitted,
-    q3Submitted,
-    q4Submitted,
+    q1Actual: qActual.Q1,
+    q2Actual: qActual.Q2,
+    q3Actual: qActual.Q3,
+    q4Actual: qActual.Q4,
+    q1Submitted: isCounted(sub.Q1),
+    q2Submitted: isCounted(sub.Q2),
+    q3Submitted: isCounted(sub.Q3),
+    q4Submitted: isCounted(sub.Q4),
     selectedQuarter,
-    ytdActual: totalSpentToDate,
+    ytdActual,
     fullYearActual,
     expectedYtd,
     remainingBudget,
     utilisationPercent,
     variance,
-    absoluteVariance,
+    absoluteVariance: Math.abs(variance),
     variancePercent,
     targetTrajectoryPercent: expectedPercent,
     isOverspent,
     overspendAmount,
     financialStatus,
     statusExplanation,
+    hasBudgetProfile: !!profile,
+    disbursedToDate,
+    disbursementRate: pct1(disbursedToDate, approvedAmount),
+    absorptionRate: pct1(ytdActual, disbursedToDate),
+    undisbursedBalance: approvedAmount - disbursedToDate,
+    unspentDisbursed: Math.max(0, disbursedToDate - ytdActual),
+    spentAheadOfDisbursement: ytdActual > disbursedToDate,
+    verifiedYtdActual,
+    unverifiedYtdActual: ytdActual - verifiedYtdActual,
+    dueQuarters,
+    missingQuarters,
+    returnedQuarters,
+    projectedYearEndSpend,
+    projectedYearEndUtilisationPercent: pct1(projectedYearEndSpend, approvedAmount),
+    lineBudgetTotal,
+    lineBudgetVariance,
+    linesReconcile,
     targetAchievementRate,
     performanceFinanceSignal,
     quarterlyTimeline,
-    categories: categoryBreakdown.filter(c => c.annualBudget > 0 || c.ytdActual > 0),
-    // Authoritative Financial Fields adhering to Section 8-11
-    budgetAllocated,
-    totalDisbursedToDate,
-    totalTransferredToDate,
-    totalCommittedToDate,
-    totalSpentToDate,
-    unspentDisbursedBalance,
-    undisbursedAllocation,
-    disbursementRate,
-    transferRate,
-    absorptionRate,
-    disbursementVariance,
-    transferVariance,
-    commitmentVsSpendingDifference,
-    budgetVsSpendingDifference,
-    transactions: matchingTransactions,
+    categories: categoryBreakdown,
   };
 }
 
-/**
- * Department-level aggregate KPI computation
- * Strictly adheres to Section 6, 12, 21: NO INDEPENDENT TOTALS, NO ROUNDING.
- * All numbers are exact mathematical aggregations of entity summaries.
- */
+/** Department-level aggregate KPI computation over portfolio members only. */
 export function calculateDepartmentFinancialKPIs(
   financialYear: string,
-  selectedQuarter: FinancialQuarter | 'FULL_YEAR',
+  selectedQuarter: QuarterSelection,
   budgetProfiles: EntityBudgetProfile[],
   quarterlySubmissions: QuarterlyFinancialSubmission[],
   entities: PublicEntity[],
   categories: ExpenseCategory[],
   kpis?: KPIRecord[],
-  transactions?: FinancialTransaction[]
+  disbursements: DisbursementRecord[] = []
 ): DepartmentFinancialKPIs {
-  const summaries = entities.map(entity => 
-    calculateEntityFinancialSummary(
-      entity.id,
-      financialYear,
-      selectedQuarter,
-      budgetProfiles,
-      quarterlySubmissions,
-      categories,
-      entity,
-      kpis,
-      transactions
-    )
+  const fy = normalizeFinancialYear(financialYear);
+  const members = entities.filter(isPortfolioMember);
+  const summaries = members.map(entity =>
+    calculateEntityFinancialSummary(entity.id, fy, selectedQuarter, budgetProfiles, quarterlySubmissions, categories, entity, kpis, disbursements)
   );
+  const memberIds = new Set(members.map(m => m.id));
 
   const totalRequested = summaries.reduce((acc, s) => acc + s.requestedAmount, 0);
   const totalApproved = summaries.reduce((acc, s) => acc + s.approvedAmount, 0);
-  const totalBudgetAllocated = summaries.reduce((acc, s) => acc + s.budgetAllocated, 0);
-  const totalDisbursedToDate = summaries.reduce((acc, s) => acc + s.totalDisbursedToDate, 0);
-  const totalTransferredToDate = summaries.reduce((acc, s) => acc + s.totalTransferredToDate, 0);
-  const totalCommittedToDate = summaries.reduce((acc, s) => acc + s.totalCommittedToDate, 0);
-  const totalSpentToDate = summaries.reduce((acc, s) => acc + s.totalSpentToDate, 0);
-  const totalActualExpenditure = totalSpentToDate;
-  const totalActualYTD = totalSpentToDate;
-  const totalRemaining = totalBudgetAllocated - totalSpentToDate;
-  const totalRemainingBudget = totalRemaining;
-  const unspentDisbursedBalance = summaries.reduce((acc, s) => acc + s.unspentDisbursedBalance, 0);
-  const undisbursedAllocation = summaries.reduce((acc, s) => acc + s.undisbursedAllocation, 0);
-
-  // Exact unrounded rates
-  const overallUtilisationPercent = totalBudgetAllocated > 0 
-    ? (totalSpentToDate / totalBudgetAllocated) * 100 
-    : 0;
-
-  const disbursementRate = totalBudgetAllocated > 0
-    ? (totalDisbursedToDate / totalBudgetAllocated) * 100
-    : 0;
-
-  const transferRate = totalBudgetAllocated > 0
-    ? (totalTransferredToDate / totalBudgetAllocated) * 100
-    : 0;
-
-  const expenditureRate = totalTransferredToDate > 0
-    ? (totalSpentToDate / totalTransferredToDate) * 100
-    : 0;
-
-  // Variances adhering to Section 12
-  const disbursementVariance = totalBudgetAllocated - totalDisbursedToDate;
-  const transferVariance = totalDisbursedToDate - totalTransferredToDate;
-  const commitmentVsSpendingDifference = totalCommittedToDate - totalSpentToDate;
-  const budgetVsSpendingDifference = totalBudgetAllocated - totalSpentToDate;
+  const totalActualExpenditure = summaries.reduce((acc, s) => acc + s.ytdActual, 0);
+  const totalDisbursed = summaries.reduce((acc, s) => acc + s.disbursedToDate, 0);
+  const totalVerifiedActual = summaries.reduce((acc, s) => acc + s.verifiedYtdActual, 0);
+  const totalRemaining = totalApproved - totalActualExpenditure;
+  const overallUtilisationPercent = pct1(totalActualExpenditure, totalApproved);
 
   const entitiesOverspendingCount = summaries.filter(s => s.isOverspent).length;
   const entitiesUnderUtilisingCount = summaries.filter(s => s.financialStatus === 'UNDER_UTILISING').length;
   const entitiesOnTrackCount = summaries.filter(s => s.financialStatus === 'ON_TRACK').length;
   const entitiesMissingSubmissionCount = summaries.filter(s => s.financialStatus === 'MISSING_SUBMISSION').length;
 
-  const pendingRequests = budgetProfiles.filter(
-    bp => bp.status === 'SUBMITTED' || bp.status === 'UNDER_REVIEW'
+  const budgetRequestsPendingCount = budgetProfiles.filter(
+    bp => memberIds.has(bp.entityId) && (bp.status === 'SUBMITTED' || bp.status === 'UNDER_REVIEW')
   ).length;
-
   const pendingSubmissionsCount = quarterlySubmissions.filter(
-    s => s.financialYear === financialYear && (s.status === 'SUBMITTED' || s.status === 'UNDER_REVIEW')
+    s => memberIds.has(s.entityId) && normalizeFinancialYear(s.financialYear) === fy && (s.status === 'SUBMITTED' || s.status === 'UNDER_REVIEW')
   ).length;
 
-  let deptExpectedPercent = 100;
-  if (selectedQuarter === 'Q1') deptExpectedPercent = 25;
-  else if (selectedQuarter === 'Q2') deptExpectedPercent = 50;
-  else if (selectedQuarter === 'Q3') deptExpectedPercent = 75;
-
-  const totalFundingGap = totalRequested - totalApproved;
+  const targetTrajectoryPercent = selectedQuarter === 'FULL_YEAR' ? 100 : quarterIndex(selectedQuarter) * 25;
 
   return {
+    totalDisbursed,
+    totalVerifiedActual,
     totalRequested,
     totalApproved,
     totalActualExpenditure,
-    totalActualYTD,
+    totalActualYTD: totalActualExpenditure,
     totalRemaining,
     overallUtilisationPercent,
     departmentUtilisationPercent: overallUtilisationPercent,
-    targetTrajectoryPercent: deptExpectedPercent,
+    targetTrajectoryPercent,
     entitiesOverspendingCount,
     overspendingEntitiesCount: entitiesOverspendingCount,
     entitiesUnderUtilisingCount,
     underUtilisingEntitiesCount: entitiesUnderUtilisingCount,
     entitiesOnTrackCount,
     entitiesMissingSubmissionCount,
-    budgetRequestsPendingCount: pendingRequests,
+    budgetRequestsPendingCount,
     pendingSubmissionsCount,
-    totalFundingGap,
-    // Section 12 Department Metrics
-    totalBudgetAllocated,
-    totalDisbursedToDate,
-    totalTransferredToDate,
-    totalCommittedToDate,
-    totalSpentToDate,
-    totalRemainingBudget,
-    unspentDisbursedBalance,
-    undisbursedAllocation,
-    disbursementRate,
-    transferRate,
-    expenditureRate,
-    disbursementVariance,
-    transferVariance,
-    commitmentVsSpendingDifference,
-    budgetVsSpendingDifference,
+    totalFundingGap: totalRequested - totalApproved,
   };
 }
 
-/**
- * Generates an export-ready CSV string adhering to Section 33 of User Request
- */
-export function generateFinancialExportCSV(
-  summaries: EntityFinancialSummary[],
-  financialYear: string
-): string {
+/** Escapes a text cell and neutralises spreadsheet formula injection (=, +, -, @ prefixes). */
+function csvText(value: string): string {
+  const safe = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+  return `"${safe.replace(/"/g, '""')}"`;
+}
+
+/** Generates an export-ready CSV string adhering to Section 33 of the User Request */
+export function generateFinancialExportCSV(summaries: EntityFinancialSummary[], financialYear: string): string {
   const headers = [
     'Entity',
     'Short Code',
@@ -687,37 +466,43 @@ export function generateFinancialExportCSV(
     'Budget Requested (ZAR)',
     'Approved Budget (ZAR)',
     'Funding Gap (ZAR)',
+    'Disbursed to Date (ZAR)',
     'Q1 Actual (ZAR)',
     'Q2 Actual (ZAR)',
     'Q3 Actual (ZAR)',
     'Q4 Actual (ZAR)',
-    'YTD Actual (ZAR)',
+    'YTD Actual Reported (ZAR)',
+    'YTD Verified by DSAC (ZAR)',
     'Remaining Budget (ZAR)',
-    'Utilisation %',
+    'Budget Utilisation % (YTD / Approved)',
+    'Transfer Absorption % (YTD / Disbursed)',
     'Expected YTD (ZAR)',
     'Variance (ZAR)',
     'Financial Status',
-    'Overspent Flag'
+    'Overspent Flag',
   ];
 
   const rows = summaries.map(s => [
-    `"${s.entityName.replace(/"/g, '""')}"`,
-    `"${s.shortCode}"`,
-    `"${s.financialYear}"`,
+    csvText(s.entityName),
+    csvText(s.shortCode),
+    csvText(s.financialYear || normalizeFinancialYear(financialYear)),
     s.requestedAmount,
     s.approvedAmount,
     s.fundingGap,
+    s.disbursedToDate,
     s.q1Actual,
     s.q2Actual,
     s.q3Actual,
     s.q4Actual,
     s.ytdActual,
+    s.verifiedYtdActual,
     s.remainingBudget,
     `${s.utilisationPercent}%`,
+    `${s.absorptionRate}%`,
     s.expectedYtd,
     s.variance,
-    `"${s.financialStatus}"`,
-    s.isOverspent ? 'YES' : 'NO'
+    csvText(s.financialStatus),
+    s.isOverspent ? 'YES' : 'NO',
   ]);
 
   return [headers.join(','), ...rows.map(r => r.join(','))].join('\n');

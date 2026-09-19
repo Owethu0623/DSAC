@@ -20,6 +20,9 @@ import {
 } from 'lucide-react';
 import { PublicEntity } from '../../types';
 import { store } from '../../services/store';
+import { formatZAR } from '../../services/financialService';
+import { getCurrentReportingPeriod, isQuarterDue, sameFinancialYear } from '../../services/reportingPeriod';
+import { getEvidenceSummary } from '../../services/evidenceStatus';
 
 interface DsacComplianceViewProps {
   entities: PublicEntity[];
@@ -71,18 +74,52 @@ export const DsacComplianceView: React.FC<DsacComplianceViewProps> = ({
   const nonCompliantCount = entities.filter(e => e.overallComplianceScore < 65).length;
   const cleanAuditCount = entities.filter(e => e.auditOutcome === 'CLEAN_AUDIT').length;
 
-  const handleVerifyCompliance = () => {
-    if (!selectedEntity) return;
-    const updated = { ...selectedEntity, overallComplianceScore: Math.min(100, selectedEntity.overallComplianceScore + 4) };
-    store.updateEntity(updated);
-    setActionNotice(`Compliance verification recorded for ${selectedEntity.shortCode}. Score updated.`);
-    setTimeout(() => setActionNotice(null), 4000);
+  const [noticeOpen, setNoticeOpen] = useState(false);
+  const [noticeReason, setNoticeReason] = useState('');
+
+  const period = getCurrentReportingPeriod();
+  const returns = selectedEntity
+    ? (['Q1', 'Q2', 'Q3', 'Q4'] as const).map(q => ({
+        quarter: q,
+        report: store.reports.find(r => r.entityId === selectedEntity.id && r.quarter === q && sameFinancialYear(r.financialYear, period.financialYear)),
+        due: isQuarterDue(period.financialYear, q),
+      }))
+    : [];
+  const evidence = selectedEntity ? getEvidenceSummary(selectedEntity.id, period.quarter, period.financialYear) : null;
+  const fin = selectedEntity ? store.getEntityFinancialSummary(selectedEntity.id, period.financialYear, period.quarter) : null;
+
+  const returnBadge = (r: typeof returns[number]) => {
+    switch (r.report?.submissionStatus) {
+      case 'APPROVED': return { label: 'Approved', cls: 'bg-emerald-100 text-emerald-800', ok: true };
+      case 'SUBMITTED':
+      case 'UNDER_REVIEW': return { label: 'Under DSAC review', cls: 'bg-amber-100 text-amber-800', ok: false };
+      case 'CORRECTION_REQUIRED': return { label: 'Sent back', cls: 'bg-rose-100 text-rose-800', ok: false };
+      case 'OVERDUE': return { label: 'Overdue', cls: 'bg-rose-100 text-rose-800', ok: false };
+      case 'DRAFT': return { label: 'Draft', cls: 'bg-slate-100 text-slate-700', ok: false };
+      default: return r.due ? { label: 'Not lodged', cls: 'bg-rose-100 text-rose-800', ok: false } : { label: 'Not yet due', cls: 'bg-slate-100 text-slate-600', ok: false };
+    }
   };
 
+  /** Records the next escalation stage against the organisation. Nothing is e-mailed from this build. */
   const handleIssueNotice = () => {
     if (!selectedEntity) return;
-    setActionNotice(`Official PFMA Section 38 Letter of Demand dispatched to ${selectedEntity.headOfEntity} (${selectedEntity.contactEmail}).`);
-    setTimeout(() => setActionNotice(null), 5000);
+    const reason = noticeReason.trim();
+    if (!reason) {
+      setActionNotice('Enter the reason for the notice first.');
+      setTimeout(() => setActionNotice(null), 4000);
+      return;
+    }
+    const stage = Math.min(4, (selectedEntity.statutoryDefaultStage ?? 0) + 1) as 1 | 2 | 3 | 4;
+    store.issueStatutoryNotice(selectedEntity.id, stage, reason);
+    const recorded = store.entities.find(e => e.id === selectedEntity.id)?.statutoryDefaultStage === stage;
+    setActionNotice(
+      recorded
+        ? `Stage ${stage} notice recorded against ${selectedEntity.shortCode}. It is not e-mailed automatically in this build, so send the letter through your normal channel.`
+        : 'Only DSAC officials can issue a statutory notice.'
+    );
+    setNoticeOpen(false);
+    setNoticeReason('');
+    setTimeout(() => setActionNotice(null), 7000);
   };
 
   return (
@@ -333,183 +370,145 @@ export const DsacComplianceView: React.FC<DsacComplianceViewProps> = ({
               </div>
 
               {/* Action Toolbar */}
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  onClick={handleVerifyCompliance}
-                  className="px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-semibold flex items-center gap-1.5 shadow-xs transition-colors"
-                >
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                  <span>Verify Compliance</span>
-                </button>
-                <button
-                  onClick={handleIssueNotice}
-                  className="px-3 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-800 text-xs font-semibold flex items-center gap-1.5 transition-colors"
-                >
-                  <AlertOctagon className="w-3.5 h-3.5 text-rose-600" />
-                  <span>Issue Section 38 Notice</span>
-                </button>
-                {onOpenWorkspace && (
+              <div className="space-y-2.5">
+                <div className="flex flex-wrap items-center gap-2">
+                  {onOpenWorkspace && (
+                    <button
+                      onClick={() => onOpenWorkspace(selectedEntity.id)}
+                      className="px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-semibold flex items-center gap-1.5 shadow-xs transition-colors"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                      <span>Open compliance page</span>
+                    </button>
+                  )}
                   <button
-                    onClick={() => onOpenWorkspace(selectedEntity.id)}
-                    className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold flex items-center gap-1.5 transition-colors ml-auto"
+                    onClick={() => setNoticeOpen(o => !o)}
+                    className="px-3 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-800 text-xs font-semibold flex items-center gap-1.5 transition-colors"
                   >
-                    <ExternalLink className="w-3.5 h-3.5 text-slate-500" />
-                    <span>Open Entity Workspace</span>
+                    <AlertOctagon className="w-3.5 h-3.5 text-rose-600" />
+                    <span>Issue Section 38 Notice</span>
                   </button>
+                </div>
+                {noticeOpen && (
+                  <div className="flex flex-col sm:flex-row gap-2 p-3 rounded-lg bg-rose-50/50 border border-rose-200">
+                    <input
+                      value={noticeReason}
+                      onChange={(e) => setNoticeReason(e.target.value)}
+                      placeholder={`Reason for the stage ${Math.min(4, (selectedEntity.statutoryDefaultStage ?? 0) + 1)} notice (required)`}
+                      className="flex-1 px-3 py-1.5 text-xs rounded-lg border border-rose-200 bg-white focus:outline-none focus:ring-1 focus:ring-rose-400"
+                    />
+                    <button onClick={handleIssueNotice} className="px-3 py-1.5 rounded-lg bg-rose-700 hover:bg-rose-800 text-white text-xs font-bold cursor-pointer">
+                      Record notice
+                    </button>
+                  </div>
                 )}
               </div>
 
-              {/* Statutory Section 38 Deliverables Checklist */}
+              {/* Statutory standing */}
+              <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80 text-xs grid grid-cols-2 gap-3">
+                <div>
+                  <div className="text-[10px] text-slate-500">Funding status</div>
+                  <div className={`font-bold mt-0.5 ${selectedEntity.trancheStatus === 'WITHHELD' ? 'text-rose-700' : selectedEntity.trancheStatus === 'CONDITIONAL_HOLD' ? 'text-amber-700' : 'text-emerald-700'}`}>
+                    {(selectedEntity.trancheStatus || 'RELEASED').replace(/_/g, ' ')}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[10px] text-slate-500">Notice stage</div>
+                  <div className="font-bold text-slate-900 mt-0.5">
+                    {selectedEntity.statutoryDefaultStage ? `Stage ${selectedEntity.statutoryDefaultStage} of 4` : 'None issued'}
+                  </div>
+                </div>
+                <div className="col-span-2">
+                  <div className="text-[10px] text-slate-500">AGSA audit opinion ({selectedEntity.auditYear})</div>
+                  <div className="font-bold text-slate-900 mt-0.5 capitalize">{selectedEntity.auditOutcome.replace(/_/g, ' ').toLowerCase()}</div>
+                </div>
+              </div>
+
+              {/* Performance returns for the current financial year */}
               <div>
                 <h4 className="text-xs font-black text-slate-800 uppercase tracking-wider mb-2.5 flex items-center justify-between">
-                  <span>Mandatory Statutory Submissions (2024/2025)</span>
-                  <span className="text-[11px] font-semibold text-emerald-700">7 of 8 Validated</span>
+                  <span>Quarterly performance returns ({period.financialYear})</span>
+                  <span className="text-[11px] font-semibold text-emerald-700">
+                    {returns.filter(r => r.report?.submissionStatus === 'APPROVED').length} of {returns.filter(r => r.due).length} due approved
+                  </span>
                 </h4>
-
                 <div className="border border-slate-200 rounded-xl overflow-hidden divide-y divide-slate-100 text-xs">
-                  {/* Row 1 */}
-                  <div className="p-2.5 flex items-center justify-between bg-slate-50/50">
-                    <div className="flex items-center gap-2">
-                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                      <div>
-                        <div className="font-bold text-slate-800">PFMA Section 38(1)(j) Written Assurance</div>
-                        <div className="text-[10px] text-slate-500">Submitted annually prior to grant disbursement</div>
+                  {returns.map(r => {
+                    const badge = returnBadge(r);
+                    return (
+                      <div key={r.quarter} className="p-2.5 flex items-center justify-between bg-white">
+                        <div className="flex items-center gap-2">
+                          {badge.ok ? <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" /> : <Clock className="w-4 h-4 text-slate-400 shrink-0" />}
+                          <div>
+                            <div className="font-bold text-slate-800">{r.quarter} statutory performance report</div>
+                            <div className="text-[10px] text-slate-500">
+                              {r.report ? `Due ${new Date(r.report.dueDate).toLocaleDateString('en-ZA', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' })}` : 'No return on record'}
+                            </div>
+                          </div>
+                        </div>
+                        <span className={`px-2 py-0.5 rounded-full font-semibold text-[10px] ${badge.cls}`}>{badge.label}</span>
                       </div>
-                    </div>
-                    <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-semibold text-[10px]">
-                      Compliant
-                    </span>
-                  </div>
-
-                  {/* Row 2 */}
-                  <div className="p-2.5 flex items-center justify-between bg-white">
-                    <div className="flex items-center gap-2">
-                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                      <div>
-                        <div className="font-bold text-slate-800">Annual Performance Plan (APP) 2024/25</div>
-                        <div className="text-[10px] text-slate-500">Tabled in Parliament via Minister of Sport, Arts and Culture</div>
-                      </div>
-                    </div>
-                    <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-semibold text-[10px]">
-                      Tabled &amp; Approved
-                    </span>
-                  </div>
-
-                  {/* Row 3 */}
-                  <div className="p-2.5 flex items-center justify-between bg-slate-50/50">
-                    <div className="flex items-center gap-2">
-                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                      <div>
-                        <div className="font-bold text-slate-800">Q1 Statutory Performance Report</div>
-                        <div className="text-[10px] text-slate-500">Verified with Portfolio of Evidence (PoE)</div>
-                      </div>
-                    </div>
-                    <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-semibold text-[10px]">
-                      Verified On-Time
-                    </span>
-                  </div>
-
-                  {/* Row 4 */}
-                  <div className="p-2.5 flex items-center justify-between bg-white">
-                    <div className="flex items-center gap-2">
-                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                      <div>
-                        <div className="font-bold text-slate-800">Q2 Statutory Performance Report</div>
-                        <div className="text-[10px] text-slate-500">Audited against MTSF priorities and targets</div>
-                      </div>
-                    </div>
-                    <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-semibold text-[10px]">
-                      Verified On-Time
-                    </span>
-                  </div>
-
-                  {/* Row 5 */}
-                  <div className="p-2.5 flex items-center justify-between bg-amber-50/40">
-                    <div className="flex items-center gap-2">
-                      <Clock className="w-4 h-4 text-amber-600 shrink-0" />
-                      <div>
-                        <div className="font-bold text-slate-800">Q3 Statutory Performance Report</div>
-                        <div className="text-[10px] text-slate-500">Due within 30 days of quarter end</div>
-                      </div>
-                    </div>
-                    <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-semibold text-[10px]">
-                      Under DSAC Review
-                    </span>
-                  </div>
-
-                  {/* Row 6 */}
-                  <div className="p-2.5 flex items-center justify-between bg-white">
-                    <div className="flex items-center gap-2">
-                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                      <div>
-                        <div className="font-bold text-slate-800">Audited Annual Financial Statements (AFS)</div>
-                        <div className="text-[10px] text-slate-500">AGSA Opinion: {selectedEntity.auditOutcome.replace(/_/g, ' ')}</div>
-                      </div>
-                    </div>
-                    <span className={`px-2 py-0.5 rounded-full font-semibold text-[10px] ${
-                      selectedEntity.auditOutcome === 'CLEAN_AUDIT' ? 'bg-teal-100 text-teal-800' : 'bg-slate-100 text-slate-800'
-                    }`}>
-                      {selectedEntity.auditOutcome === 'CLEAN_AUDIT' ? 'Clean Audit' : 'Submitted'}
-                    </span>
-                  </div>
-
-                  {/* Row 7 */}
-                  <div className="p-2.5 flex items-center justify-between bg-slate-50/50">
-                    <div className="flex items-center gap-2">
-                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                      <div>
-                        <div className="font-bold text-slate-800">SARS Tax Compliance Status (TCS PIN)</div>
-                        <div className="text-[10px] text-slate-500">Valid eFiling PIN for government funding disbursement</div>
-                      </div>
-                    </div>
-                    <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-semibold text-[10px]">
-                      Valid &amp; Good Standing
-                    </span>
-                  </div>
-
-                  {/* Row 8 */}
-                  <div className="p-2.5 flex items-center justify-between bg-white">
-                    <div className="flex items-center gap-2">
-                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                      <div>
-                        <div className="font-bold text-slate-800">B-BBEE Transformation Certificate</div>
-                        <div className="text-[10px] text-slate-500">B-BBEE Act compliance and equity scorecard</div>
-                      </div>
-                    </div>
-                    <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-semibold text-[10px]">
-                      Level 1 Verified
-                    </span>
-                  </div>
+                    );
+                  })}
                 </div>
               </div>
 
-              {/* Financial Compliance Snapshot */}
-              <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80">
-                <div className="flex items-center justify-between pb-2 border-b border-slate-200">
-                  <span className="text-xs font-bold text-slate-800">Statutory Vote 37 Funding Compliance</span>
-                  <span className="text-[11px] text-slate-500">Audited 2024/2025</span>
+              {/* Evidence required for the current quarter */}
+              {evidence && (
+                <div>
+                  <h4 className="text-xs font-black text-slate-800 uppercase tracking-wider mb-2.5 flex items-center justify-between">
+                    <span>Evidence required for {period.quarter} {period.financialYear}</span>
+                    <span className="text-[11px] font-semibold text-emerald-700">{evidence.verifiedMandatory} of {evidence.totalMandatory} mandatory verified</span>
+                  </h4>
+                  <div className="border border-slate-200 rounded-xl overflow-hidden divide-y divide-slate-100 text-xs">
+                    {evidence.slots.map(slot => (
+                      <div key={slot.id} className="p-2.5 flex items-center justify-between bg-white">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <CheckCircle2 className={`w-4 h-4 shrink-0 ${slot.status === 'VERIFIED' ? 'text-emerald-600' : 'text-slate-300'}`} />
+                          <div className="min-w-0">
+                            <div className="font-bold text-slate-800 truncate">{slot.title}</div>
+                            {slot.detail && <div className="text-[10px] text-slate-500 truncate">{slot.detail}</div>}
+                          </div>
+                        </div>
+                        <span className={`px-2 py-0.5 rounded-full font-semibold text-[10px] shrink-0 ${
+                          slot.status === 'VERIFIED' ? 'bg-emerald-100 text-emerald-800'
+                          : slot.status === 'MANUAL_REVIEW' || slot.status === 'VALIDATING' ? 'bg-amber-100 text-amber-800'
+                          : 'bg-rose-100 text-rose-800'
+                        }`}>
+                          {slot.status === 'VERIFIED' ? 'Verified' : slot.status === 'MANUAL_REVIEW' || slot.status === 'VALIDATING' ? 'Under review' : slot.status === 'REJECTED' ? 'Rejected' : 'Missing'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-[10px] text-slate-400 mt-1.5">
+                    Tax clearance, B-BBEE certificates and APP tabling are not tracked in this build, so they are not shown.
+                  </p>
                 </div>
-                <div className="grid grid-cols-3 gap-2 pt-2.5 text-center">
-                  <div>
-                    <div className="text-[10px] text-slate-500">Approved Budget</div>
-                    <div className="text-xs font-bold text-slate-900 mt-0.5">
-                      R {(selectedEntity.budgetAllocationZAR / 1_000_000).toFixed(1)}M
-                    </div>
+              )}
+
+              {/* Funding snapshot, from the same engine as every dashboard */}
+              {fin && (
+                <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80">
+                  <div className="flex items-center justify-between pb-2 border-b border-slate-200">
+                    <span className="text-xs font-bold text-slate-800">Vote 37 funding</span>
+                    <span className="text-[11px] text-slate-500">{period.financialYear} to {period.quarter}</span>
                   </div>
-                  <div>
-                    <div className="text-[10px] text-slate-500">Transferred (75%)</div>
-                    <div className="text-xs font-bold text-teal-700 mt-0.5">
-                      R {(selectedEntity.transferredAmountZAR / 1_000_000).toFixed(1)}M
+                  <div className="grid grid-cols-3 gap-2 pt-2.5 text-center">
+                    <div>
+                      <div className="text-[10px] text-slate-500">Approved budget</div>
+                      <div className="text-xs font-bold text-slate-900 mt-0.5">{formatZAR(fin.approvedAmount)}</div>
                     </div>
-                  </div>
-                  <div>
-                    <div className="text-[10px] text-slate-500">Expenditure</div>
-                    <div className="text-xs font-bold text-slate-900 mt-0.5">
-                      R {(selectedEntity.reportedExpenditureZAR / 1_000_000).toFixed(1)}M
+                    <div>
+                      <div className="text-[10px] text-slate-500">Disbursed ({fin.disbursementRate.toFixed(1)}%)</div>
+                      <div className="text-xs font-bold text-teal-700 mt-0.5">{formatZAR(fin.disbursedToDate)}</div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] text-slate-500">Reported spend</div>
+                      <div className="text-xs font-bold text-slate-900 mt-0.5">{formatZAR(fin.ytdActual)}</div>
                     </div>
                   </div>
                 </div>
-              </div>
+              )}
 
             </div>
           ) : (

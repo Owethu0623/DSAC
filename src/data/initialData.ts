@@ -10,16 +10,21 @@ import {
   User 
 } from '../types';
 import { generateOfficialKpis, generateOfficialReports } from './seedData';
+import { normalizeKpiRecords } from '../services/kpiProgress';
+import { DEMO_DSAC_ADMIN_EMAIL } from '../config/demoMode';
 
+/**
+ * DEMONSTRATION ACCOUNTS (see src/config/demoMode.ts). No credentials live in source: the store derives each
+ * account's password hash at runtime from the demo password, and only when demo mode is on.
+ */
 export const INITIAL_USERS: User[] = [
   {
     id: 'user-dsac-admin',
     name: 'Sicelo Sakhile Mkhize',
-    email: 'sakhilesicelo94@gmail.com',
+    email: DEMO_DSAC_ADMIN_EMAIL,
     role: 'DSAC_ADMIN',
     designation: 'Chief Director: Public Entities Oversight & Governance',
     entityName: 'DSAC National Headquarters',
-    password: 'Mkhize@550',
   },
   {
     id: 'user-dsac-thandi',
@@ -28,7 +33,6 @@ export const INITIAL_USERS: User[] = [
     role: 'DSAC_ADMIN',
     designation: 'DSAC Official • Oversight Directorate',
     entityName: 'DSAC National Headquarters',
-    password: 'Password123!',
   },
   {
     id: 'user-ea-officer',
@@ -38,7 +42,6 @@ export const INITIAL_USERS: User[] = [
     entityId: 'ent-basa',
     entityName: 'Business and Arts South Africa (BASA)',
     designation: 'Chief Financial Officer & Reporting Officer',
-    password: 'Password123!',
   },
   {
     id: 'user-npo-ubuntu',
@@ -48,7 +51,6 @@ export const INITIAL_USERS: User[] = [
     entityId: 'ent-ubuntu-arts',
     entityName: 'Ubuntu Arts NPO',
     designation: 'Organisation Admin',
-    password: 'Password123!',
   },
   {
     id: 'user-pe-sahra',
@@ -58,7 +60,6 @@ export const INITIAL_USERS: User[] = [
     entityId: 'ent-sahra',
     entityName: 'South African Heritage Resources Agency (SAHRA)',
     designation: 'Chief Performance & Reporting Officer',
-    password: 'Password123!',
   },
   {
     id: 'user-pe-nac',
@@ -68,7 +69,6 @@ export const INITIAL_USERS: User[] = [
     entityId: 'ent-nac',
     entityName: 'National Arts Council of South Africa (NAC)',
     designation: 'Finance & Compliance Officer',
-    password: 'Password123!',
   },
   {
     id: 'user-pe-nfvf',
@@ -78,7 +78,6 @@ export const INITIAL_USERS: User[] = [
     entityId: 'ent-nfvf',
     entityName: 'National Film and Video Foundation (NFVF)',
     designation: 'Senior Monitoring & Evaluations Officer',
-    password: 'Password123!',
   },
   {
     id: 'user-dsac-mgmt',
@@ -87,7 +86,6 @@ export const INITIAL_USERS: User[] = [
     role: 'DSAC_MANAGEMENT',
     designation: 'Deputy Director-General: Institutional Governance & Monitoring',
     entityName: 'DSAC National Headquarters',
-    password: 'Password123!',
   },
 ];
 
@@ -942,7 +940,9 @@ export const INITIAL_ENTITIES: PublicEntity[] = [
   },
 ];
 
-export const INITIAL_KPIS: KPIRecord[] = generateOfficialKpis(INITIAL_ENTITIES);
+// Normalised so currentValue / expectedValue / percentageAchieved / status are always derived from the quarterly
+// targets and actuals (the raw seed had currentValue values unrelated to the quarters, e.g. 825 vs 55).
+export const INITIAL_KPIS: KPIRecord[] = normalizeKpiRecords(generateOfficialKpis(INITIAL_ENTITIES));
 
 export const INITIAL_REPORTS: QuarterlyReport[] = generateOfficialReports(INITIAL_ENTITIES, INITIAL_KPIS);
 

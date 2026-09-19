@@ -75,32 +75,9 @@ export default function App() {
 
       {/* 3. DSAC REPO Dashboard (Official Statutory Oversight Portal) */}
       {currentTab !== 'workspace' && currentTab !== 'entity-portal' && (
+        // Entity pages open inside the DSAC shell, and the shell resolves every older section id itself
         <DsacRepoDashboard
-          initialSection={
-            currentTab === 'entities' ? 'entities' :
-            currentTab === 'executive' || currentTab === 'performance' ? 'performance' :
-            currentTab === 'kpis' ? 'kpis' :
-            currentTab === 'targets' ? 'targets' :
-            currentTab === 'compliance' ? 'compliance' :
-            currentTab === 'financials' ? 'financials' :
-            currentTab === 'reports' ? 'reports' :
-            currentTab === 'queries' ? 'queries' :
-            currentTab === 'radar' || currentTab === 'early-warning' || currentTab === 'risks' ? 'risks' :
-            currentTab === 'documents' ? 'documents' :
-            currentTab === 'tasks' || currentTab === 'approvals' ? 'tasks' :
-            currentTab === 'notifications' ? 'notifications' :
-            currentTab === 'analytics' ? 'analytics' :
-            currentTab === 'audit' ? 'audit' :
-            currentTab === 'ai' ? 'ai' :
-            currentTab === 'settings' ? 'settings' :
-            'overview'
-          }
-          onNavigateToEntity={(entityId) => {
-            setSelectedEntityId(entityId);
-            setCurrentTab('workspace');
-          }}
-          onNavigateToEntitiesList={() => setCurrentTab('entities')}
-          onOpenReportDetails={() => setCurrentTab('workspace')}
+          initialSection={currentTab === 'dsac-repo' ? 'overview' : currentTab}
           onLogout={handleLogout}
         />
       )}

@@ -40,6 +40,13 @@ import {
   generateFinancialExportCSV 
 } from '../../services/financialService';
 import { EntityFinancialView } from './EntityFinancialView';
+import {
+  financialYearStart,
+  getCurrentReportingPeriod,
+  pct1,
+  sameFinancialYear
+} from '../../services/reportingPeriod';
+import { isPortfolioMember } from '../../services/financialService';
 import { DsacSupportView } from './DsacSupportView';
 
 interface DsacFinancialDashboardProps {
@@ -63,8 +70,9 @@ export const DsacFinancialDashboard: React.FC<DsacFinancialDashboardProps> = ({
   }, []);
 
   // Filters & State
-  const [selectedYear, setSelectedYear] = useState<string>('2026/27');
-  const [selectedQuarter, setSelectedQuarter] = useState<FinancialQuarter | 'FULL_YEAR'>('Q3');
+  const period = getCurrentReportingPeriod();
+  const [selectedYear, setSelectedYear] = useState<string>(period.financialYear);
+  const [selectedQuarter, setSelectedQuarter] = useState<FinancialQuarter | 'FULL_YEAR'>(period.quarter);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [typeFilter, setTypeFilter] = useState<'ALL' | 'PUBLIC_ENTITY' | 'NPO'>('ALL');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
@@ -91,17 +99,19 @@ export const DsacFinancialDashboard: React.FC<DsacFinancialDashboardProps> = ({
 
   // Treasury Allocation Upload State (Requirement c)
   const [showUploadTreasuryModal, setShowUploadTreasuryModal] = useState(false);
-  const [treasuryUploadFileName, setTreasuryUploadFileName] = useState<string>('National_Treasury_Vote_37_ENE_2026_27.csv');
+  const [treasuryUploadFileName, setTreasuryUploadFileName] = useState<string>(`National_Treasury_Vote_37_ENE_${period.financialYear.replace('/', '_')}.csv`);
   const [treasuryAllocationsPreview, setTreasuryAllocationsPreview] = useState<{ shortCode: string; name: string; amount: number }[]>([]);
   const [isProcessingTreasuryFile, setIsProcessingTreasuryFile] = useState(false);
 
   // Initialize preview when modal opens
   const openTreasuryUploadModal = () => {
-    const previewList = store.entities.map(e => ({
+    // Pre-filled from the approved budget on record for the selected year; blank rows (0) are skipped on import.
+    const previewList = store.entities.filter(isPortfolioMember).map(e => ({
       shortCode: e.shortCode,
       name: e.name,
-      amount: e.budgetAllocationZAR || 10_000_000
+      amount: store.getBudgetProfileForEntity(e.id, selectedYear)?.approvedAmount ?? 0
     }));
+    setTreasuryUploadFileName(`National_Treasury_Vote_37_ENE_${selectedYear.replace('/', '_')}.csv`);
     setTreasuryAllocationsPreview(previewList);
     setShowUploadTreasuryModal(true);
   };
@@ -119,7 +129,7 @@ export const DsacFinancialDashboard: React.FC<DsacFinancialDashboardProps> = ({
 
       setIsProcessingTreasuryFile(false);
       setShowUploadTreasuryModal(false);
-      setNotificationMsg(`Successfully imported National Treasury Vote 37 budget allocations: ${result.updatedCount} institutions updated totaling ${formatZAR(result.totalZAR)}.`);
+      setNotificationMsg(`Imported National Treasury Vote 37 budget allocations for ${selectedYear}: ${result.updatedCount} institutions updated totaling ${formatZAR(result.totalZAR)}.${result.skipped.length ? ` ${result.skipped.length} row(s) skipped.` : ''}`);
       setTimeout(() => setNotificationMsg(null), 5000);
       setTick(t => t + 1);
     }, 400);
@@ -134,8 +144,19 @@ export const DsacFinancialDashboard: React.FC<DsacFinancialDashboardProps> = ({
 
   // All entity summaries
   const allSummaries: EntityFinancialSummary[] = useMemo(() => {
-    return store.entities.map(e => store.getEntityFinancialSummary(e.id, selectedYear, selectedQuarter));
+    return store.entities.filter(isPortfolioMember).map(e => store.getEntityFinancialSummary(e.id, selectedYear, selectedQuarter));
   }, [selectedYear, selectedQuarter, tick]);
+
+  // Financial years offered: next budget cycle, the current year, and the two closed years before it (generated).
+  const yearOptions = useMemo(() => {
+    const start = financialYearStart(period.financialYear);
+    return [1, 0, -1, -2].map(offset => {
+      const y = start + offset;
+      const fy = `${y}/${String((y + 1) % 100).padStart(2, '0')}`;
+      const tag = offset === 1 ? 'Next Budget Cycle' : offset === 0 ? 'Current' : 'Closed';
+      return { value: fy, label: `${fy} (${tag})` };
+    });
+  }, [period.financialYear]);
 
   // Filtered summaries
   const filteredSummaries = useMemo(() => {
@@ -150,12 +171,12 @@ export const DsacFinancialDashboard: React.FC<DsacFinancialDashboardProps> = ({
 
   // Submissions pending review
   const pendingSubmissions = useMemo(() => {
-    return store.quarterlyFinancialSubmissions.filter(s => s.financialYear === selectedYear && s.status === 'SUBMITTED');
+    return store.quarterlyFinancialSubmissions.filter(s => sameFinancialYear(s.financialYear, selectedYear) && (s.status === 'SUBMITTED' || s.status === 'UNDER_REVIEW'));
   }, [selectedYear, tick]);
 
   // Budget profiles pending approval
   const pendingBudgetProfiles = useMemo(() => {
-    return store.budgetProfiles.filter(p => p.financialYear === selectedYear && p.status === 'SUBMITTED');
+    return store.budgetProfiles.filter(p => sameFinancialYear(p.financialYear, selectedYear) && (p.status === 'SUBMITTED' || p.status === 'UNDER_REVIEW'));
   }, [selectedYear, tick]);
 
   // Export CSV
@@ -194,20 +215,23 @@ export const DsacFinancialDashboard: React.FC<DsacFinancialDashboardProps> = ({
     e.preventDefault();
     if (!reviewBudgetProfileModal) return;
 
-    const approvedAmt = parseFloat(budgetApprovalAmount) || 0;
-    const lines = reviewBudgetProfileModal.lines.map((l: any) => ({
-      categoryId: l.categoryId,
-      categoryName: l.categoryName,
-      annualBudget: Math.round((approvedAmt / reviewBudgetProfileModal.lines.length) / 1000) * 1000,
-    }));
+    const approvedAmt = Math.round(parseFloat(budgetApprovalAmount) || 0);
 
-    store.reviewBudgetRequest(
+    // The store allocates the approved amount across the expense lines exactly (largest-remainder), in proportion
+    // to what was requested, so the lines always add up to the approved budget. (This screen used to split the
+    // amount equally and round to R1,000, so the lines never footed.)
+    const result = store.reviewBudgetRequest(
       reviewBudgetProfileModal.id,
       approvedAmt,
       'APPROVED',
-      budgetApprovalNotes || 'National Treasury Vote 37 appropriation gazetted and confirmed.',
-      lines
+      budgetApprovalNotes || 'National Treasury Vote 37 appropriation gazetted and confirmed.'
     );
+
+    if (!result.success) {
+      setNotificationMsg(result.message || 'The budget decision could not be recorded.');
+      setTimeout(() => setNotificationMsg(null), 6000);
+      return;
+    }
 
     setReviewBudgetProfileModal(null);
     setBudgetApprovalNotes('');
@@ -221,11 +245,18 @@ export const DsacFinancialDashboard: React.FC<DsacFinancialDashboardProps> = ({
     e.preventDefault();
     if (!newCatName.trim()) return;
 
-    store.createExpenseCategory(
-      newCatCode.trim() || `EXP_${Date.now()}`,
-      newCatName.trim(),
-      newCatDesc.trim() || 'Custom departmental operational expense category.'
-    );
+    try {
+      // Signature is (name, code, description). The previous call passed (code, name, ...), swapping the two.
+      store.createExpenseCategory(
+        newCatName.trim(),
+        newCatCode.trim() || `EXP_${Date.now()}`,
+        newCatDesc.trim() || 'Custom departmental operational expense category.'
+      );
+    } catch (err) {
+      setNotificationMsg(err instanceof Error ? err.message : 'The category could not be created.');
+      setTimeout(() => setNotificationMsg(null), 5000);
+      return;
+    }
 
     setShowAddCategoryModal(false);
     setNewCatCode('');
@@ -280,9 +311,9 @@ export const DsacFinancialDashboard: React.FC<DsacFinancialDashboardProps> = ({
                 onChange={(e) => setSelectedYear(e.target.value)}
                 className="bg-transparent border-0 font-bold text-slate-800 cursor-pointer focus:outline-hidden"
               >
-                <option value="2026/27">2026/27 (Active Cycle)</option>
-                <option value="2025/26">2025/26 (Prior Cycle)</option>
-                <option value="2024/25">2024/25 (Audited AFS)</option>
+                {yearOptions.map(o => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
               </select>
             </div>
 
@@ -336,7 +367,7 @@ export const DsacFinancialDashboard: React.FC<DsacFinancialDashboardProps> = ({
             <div className="text-base font-black text-slate-900 mt-1">
               {formatZAR(departmentKPIs.totalRequested)}
             </div>
-            <div className="text-[10px] text-slate-400 mt-0.5">32 Entities &amp; NPOs</div>
+            <div className="text-[10px] text-slate-400 mt-0.5">{allSummaries.length} Entities &amp; NPOs</div>
           </div>
 
           {/* Metric 2: Total Approved Budget */}
@@ -375,17 +406,20 @@ export const DsacFinancialDashboard: React.FC<DsacFinancialDashboardProps> = ({
           {/* Metric 5: Department Burn Rate % */}
           <div className="p-3 bg-indigo-50/70 rounded-xl border border-indigo-200/80">
             <div className="flex items-center justify-between">
-              <span className="text-[10px] font-semibold text-indigo-800 uppercase tracking-wider">Burn Rate</span>
+              <span className="text-[10px] font-semibold text-indigo-800 uppercase tracking-wider">Budget Utilisation</span>
               <span className="text-[10px] font-bold text-indigo-600">Target: {departmentKPIs.targetTrajectoryPercent}%</span>
             </div>
             <div className="text-base font-black text-indigo-950 mt-1">
-              {departmentKPIs.departmentUtilisationPercent.toFixed(1)}%
+              {departmentKPIs.departmentUtilisationPercent}%
             </div>
             <div className="w-full bg-indigo-200/60 h-1.5 rounded-full mt-1.5 overflow-hidden">
               <div 
                 className="h-full bg-indigo-600 rounded-full transition-all"
                 style={{ width: `${Math.min(departmentKPIs.departmentUtilisationPercent, 100)}%` }}
               />
+            </div>
+            <div className="text-[10px] text-indigo-700 mt-1">
+              Absorption of transfers: {pct1(departmentKPIs.totalActualYTD, departmentKPIs.totalDisbursed)}%
             </div>
           </div>
 
@@ -404,7 +438,7 @@ export const DsacFinancialDashboard: React.FC<DsacFinancialDashboardProps> = ({
               </div>
             </div>
             <div className="text-[10px] text-rose-700 mt-0.5 font-medium">
-              {departmentKPIs.pendingSubmissionsCount} returns in review
+              {departmentKPIs.pendingSubmissionsCount} return{departmentKPIs.pendingSubmissionsCount === 1 ? '' : 's'} in review
             </div>
           </div>
         </div>
@@ -512,7 +546,7 @@ export const DsacFinancialDashboard: React.FC<DsacFinancialDashboardProps> = ({
                   onChange={(e) => setTypeFilter(e.target.value as any)}
                   className="bg-slate-50 border border-slate-200 rounded-md px-2 py-1 text-xs font-bold text-slate-700 cursor-pointer"
                 >
-                  <option value="ALL">All (26 PEs + 6 NPOs)</option>
+                  <option value="ALL">All ({allSummaries.filter(s => s.entityType === 'PUBLIC_ENTITY').length} PEs + {allSummaries.filter(s => s.entityType === 'NPO').length} NPOs)</option>
                   <option value="PUBLIC_ENTITY">Public Entities Only</option>
                   <option value="NPO">Subsidized NPOs Only</option>
                 </select>
@@ -527,10 +561,11 @@ export const DsacFinancialDashboard: React.FC<DsacFinancialDashboardProps> = ({
                 >
                   <option value="ALL">All Financial Statuses</option>
                   <option value="ON_TRACK">On Track</option>
-                  <option value="OVERSPENT">Overspent</option>
+                  <option value="OVERSPENDING">Overspending</option>
                   <option value="UNDER_UTILISING">Under-Utilising</option>
                   <option value="REQUIRES_REVIEW">Requires Review</option>
-                  <option value="MISSING_SUBMISSION">Missing Submission</option>
+                  <option value="MISSING_SUBMISSION">Return Outstanding</option>
+                  <option value="NOT_DUE">Not Yet Due</option>
                 </select>
               </div>
             </div>
@@ -545,12 +580,11 @@ export const DsacFinancialDashboard: React.FC<DsacFinancialDashboardProps> = ({
                     <th className="p-3">Entity &amp; Classification</th>
                     <th className="p-3 text-right">Requested</th>
                     <th className="p-3 text-right">Approved Budget</th>
-                    <th className="p-3 text-right">Q1 Actual</th>
-                    <th className="p-3 text-right">Q2 Actual</th>
-                    <th className="p-3 text-right">Q3 Actual</th>
-                    <th className="p-3 text-right">Cumulative YTD</th>
-                    <th className="p-3 text-right">Remaining</th>
-                    <th className="p-3 text-right">Utilisation</th>
+                    <th className="p-3 text-right">Disbursed</th>
+                    <th className="p-3 text-right">Actual to Date</th>
+                    <th className="p-3 text-right">Remaining Budget</th>
+                    <th className="p-3 text-right" title="Actual to date as a % of the approved annual budget">Budget Utilisation</th>
+                    <th className="p-3 text-right" title="Actual to date as a % of funds disbursed">Absorption</th>
                     <th className="p-3 text-center">Status</th>
                     <th className="p-3 text-center">Action</th>
                   </tr>
@@ -559,9 +593,6 @@ export const DsacFinancialDashboard: React.FC<DsacFinancialDashboardProps> = ({
                   {filteredSummaries.map((summary) => {
                     const badge = getFinancialStatusBadge(summary.financialStatus);
                     const isOver = summary.isOverspent;
-                    const q1Spend = summary.quarterlyTimeline.find(t => t.quarter === 'Q1')?.actualExpenditure || 0;
-                    const q2Spend = summary.quarterlyTimeline.find(t => t.quarter === 'Q2')?.actualExpenditure || 0;
-                    const q3Spend = summary.quarterlyTimeline.find(t => t.quarter === 'Q3')?.actualExpenditure || 0;
 
                     return (
                       <tr 
@@ -592,19 +623,16 @@ export const DsacFinancialDashboard: React.FC<DsacFinancialDashboardProps> = ({
                         </td>
 
                         <td className="p-3 text-right text-slate-600">
-                          {formatZAR(q1Spend)}
-                        </td>
-
-                        <td className="p-3 text-right text-slate-600">
-                          {formatZAR(q2Spend)}
-                        </td>
-
-                        <td className="p-3 text-right text-slate-600">
-                          {formatZAR(q3Spend)}
+                          {formatZAR(summary.disbursedToDate)}
                         </td>
 
                         <td className="p-3 text-right font-black text-blue-900">
                           {formatZAR(summary.ytdActual)}
+                          {summary.unverifiedYtdActual > 0 && (
+                            <div className="text-[9px] font-semibold text-amber-600" title="Reported by the entity, not yet accepted by DSAC">
+                              {formatZAR(summary.unverifiedYtdActual, { compact: true })} awaiting verification
+                            </div>
+                          )}
                         </td>
 
                         <td className={`p-3 text-right font-bold ${
@@ -615,7 +643,7 @@ export const DsacFinancialDashboard: React.FC<DsacFinancialDashboardProps> = ({
 
                         <td className="p-3 text-right">
                           <div className="flex items-center justify-end gap-1.5">
-                            <span className="font-bold text-slate-900">{summary.utilisationPercent.toFixed(1)}%</span>
+                            <span className="font-bold text-slate-900">{summary.utilisationPercent}%</span>
                           </div>
                           <div className="w-16 bg-slate-200 h-1 rounded-full ml-auto mt-1 overflow-hidden">
                             <div 
@@ -623,6 +651,10 @@ export const DsacFinancialDashboard: React.FC<DsacFinancialDashboardProps> = ({
                               style={{ width: `${Math.min(summary.utilisationPercent, 100)}%` }}
                             />
                           </div>
+                        </td>
+
+                        <td className={`p-3 text-right font-bold ${summary.spentAheadOfDisbursement ? 'text-rose-600' : 'text-slate-800'}`} title={summary.spentAheadOfDisbursement ? 'Spent ahead of funds received' : undefined}>
+                          {summary.disbursedToDate > 0 ? `${summary.absorptionRate}%` : '-'}
                         </td>
 
                         <td className="p-3 text-center">
@@ -649,18 +681,11 @@ export const DsacFinancialDashboard: React.FC<DsacFinancialDashboardProps> = ({
                     <td className="p-3">Department Aggregate Total</td>
                     <td className="p-3 text-right">{formatZAR(departmentKPIs.totalRequested)}</td>
                     <td className="p-3 text-right text-emerald-950">{formatZAR(departmentKPIs.totalApproved)}</td>
-                    <td className="p-3 text-right text-slate-600">
-                      {formatZAR(filteredSummaries.reduce((sum, s) => sum + (s.quarterlyTimeline.find(t => t.quarter === 'Q1')?.actualExpenditure || 0), 0))}
-                    </td>
-                    <td className="p-3 text-right text-slate-600">
-                      {formatZAR(filteredSummaries.reduce((sum, s) => sum + (s.quarterlyTimeline.find(t => t.quarter === 'Q2')?.actualExpenditure || 0), 0))}
-                    </td>
-                    <td className="p-3 text-right text-slate-600">
-                      {formatZAR(filteredSummaries.reduce((sum, s) => sum + (s.quarterlyTimeline.find(t => t.quarter === 'Q3')?.actualExpenditure || 0), 0))}
-                    </td>
+                    <td className="p-3 text-right text-slate-600">{formatZAR(departmentKPIs.totalDisbursed)}</td>
                     <td className="p-3 text-right text-blue-900">{formatZAR(departmentKPIs.totalActualYTD)}</td>
-                    <td className="p-3 text-right">{departmentKPIs.totalRemaining ? formatZAR(departmentKPIs.totalRemaining) : formatZAR(0)}</td>
-                    <td className="p-3 text-right">{departmentKPIs.departmentUtilisationPercent.toFixed(1)}%</td>
+                    <td className="p-3 text-right">{formatZAR(departmentKPIs.totalRemaining)}</td>
+                    <td className="p-3 text-right">{departmentKPIs.departmentUtilisationPercent}%</td>
+                    <td className="p-3 text-right">{pct1(departmentKPIs.totalActualYTD, departmentKPIs.totalDisbursed)}%</td>
                     <td className="p-3 text-center" colSpan={2}>
                       <span className="text-[10px] text-slate-500 font-bold">
                         {filteredSummaries.length} Records
@@ -689,7 +714,7 @@ export const DsacFinancialDashboard: React.FC<DsacFinancialDashboardProps> = ({
           </div>
 
           <div className="space-y-3">
-            {store.budgetProfiles.filter(p => p.financialYear === selectedYear).map(profile => (
+            {store.budgetProfiles.filter(p => sameFinancialYear(p.financialYear, selectedYear)).map(profile => (
               <div
                 key={profile.id}
                 className="p-4 rounded-xl border border-slate-200 hover:border-indigo-300 transition-all bg-slate-50/40 flex flex-col lg:flex-row lg:items-center justify-between gap-4"
@@ -810,7 +835,7 @@ export const DsacFinancialDashboard: React.FC<DsacFinancialDashboardProps> = ({
 
                   <div className="flex items-center gap-3 shrink-0">
                     <div className="text-right">
-                      <div className="text-xs text-slate-500">Disbursed Amount</div>
+                      <div className="text-xs text-slate-500">Reported Expenditure</div>
                       <div className="text-base font-black text-slate-900">
                         {formatZAR(sub.totalQuarterlyActual)}
                       </div>

@@ -95,6 +95,8 @@ export interface DetailedDocumentVersion {
   rejectionReason?: string;
   changeSummary?: string;
   downloadUrl?: string;
+  mimeType?: string;
+  contentDataUrl?: string;
 }
 
 export interface DocumentRequirementSlot {

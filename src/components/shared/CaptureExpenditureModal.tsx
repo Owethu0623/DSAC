@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { X, Coins, ShieldCheck, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { FinancialQuarter } from '../../types';
 import { store } from '../../services/store';
 import { formatZAR } from '../../services/financialService';
+import { getCurrentReportingPeriod, normalizeFinancialYear } from '../../services/reportingPeriod';
 
 interface CaptureExpenditureModalProps {
   entityId: string;
@@ -13,57 +14,69 @@ interface CaptureExpenditureModalProps {
   onSuccess?: () => void;
 }
 
+interface ExpenditureLine {
+  categoryId: string;
+  categoryName: string;
+  quarterlyActual: number;
+  annualBudget: number;
+}
+
 export const CaptureExpenditureModal: React.FC<CaptureExpenditureModalProps> = ({
   entityId,
   entityName,
   annualBudget,
-  financialYear = '2025/26',
+  financialYear,
   onClose,
   onSuccess,
 }) => {
-  const [quarter, setQuarter] = useState<FinancialQuarter>('Q3');
-  const [lines, setLines] = useState([
-    {
-      categoryId: 'cat-comp',
-      categoryName: 'Compensation of Employees / Personnel',
-      quarterlyActual: Math.round(annualBudget * 0.45 * 0.25),
-      annualBudget: Math.round(annualBudget * 0.45),
-    },
-    {
-      categoryId: 'cat-prog',
-      categoryName: 'Programme & Community Arts Delivery',
-      quarterlyActual: Math.round(annualBudget * 0.35 * 0.25),
-      annualBudget: Math.round(annualBudget * 0.35),
-    },
-    {
-      categoryId: 'cat-admin',
-      categoryName: 'Operational & Administrative Overheads',
-      quarterlyActual: Math.round(annualBudget * 0.15 * 0.25),
-      annualBudget: Math.round(annualBudget * 0.15),
-    },
-    {
-      categoryId: 'cat-capex',
-      categoryName: 'Capital Assets, Equipment & Facilities',
-      quarterlyActual: Math.round(annualBudget * 0.05 * 0.25),
-      annualBudget: Math.round(annualBudget * 0.05),
-    },
-  ]);
+  const period = getCurrentReportingPeriod();
+  const fy = normalizeFinancialYear(financialYear, period.financialYear);
+  const [quarter, setQuarter] = useState<FinancialQuarter>(period.quarter);
+
+  const profile = store.getBudgetProfileForEntity(entityId, fy);
+  const categories = store.getExpenseCategories().filter(c => c.active);
+
+  // Lines come from the real chart of accounts and the entity's approved budget lines. Nothing is pre-filled
+  // with an assumed amount: a new return starts at zero, and re-opening a quarter shows what was lodged.
+  const buildLines = (q: FinancialQuarter): ExpenditureLine[] => {
+    const existing = store.getQuarterlyFinancialSubmissionsForEntity(entityId, fy).find(s => s.quarter === q);
+    const budgetFor = (categoryId: string) =>
+      (profile?.lines || []).filter(l => l.categoryId === categoryId).reduce((a, l) => a + l.annualBudget, 0);
+    const budgeted = profile ? categories.filter(c => budgetFor(c.id) > 0) : categories;
+    return (budgeted.length > 0 ? budgeted : categories).map(c => ({
+      categoryId: c.id,
+      categoryName: c.name,
+      annualBudget: budgetFor(c.id),
+      quarterlyActual: existing?.lines.find(l => l.categoryId === c.id)?.actualAmount ?? 0,
+    }));
+  };
+
+  const [lines, setLines] = useState<ExpenditureLine[]>(() => buildLines(period.quarter));
+  useEffect(() => {
+    setLines(buildLines(quarter));
+    setError(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [quarter]);
 
   const [accountingOfficerName, setAccountingOfficerName] = useState(
     store.currentUser?.name || 'Chief Financial Officer'
   );
-  const [affirmed, setAffirmed] = useState(true);
+  // The certification is a legal declaration: it must be given explicitly, never pre-ticked.
+  const [affirmed, setAffirmed] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const totalActual = lines.reduce((sum, l) => sum + (l.quarterlyActual || 0), 0);
-  const quarterBenchmark = Math.round(annualBudget * 0.25);
+  const trajectory = profile?.expectedSpendingTrajectory || { q1Percent: 25, q2Percent: 50, q3Percent: 75, q4Percent: 100 };
+  const points = [trajectory.q1Percent, trajectory.q2Percent, trajectory.q3Percent, trajectory.q4Percent];
+  const qi = ['Q1', 'Q2', 'Q3', 'Q4'].indexOf(quarter);
+  const quarterShare = (points[qi] - (qi > 0 ? points[qi - 1] : 0)) / 100;
+  const quarterBenchmark = Math.round((profile?.approvedAmount || annualBudget) * quarterShare);
   const varianceFromBenchmark = totalActual - quarterBenchmark;
 
   const handleLineAmountChange = (index: number, val: number) => {
-    const updated = [...lines];
-    updated[index].quarterlyActual = Math.max(0, val);
-    setLines(updated);
+    setLines(prev => prev.map((l, i) => (i === index ? { ...l, quarterlyActual: Math.max(0, val) } : l)));
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -71,12 +84,13 @@ export const CaptureExpenditureModal: React.FC<CaptureExpenditureModalProps> = (
     if (!affirmed) return;
 
     setIsSubmitting(true);
+    setError(null);
     try {
       store.captureQuarterlyExpenditure({
         entityId,
         entityName,
         quarter,
-        financialYear,
+        financialYear: fy,
         accountingOfficerAffirmation: affirmed,
         accountingOfficerName,
         lines,
@@ -89,7 +103,7 @@ export const CaptureExpenditureModal: React.FC<CaptureExpenditureModalProps> = (
         onClose();
       }, 700);
     } catch (err) {
-      console.error('Failed to capture quarterly expenditure', err);
+      setError(err instanceof Error ? err.message : 'The return could not be submitted.');
       setIsSubmitting(false);
     }
   };
@@ -105,7 +119,7 @@ export const CaptureExpenditureModal: React.FC<CaptureExpenditureModalProps> = (
             </div>
             <div>
               <h3 className="font-bold text-sm text-slate-900">Capture Quarterly Expenditure Return</h3>
-              <p className="text-[11px] text-slate-500">{entityName} • Vote 40 BAS</p>
+              <p className="text-[11px] text-slate-500">{entityName} • Vote 37 BAS • FY {fy}</p>
             </div>
           </div>
           <button
@@ -142,8 +156,14 @@ export const CaptureExpenditureModal: React.FC<CaptureExpenditureModalProps> = (
           {/* Expenditure Breakdown by Category */}
           <div className="space-y-3">
             <label className="block text-xs font-bold text-slate-700">
-              Verified Actual Expenditure by Category (ZAR)
+              Verified Actual Expenditure for {quarter} by Category (ZAR)
             </label>
+            {!profile && (
+              <div className="p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-[11px] text-amber-800 flex items-start gap-2">
+                <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                <span>No approved budget is on record for {fy}. Expenditure reported now will be flagged as unbudgeted.</span>
+              </div>
+            )}
             {lines.map((line, idx) => (
               <div key={line.categoryId} className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs">
                 <div className="flex items-center justify-between mb-1.5">
@@ -212,6 +232,13 @@ export const CaptureExpenditureModal: React.FC<CaptureExpenditureModalProps> = (
               </label>
             </div>
           </div>
+
+          {error && (
+            <div className="p-2.5 rounded-lg bg-rose-50 border border-rose-200 text-[11px] text-rose-800 flex items-start gap-2" role="alert">
+              <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+              <span>{error}</span>
+            </div>
+          )}
 
           {/* Footer */}
           <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2">

@@ -37,6 +37,9 @@ import {
   getFinancialStatusBadge,
   generateFinancialExportCSV
 } from '../../services/financialService';
+import { returnTotal } from '../../services/financialService';
+import { REPORTED_RETURN_STATUSES } from '../../types/financial';
+import { allocateProportionally, getCurrentReportingPeriod } from '../../services/reportingPeriod';
 
 interface EntityFinancialViewProps {
   entityId: string;
@@ -47,12 +50,12 @@ interface EntityFinancialViewProps {
 
 export const EntityFinancialView: React.FC<EntityFinancialViewProps> = ({
   entityId,
-  financialYear = '2026/27',
+  financialYear = getCurrentReportingPeriod().financialYear,
   readOnly = false,
   onBack,
 }) => {
   const [, setTick] = useState(0);
-  const [selectedQuarter, setSelectedQuarter] = useState<FinancialQuarter | 'FULL_YEAR'>('Q3');
+  const [selectedQuarter, setSelectedQuarter] = useState<FinancialQuarter | 'FULL_YEAR'>(getCurrentReportingPeriod().quarter);
   const [activeTab, setActiveTab] = useState<'matrix' | 'categories' | 'submissions' | 'requests'>('matrix');
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
@@ -62,7 +65,7 @@ export const EntityFinancialView: React.FC<EntityFinancialViewProps> = ({
   const [selectedSubmissionForDetails, setSelectedSubmissionForDetails] = useState<QuarterlyFinancialSubmission | null>(null);
 
   // Submission Form State
-  const [formQuarter, setFormQuarter] = useState<FinancialQuarter>('Q3');
+  const [formQuarter, setFormQuarter] = useState<FinancialQuarter>(getCurrentReportingPeriod().quarter);
   const [formCategoryActuals, setFormCategoryActuals] = useState<{ [categoryId: string]: number }>({});
   const [formSupportingDocId, setFormSupportingDocId] = useState<string>('');
   const [formAffirmation, setFormAffirmation] = useState<boolean>(false);
@@ -71,7 +74,7 @@ export const EntityFinancialView: React.FC<EntityFinancialViewProps> = ({
   );
 
   // Budget Request Form State
-  const [reqAmount, setReqAmount] = useState<string>('24000000');
+  const [reqAmount, setReqAmount] = useState<string>('');
   const [reqJustification, setReqJustification] = useState<string>('');
   const [reqLines, setReqLines] = useState<{ [categoryId: string]: number }>({});
 
@@ -98,9 +101,8 @@ export const EntityFinancialView: React.FC<EntityFinancialViewProps> = ({
         const line = existing.lines.find(l => l.categoryId === cat.id);
         initialAmounts[cat.id] = line ? line.actualAmount : 0;
       } else {
-        const profileLine = budgetProfile?.lines.find(l => l.categoryId === cat.id);
-        const plannedQuarterly = profileLine ? Math.round(profileLine.annualBudget * 0.25) : 0;
-        initialAmounts[cat.id] = plannedQuarterly;
+        // A certified return is never pre-filled with assumed (planned) amounts: the officer enters the actuals.
+        initialAmounts[cat.id] = 0;
       }
     });
 
@@ -111,18 +113,17 @@ export const EntityFinancialView: React.FC<EntityFinancialViewProps> = ({
 
   const handleOpenBudgetRequestModal = () => {
     const initialLineAmounts: { [categoryId: string]: number } = {};
-    const total = budgetProfile?.requestedAmount || 24000000;
-    setReqAmount(total.toString());
+    const total = budgetProfile?.requestedAmount || 0;
+    setReqAmount(total > 0 ? total.toString() : '');
     setReqJustification(budgetProfile?.justification || 'Annual statutory allocation request aligned to strategic performance plan.');
     
+    // Lines must add up to the request. With an existing profile, start from its lines; otherwise start from an
+    // exact equal split of the amount (largest-remainder), never a rounded one that leaves a gap.
+    const hasLines = !!budgetProfile && budgetProfile.lines.length > 0;
+    const equalSplit = allocateProportionally(total, expenseCategories.map(() => 1));
     expenseCategories.forEach((cat, i) => {
       const line = budgetProfile?.lines.find(l => l.categoryId === cat.id);
-      if (line) {
-        initialLineAmounts[cat.id] = line.requestedAmount;
-      } else {
-        // default distribution
-        initialLineAmounts[cat.id] = Math.round((total / expenseCategories.length) / 10000) * 10000;
-      }
+      initialLineAmounts[cat.id] = hasLines ? (line ? line.requestedAmount : 0) : equalSplit[i];
     });
     setReqLines(initialLineAmounts);
     setShowBudgetRequestModal(true);
@@ -136,8 +137,8 @@ export const EntityFinancialView: React.FC<EntityFinancialViewProps> = ({
   // Projected YTD actual if this submission is saved
   const projectedYtdActual = useMemo(() => {
     const otherQuartersSpend = quarterlySubmissions
-      .filter(s => s.quarter !== formQuarter && s.status === 'APPROVED')
-      .reduce((sum, s) => sum + s.totalQuarterlyActual, 0);
+      .filter(s => s.quarter !== formQuarter && REPORTED_RETURN_STATUSES.includes(s.status))
+      .reduce((sum, s) => sum + returnTotal(s), 0);
     return otherQuartersSpend + formTotalQuarterActual;
   }, [quarterlySubmissions, formQuarter, formTotalQuarterActual]);
 
@@ -165,20 +166,25 @@ export const EntityFinancialView: React.FC<EntityFinancialViewProps> = ({
       };
     });
 
-    store.submitQuarterlyFinancialReturn({
-      entityId: entity.id,
-      entityName: entity.name,
-      financialYear,
-      quarter: formQuarter,
-      totalQuarterlyActual: formTotalQuarterActual,
-      lines,
-      supportingDocumentIds: formSupportingDocId ? [formSupportingDocId] : [],
-      accountingOfficerAffirmation: formAffirmation,
-      accountingOfficerName: formSignOffOfficer,
-    });
+    try {
+      store.submitQuarterlyFinancialReturn({
+        entityId: entity.id,
+        entityName: entity.name,
+        financialYear,
+        quarter: formQuarter,
+        totalQuarterlyActual: formTotalQuarterActual,
+        lines,
+        supportingDocumentIds: formSupportingDocId ? [formSupportingDocId] : [],
+        accountingOfficerAffirmation: formAffirmation,
+        accountingOfficerName: formSignOffOfficer,
+      });
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'The return could not be submitted.');
+      return;
+    }
 
     setShowSubmitModal(false);
-    setSuccessMessage(`Quarter ${formQuarter} Financial Return of ${formatZAR(formTotalQuarterActual)} successfully certified and recorded.`);
+    setSuccessMessage(`Quarter ${formQuarter} Financial Return of ${formatZAR(formTotalQuarterActual)} certified and submitted to DSAC for verification.`);
     setTimeout(() => setSuccessMessage(null), 5000);
     setTick(t => t + 1);
   };
@@ -198,14 +204,19 @@ export const EntityFinancialView: React.FC<EntityFinancialViewProps> = ({
       requestedAmount: Number(reqLines[cat.id]) || 0,
     }));
 
-    store.submitBudgetRequest({
-      entityId: entity.id,
-      entityName: entity.name,
-      financialYear,
-      requestedAmount: parsedTotal,
-      justification: reqJustification.trim() || 'Annual statutory appropriation motivation for Vote 37.',
-      lines,
-    });
+    try {
+      store.submitBudgetRequest({
+        entityId: entity.id,
+        entityName: entity.name,
+        financialYear,
+        requestedAmount: parsedTotal,
+        justification: reqJustification.trim() || 'Annual statutory appropriation motivation for Vote 37.',
+        lines,
+      });
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'The budget request could not be submitted.');
+      return;
+    }
 
     setShowBudgetRequestModal(false);
     setSuccessMessage(`Budget Request of ${formatZAR(parsedTotal)} for ${financialYear} submitted for DSAC National approval.`);
@@ -285,7 +296,7 @@ export const EntityFinancialView: React.FC<EntityFinancialViewProps> = ({
                 </button>
 
                 <button
-                  onClick={() => handleOpenSubmitModal('Q3')}
+                  onClick={() => handleOpenSubmitModal(getCurrentReportingPeriod().quarter)}
                   className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-white bg-emerald-700 hover:bg-emerald-800 rounded-lg shadow-xs transition-colors cursor-pointer"
                 >
                   <Upload className="w-3.5 h-3.5" />
@@ -363,7 +374,7 @@ export const EntityFinancialView: React.FC<EntityFinancialViewProps> = ({
               <span className="text-[10px] font-bold text-indigo-600">Benchmark: {summary.targetTrajectoryPercent}%</span>
             </div>
             <div className="text-base font-black text-indigo-950 mt-1">
-              {summary.utilisationPercent.toFixed(1)}%
+              {summary.utilisationPercent}%
             </div>
             <div className="w-full bg-indigo-200/60 h-1.5 rounded-full mt-1.5 overflow-hidden">
               <div 
@@ -385,7 +396,7 @@ export const EntityFinancialView: React.FC<EntityFinancialViewProps> = ({
           }`}>
             <span className="text-[10px] font-semibold uppercase tracking-wider block">Trajectory Variance</span>
             <div className="text-base font-black mt-1">
-              {summary.variancePercent > 0 ? `+${summary.variancePercent.toFixed(1)}%` : `${summary.variancePercent.toFixed(1)}%`}
+              {summary.variancePercent > 0 ? `+${summary.variancePercent}%` : `${summary.variancePercent}%`}
             </div>
             <div className="text-[10px] mt-0.5 font-medium">
               {summary.variancePercent > 0 ? 'Ahead of Benchmark' : 'Lagging Benchmark'}
@@ -631,11 +642,7 @@ export const EntityFinancialView: React.FC<EntityFinancialViewProps> = ({
                 <tr>
                   <th className="p-3">Expense Category</th>
                   <th className="p-3 text-right">Annual Budget</th>
-                  <th className="p-3 text-right">Q1 Actual</th>
-                  <th className="p-3 text-right">Q2 Actual</th>
-                  <th className="p-3 text-right">Q3 Actual</th>
-                  <th className="p-3 text-right">Q4 Actual</th>
-                  <th className="p-3 text-right">Cumulative YTD</th>
+                  <th className="p-3 text-right">Actual to Date</th>
                   <th className="p-3 text-right">Remaining</th>
                   <th className="p-3 text-right">Utilisation</th>
                   <th className="p-3 text-center">Status</th>
@@ -654,18 +661,6 @@ export const EntityFinancialView: React.FC<EntityFinancialViewProps> = ({
                       </td>
                       <td className="p-3 text-right font-medium text-slate-700">
                         {formatZAR(catPerf.annualBudget)}
-                      </td>
-                      <td className="p-3 text-right text-slate-600">
-                        {formatZAR(catPerf.q1Actual)}
-                      </td>
-                      <td className="p-3 text-right text-slate-600">
-                        {formatZAR(catPerf.q2Actual)}
-                      </td>
-                      <td className="p-3 text-right text-slate-600">
-                        {formatZAR(catPerf.q3Actual)}
-                      </td>
-                      <td className="p-3 text-right text-slate-600">
-                        {formatZAR(catPerf.q4Actual)}
                       </td>
                       <td className="p-3 text-right font-bold text-blue-900">
                         {formatZAR(catPerf.ytdActual)}
@@ -690,7 +685,7 @@ export const EntityFinancialView: React.FC<EntityFinancialViewProps> = ({
                             ? 'bg-amber-100 text-amber-800 border border-amber-200'
                             : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
                         }`}>
-                          {isCatOver ? 'OVERSPENT' : catPerf.utilisationPercent > 80 ? 'HIGH BURN' : 'ON TRACK'}
+                          {catPerf.isUnbudgeted ? 'UNBUDGETED' : isCatOver ? 'OVERSPENT' : catPerf.utilisationPercent > 80 ? 'HIGH BURN' : 'ON TRACK'}
                         </span>
                       </td>
                     </tr>
@@ -701,18 +696,6 @@ export const EntityFinancialView: React.FC<EntityFinancialViewProps> = ({
                 <tr>
                   <td className="p-3">Total Expenditure</td>
                   <td className="p-3 text-right">{formatZAR(summary.approvedAmount)}</td>
-                  <td className="p-3 text-right">
-                    {formatZAR(summary.quarterlyTimeline.find(t => t.quarter === 'Q1')?.actualExpenditure || 0)}
-                  </td>
-                  <td className="p-3 text-right">
-                    {formatZAR(summary.quarterlyTimeline.find(t => t.quarter === 'Q2')?.actualExpenditure || 0)}
-                  </td>
-                  <td className="p-3 text-right">
-                    {formatZAR(summary.quarterlyTimeline.find(t => t.quarter === 'Q3')?.actualExpenditure || 0)}
-                  </td>
-                  <td className="p-3 text-right">
-                    {formatZAR(summary.quarterlyTimeline.find(t => t.quarter === 'Q4')?.actualExpenditure || 0)}
-                  </td>
                   <td className="p-3 text-right text-blue-900">{formatZAR(summary.ytdActual)}</td>
                   <td className={`p-3 text-right ${summary.isOverspent ? 'text-rose-600' : 'text-slate-900'}`}>
                     {summary.isOverspent ? `-${formatZAR(summary.overspendAmount)}` : formatZAR(summary.remainingBudget)}
@@ -744,7 +727,7 @@ export const EntityFinancialView: React.FC<EntityFinancialViewProps> = ({
             </div>
             {!readOnly && (
               <button
-                onClick={() => handleOpenSubmitModal('Q3')}
+                onClick={() => handleOpenSubmitModal(getCurrentReportingPeriod().quarter)}
                 className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-emerald-700 hover:bg-emerald-800 rounded-lg shadow-xs"
               >
                 <PlusCircle className="w-3.5 h-3.5" />
